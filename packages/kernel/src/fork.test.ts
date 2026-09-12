@@ -377,11 +377,14 @@ describe('parseForkMode —— 字面量解析', () => {
     expect(parseForkMode('3')).toEqual({ kind: 'lastRounds', rounds: 3 });
   });
 
-  it('缺省与空串默认为 all', () => {
-    expect(parseForkMode(undefined)).toEqual(FORK_ALL);
-    expect(parseForkMode(null)).toEqual(FORK_ALL);
-    expect(parseForkMode('')).toEqual(FORK_ALL);
-    expect(parseForkMode('   ')).toEqual(FORK_ALL);
+  // 默认值是个产品决策而非实现细节：三个产品（TabTin/kalo/tutti）都收敛到
+  // 「子 Agent 不继承父上下文」，详见 protocol/agent.ts 的 DEFAULT_FORK_MODE。
+  // 这条测试是那个决策的回归护栏 —— 若有人轻率改回 all，这里会红。
+  it('缺省与空串默认为 none（纯净）', () => {
+    expect(parseForkMode(undefined)).toEqual(FORK_NONE);
+    expect(parseForkMode(null)).toEqual(FORK_NONE);
+    expect(parseForkMode('')).toEqual(FORK_NONE);
+    expect(parseForkMode('   ')).toEqual(FORK_NONE);
   });
 
   it('大小写与空白容错', () => {

@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline';"
+    />
+    <title>Axon</title>
+    <style>
+      :root {
+        --bg: #16181d;
+        --panel: #1c1f26;
+        --line: #2b303b;
+        --text: #d7dae0;
+        --dim: #7c8493;
+        --accent: #6aa6ff;
+        --ok: #5ec27e;
+        --warn: #d9a441;
+        --err: #e06c75;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0; height: 100vh; display: flex;
+        font: 13px/1.6 -apple-system, "Segoe UI", "PingFang SC", sans-serif;
+        background: var(--bg); color: var(--text);
+      }
+      aside {
+        width: 300px; flex: none; border-right: 1px solid var(--line);
+        display: flex; flex-direction: column; background: var(--panel);
+      }
+      h2 {
+        margin: 0; padding: 12px 14px; font-size: 11px; letter-spacing: .08em;
+        text-transform: uppercase; color: var(--dim);
+        border-bottom: 1px solid var(--line);
+      }
+      .roles { padding: 8px; border-bottom: 1px solid var(--line); }
+      .role {
+        display: flex; justify-content: space-between; align-items: center;
+        gap: 8px; padding: 7px 8px; border-radius: 6px; cursor: pointer;
+      }
+      .role:hover { background: #23272f; }
+      .role .meta { min-width: 0; }
+      .role .name { font-weight: 500; }
+      .role .desc {
+        color: var(--dim); font-size: 11px; white-space: nowrap;
+        overflow: hidden; text-overflow: ellipsis;
+      }
+      .role .fork {
+        flex: none; font-size: 10px; padding: 1px 6px; border-radius: 999px;
+        border: 1px solid var(--line); color: var(--dim);
+      }
+      .role .fork[data-mode="all"] { color: var(--warn); border-color: #4a3c22; }
+      #tree { flex: 1; overflow: auto; padding: 8px; }
+      .node {
+        padding: 6px 8px; border-radius: 6px; cursor: pointer;
+        display: flex; align-items: center; gap: 8px;
+      }
+      .node:hover { background: #23272f; }
+      .node.sel { background: #2a3140; }
+      .dot { width: 7px; height: 7px; border-radius: 50%; flex: none; background: var(--dim); }
+      .dot[data-s="running"] { background: var(--accent); }
+      .dot[data-s="done"] { background: var(--ok); }
+      .dot[data-s="failed"] { background: var(--err); }
+      .dot[data-s="waiting"] { background: var(--warn); }
+      main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+      #log { flex: 1; overflow: auto; padding: 14px; font-family: ui-monospace, monospace; font-size: 12px; }
+      #log div { padding: 1px 0; white-space: pre-wrap; word-break: break-word; }
+      #log .t { color: var(--dim); }
+      #log .e { color: var(--err); }
+      #log .k { color: var(--accent); }
+      footer { border-top: 1px solid var(--line); padding: 10px 14px; display: flex; gap: 8px; }
+      input {
+        flex: 1; background: #12141a; border: 1px solid var(--line);
+        color: var(--text); padding: 7px 10px; border-radius: 6px; font: inherit;
+      }
+      input:focus { outline: none; border-color: var(--accent); }
+      button {
+        background: #2a3140; border: 1px solid var(--line); color: var(--text);
+        padding: 7px 14px; border-radius: 6px; cursor: pointer; font: inherit;
+      }
+      button:hover { border-color: var(--accent); }
+    </style>
+  </head>
+  <body>
+    <aside>
+      <h2>角色 · 点击创建分身</h2>
+      <div class="roles" id="roles"></div>
+      <h2>Agent 树</h2>
+      <div id="tree"></div>
+    </aside>
+    <main>
+      <div id="log"></div>
+      <footer>
+        <input id="input" placeholder="给选中的 Agent 发消息…" autocomplete="off" />
+        <button id="send">发送</button>
+        <button id="stop">中断</button>
+      </footer>
+    </main>
+    <script type="module" src="./renderer.js"></script>
+  </body>
+</html>

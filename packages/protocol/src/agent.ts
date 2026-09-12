@@ -68,21 +68,38 @@ export function forkLastRounds(rounds: number): ForkMode {
 export type ForkModeSpec = string | number | undefined | null;
 
 /**
+ * 默认分身模式 —— **纯净上下文**。
+ *
+ * 这个默认值是被三个已上线产品的实践反过来定的，不是拍脑袋：
+ *
+ *  - TabTin 最初默认 filtered 继承，后来改回 none，并留下复盘
+ *    （`packages/agent-runtime/src/subagent/fork-query.ts:70-82`）：继承会把父原文
+ *    「调 N 个 agent 做 X」灌进子上下文，弱模型被父原文带跑，thinking 里反复纠结
+ *    「父原文 vs 自己的 directive」。
+ *  - kalo 的 subagent 干脆只传 prompt 文本，不复制父消息历史。
+ *  - tutti 不设默认，强制每次显式选 none/recent/full。
+ *
+ * 所以子 Agent 的输入应当是**结构化的 task 契约**（systemPrompt + 明确任务），
+ * 而不是把父会话原样灌过去。`all` 仍然保留，但降级为显式逃生门。
+ */
+export const DEFAULT_FORK_MODE: ForkMode = FORK_NONE;
+
+/**
  * 解析分身模式字面量。
- * - undefined / null / 空串 → all（继承全部，最不意外的默认）
+ * - undefined / null / 空串 → none（纯净，见 DEFAULT_FORK_MODE 的理由）
  * - "none" → 纯净上下文
- * - "all"  → 继承全部
+ * - "all"  → 继承全部（显式逃生门）
  * - "3"    → 继承最后 3 个 round
  *
  * 用 /^\d+$/ 而非 parseInt，否则 "1.5"、"3abc" 会被悄悄截断成 3。
  */
 export function parseForkMode(spec: ForkModeSpec): ForkMode {
-  if (spec === undefined || spec === null) return FORK_ALL;
+  if (spec === undefined || spec === null) return DEFAULT_FORK_MODE;
 
   if (typeof spec === 'number') return forkLastRounds(spec);
 
   const raw = spec.trim();
-  if (raw === '') return FORK_ALL;
+  if (raw === '') return DEFAULT_FORK_MODE;
 
   const normalized = raw.toLowerCase();
   if (normalized === 'none') return FORK_NONE;
@@ -139,6 +156,13 @@ export function isAncestorOf(a: AgentPath, b: AgentPath): boolean {
 // 状态与角色
 // ─────────────────────────────────────────────────────────────
 
+/**
+ * 审批档。`always_ask` 是最安全的默认；`full_access` 必须用户显式选。
+ */
+export type ApprovalMode = 'always_ask' | 'auto' | 'full_access';
+
+export const DEFAULT_APPROVAL_MODE: ApprovalMode = 'always_ask';
+
 export type AgentStatus =
   | 'idle'
   | 'running'
@@ -171,7 +195,18 @@ export interface RoleDefinition {
    */
   tools?: string[];
   shellAllow?: string[];
+  /** 省略则用 DEFAULT_FORK_MODE（none）。 */
   defaultForkMode?: ForkModeSpec;
+  /**
+   * 审批档 —— 与 tools 白名单**正交**的第二个维度（抄 TabTin 的
+   * AgentMode × ApprovalMode，`packages/agent-modes/src/types.ts:70-74`）：
+   * tools 管「能碰什么」，approval 管「多大程度放手」。
+   *
+   * 两者分开的理由：“测试 Agent 只读”是能力限制（tools），
+   * “开发 Agent 改代码前要问我”是信任度（approval），
+   * 塑进同一个枚举会立刻组合爆炸。
+   */
+  approval?: ApprovalMode;
 }
 
 export interface UsageTotals {

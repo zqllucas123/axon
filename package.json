@@ -15,15 +15,20 @@
   ],
   "scripts": {
     "guard": "bun run scripts/check-bun-only.mjs",
-    "typecheck": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json && tsc -p apps/desktop/tsconfig.renderer.json",
     "test": "vitest run",
-    "check": "bun run guard && bun run typecheck && bun run test",
-    "example:single": "bun run examples/single-agent.ts"
+    "check": "bun run guard && bun run typecheck && bun run test && bun run build:desktop && bun run verify-lazy",
+    "example:single": "bun run examples/single-agent.ts",
+    "build:desktop": "bun run apps/desktop/scripts/build.mjs",
+    "dev": "bun run build:desktop && env -u ELECTRON_RUN_AS_NODE electron apps/desktop/dist/main.mjs",
+    "verify-lazy": "bun run scripts/verify-lazy-loading.mjs"
   },
   "devDependencies": {
     "@earendil-works/pi-agent-core": "0.85.1",
     "@earendil-works/pi-ai": "0.85.1",
     "@types/node": "22.10.2",
+    "electron": "33.2.1",
+    "esbuild": "0.24.2",
     "typescript": "5.7.2",
     "vitest": "2.1.8"
   }

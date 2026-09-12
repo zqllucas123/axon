@@ -8,9 +8,13 @@
  *  - electron 空壳：bun 默认阻止依赖的 postinstall，包装上了但 dist 是空的，
  *    直到运行时才炸。
  *  - kernel 被 electron 污染：一旦 kernel 依赖 electron，就再也无法 headless 测试。
+ *  - pi import 散落：pi 未到 1.0，最近 5 个 minor 里 4 个有破坏性变更，
+ *    AgentOptions 被动过 3 次。import 一旦散落，升级就从「改一个文件」
+ *    变成「全仓掘土」。而且上游正在往 lane-based harness 迁，这层隔离
+ *    是将来能「换实现而不换设计」的前提。
  */
-import { existsSync, readFileSync, readdirSync } from 'node:fs';
-import { join, dirname } from 'node:path';
+import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
+import { join, dirname, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -70,6 +74,40 @@ check('electron 二进制已落地', () => {
   if (!existsSync(dist) || readdirSync(dist).length === 0)
     return 'node_modules/electron/dist 为空，需 rm -rf node_modules && bun install';
   return null;
+});
+
+check('pi import 收敛在边界层', () => {
+  // 白名单：只有边界层和契约测试/示例可以直接碰 pi。
+  // 契约测试必须碰，它的职责就是用真实 pi 产物锁死我们对上游的假设。
+  const allow = new Set([
+    'packages/kernel/src/engine.ts',
+    'packages/kernel/src/engine.contract.test.ts',
+    'packages/kernel/src/provider.ts',
+  ]);
+  const roots = ['packages', 'apps', 'examples'];
+  const offenders = [];
+
+  const walk = (dir) => {
+    if (!existsSync(dir)) return;
+    for (const name of readdirSync(dir)) {
+      if (name === 'node_modules' || name === 'dist' || name.startsWith('.')) continue;
+      const full = join(dir, name);
+      if (statSync(full).isDirectory()) {
+        walk(full);
+      } else if (/\.(ts|tsx|mts)$/.test(name)) {
+        const rel = relative(root, full).split('\\').join('/');
+        if (allow.has(rel)) continue;
+        if (/from\s+['"]@earendil-works\//.test(readFileSync(full, 'utf8'))) {
+          offenders.push(rel);
+        }
+      }
+    }
+  };
+  for (const r of roots) walk(join(root, r));
+
+  return offenders.length
+    ? `以下文件直接 import 了 pi，请改走 kernel/src/engine.ts：\n      ${offenders.join('\n      ')}`
+    : null;
 });
 
 if (errors.length) {

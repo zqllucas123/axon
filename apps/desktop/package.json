@@ -1,0 +1,11 @@
+{
+  "name": "@axon/desktop",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/main.mjs",
+  "dependencies": {
+    "@axon/kernel": "workspace:*",
+    "@axon/protocol": "workspace:*"
+  }
+}

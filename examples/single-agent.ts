@@ -8,24 +8,20 @@
  *   bun run example:single
  */
 
+import { createAxonEngine } from '../packages/kernel/src/engine.ts';
 import {
-  createModels,
+  createFauxSource,
   fauxAssistantMessage,
-  fauxProvider,
   fauxText,
   fauxToolCall,
   Type,
-} from '@earendil-works/pi-ai';
-import { createEngine, snapshotMessages } from '../packages/kernel/src/engine.ts';
+} from '../packages/kernel/src/provider.ts';
 import { forkMessages, intersectTools } from '../packages/kernel/src/fork.ts';
 import { FORK_ALL, formatForkMode, forkLastRounds } from '@axon/protocol';
 
 // ── 1. 假 provider：脚本化模型回复 ───────────────────────────
 
-const faux = fauxProvider({ provider: 'axon-faux', api: 'faux' });
-const models = createModels();
-models.setProvider(faux.provider);
-const model = faux.getModel();
+const faux = await createFauxSource();
 
 // 脚本：先调用一次工具，拿到结果后给出最终答复
 faux.setResponses([
@@ -65,12 +61,12 @@ const allowed = new Set(roleTools ?? []);
 
 // ── 4. 建 Agent ─────────────────────────────────────────────
 
-const agent = createEngine({
+const agent = createAxonEngine({
   systemPrompt: '你是 Axon3（开发执行）。保持简洁。',
-  model,
+  model: faux.model,
   messages: [],
   tools: [listDir, dangerousShell] as never,
-  streamFn: (m, context, options) => models.stream(m, context, options),
+  streamFn: faux.streamFn,
   sessionId: 'example-single',
   // 闸门在这里兜底：即使工具在 tools 列表里，未获角色授权也执行不了
   onBeforeTool: async (name) =>
@@ -103,7 +99,7 @@ console.log('\n--- prompt ---');
 await agent.prompt('看看当前目录有什么');
 await agent.waitForIdle();
 
-const transcript = snapshotMessages(agent);
+const transcript = agent.messages();
 console.log(`\ntranscript 共 ${transcript.length} 条消息`);
 for (const m of transcript) {
   const kinds = m.content.map((b) => b.type).join('+');

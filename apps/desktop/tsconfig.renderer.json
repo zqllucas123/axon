@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json.schemastore.org/tsconfig",
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "baseUrl": "../..",
+    "paths": {
+      "@axon/protocol": ["./packages/protocol/src/index.ts"],
+      "@axon/kernel": ["./packages/kernel/src/index.ts"]
+    }
+  },
+  "include": ["src/renderer/**/*.ts"]
+}

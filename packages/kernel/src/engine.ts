@@ -6,6 +6,17 @@
  * 上游一旦破坏性变更，改动面就只有这里，registry/orchestrator 不受影响。
  *
  * 反过来说：其他文件里出现 pi 的 import 就是设计事故。
+ *
+ * ── 具体在防什么（已核实的上游动向）──
+ *
+ * pi 正在把执行内核从 `Agent`（当前能用）迁向 `AgentHarness` + lane-based
+ * Session。但 `AgentHarness` 的 22 个行为方法目前全是 `HarnessNotImplemented`，
+ * 而其中 `lane` / `createLane` / `lanes`（`agent-harness.ts:445,448,451`）
+ * 正是 Axon 要自建的那层能力。参见 `docs/02-调研补充与结论复核.md` §4 风险 A。
+ *
+ * 所以这一层的职责不止于「收敛 import」，还要**不让 `Agent` 类型本身泄露出去**：
+ * 对外只给 `AxonEngine` 接口。将来底座换成 harness/lane 时，改的是这里的实现，
+ * 不是编排层的设计。
  */
 
 import { Agent } from '@earendil-works/pi-agent-core';
@@ -19,6 +30,25 @@ import type { Model } from '@earendil-works/pi-ai';
 import type { MessageLike } from '@axon/protocol';
 
 export type { AgentEvent, AgentMessage, StreamFn, Model };
+
+/**
+ * Axon 编排层看到的引擎面 —— **刻意小于 `Agent` 的全部能力**。
+ *
+ * 只声明编排真正需要的五件事。每多暴露一个 pi 的方法，未来迁移到
+ * lane-based harness 时就多一处要填的坑。现在克制，将来省事。
+ */
+export interface AxonEngine {
+  /** 投喂一条用户消息并启动一轮。 */
+  prompt(text: string): Promise<void>;
+  /** 等到完全静止（含所有 await 的事件监听器 settle）。 */
+  waitForIdle(): Promise<void>;
+  /** 中断当前轮。 */
+  abort(): void;
+  /** 订阅事件流；返回退订函数。监听器被**串行 await**，这是编排层挂起的手段之一。 */
+  subscribe(listener: (event: AgentEvent) => void | Promise<void>): () => void;
+  /** 当前 transcript 快照（拷贝）。 */
+  messages(): MessageLike[];
+}
 
 /** 创建一个受 Axon 管理的 pi Agent 所需的最小参数。 */
 export interface EngineSpec {
@@ -81,4 +111,25 @@ export function fromMessageLike(messages: readonly MessageLike[]): AgentMessage[
 /** 读取当前 transcript 的快照（拷贝，调用方改动不会影响 agent）。 */
 export function snapshotMessages(agent: Agent): MessageLike[] {
   return toMessageLike(structuredClone(agent.state.messages));
+}
+
+/**
+ * 把原生 `Agent` 包成 `AxonEngine`。
+ *
+ * 这是编排层应该用的入口；`createEngine` 保留为逃生门（契约测试、
+ * 以及确实需要 pi 原生能力的场景）。
+ */
+export function wrapEngine(agent: Agent): AxonEngine {
+  return {
+    prompt: (text) => agent.prompt(text),
+    waitForIdle: () => agent.waitForIdle(),
+    abort: () => agent.abort(),
+    subscribe: (listener) => agent.subscribe(listener),
+    messages: () => snapshotMessages(agent),
+  };
+}
+
+/** 一步到位：建引擎并直接得到收敛后的接口。 */
+export function createAxonEngine(spec: EngineSpec): AxonEngine {
+  return wrapEngine(createEngine(spec));
 }
