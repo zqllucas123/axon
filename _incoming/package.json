@@ -1,0 +1,30 @@
+{
+  "name": "axon-pi",
+  "private": true,
+  "type": "module",
+  "version": "0.1.0",
+  "description": "Axon — 多子 Agent 协作桌面客户端",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "trustedDependencies": [
+    "electron",
+    "electron-builder",
+    "esbuild"
+  ],
+  "scripts": {
+    "guard": "bun run scripts/check-bun-only.mjs",
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "vitest run",
+    "check": "bun run guard && bun run typecheck && bun run test",
+    "example:single": "bun run examples/single-agent.ts"
+  },
+  "devDependencies": {
+    "@earendil-works/pi-agent-core": "0.85.1",
+    "@earendil-works/pi-ai": "0.85.1",
+    "@types/node": "22.10.2",
+    "typescript": "5.7.2",
+    "vitest": "2.1.8"
+  }
+}
