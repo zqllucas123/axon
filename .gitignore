@@ -1,0 +1,12 @@
+node_modules/
+dist/
+out/
+.tmp/
+*.log
+.DS_Store
+.env.local
+
+# bun 是唯一包管理器，其他锁文件不允许进仓
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
