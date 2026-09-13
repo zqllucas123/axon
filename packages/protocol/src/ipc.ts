@@ -13,6 +13,8 @@ import type {
   ForkModeSpec,
   MessageLike,
   RoleDefinition,
+  RoleEntry,
+  RoleIssue,
   UsageTotals,
 } from './agent.ts';
 
@@ -70,9 +72,16 @@ export interface CommandMap {
   /** 级联删除整棵子树。 */
   'agent.remove': { payload: { path: AgentPath }; result: { removed: AgentPath[] } };
 
-  'role.list': { payload: Record<string, never>; result: RoleDefinition[] };
-  'role.save': { payload: { role: RoleDefinition }; result: RoleDefinition };
-  'role.delete': { payload: { name: string }; result: { deleted: boolean } };
+  'role.list': { payload: Record<string, never>; result: RoleEntry[] };
+  /** 创建或覆盖同名用户角色；校验失败时 accepted=false 且带 errors。 */
+  'role.save': {
+    payload: { role: RoleDefinition };
+    result: { accepted: boolean; errors: RoleIssue[] };
+  };
+  /** 删除用户角色文件；不存在视为已删除（幂等）。 */
+  'role.delete': { payload: { name: string }; result: { deleted: boolean; errors: RoleIssue[] } };
+  /** 让操作系统开文件管理器定位到角色目录；只读便捷操作。 */
+  'role.openDir': { payload: Record<string, never>; result: { path: string } };
 
   /** 回应内核发起的审批请求。 */
   'approval.respond': {
@@ -119,6 +128,9 @@ export interface EventMap {
 
   /** Agent 间通信：某 agent 收到了来自另一个 agent 的消息。 */
   'agent.message.received': { from: AgentPath; kind: 'task' | 'note'; text: string };
+
+  /** 角色集合变化（保存/删除/编辑器外部改文件后热重载）。UI 直接拿 entries 重绘。 */
+  'roles.changed': { entries: RoleEntry[] };
 
   'approval.request': { requestId: string; message: string; detail?: unknown };
   'question.request': { requestId: string; message: string };

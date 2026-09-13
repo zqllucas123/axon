@@ -18,6 +18,7 @@ import {
   type EventMap,
   type MessageLike,
   type RoleDefinition,
+  type RoleEntry,
   type SpawnAgentPayload,
 } from '@axon/protocol';
 import {
@@ -49,7 +50,7 @@ export interface HostOptions {
 
 export class AxonHost {
   private readonly registry: AgentRegistry;
-  private readonly roles = new Map<string, RoleDefinition>();
+  private roles = new Map<string, RoleEntry>();
   private readonly emit: EmitFn;
   private readonly modelSource: ModelSource;
   private readonly tools: unknown[];
@@ -61,10 +62,24 @@ export class AxonHost {
     this.modelSource = options.modelSource;
     this.tools = options.tools ?? [];
     this.registry = new AgentRegistry({ maxConcurrent: options.maxConcurrent ?? 6 });
-    for (const role of options.roles) this.roles.set(role.name, role);
+    for (const role of options.roles) {
+      this.roles.set(role.name, { role, source: 'builtin', errors: [] });
+    }
   }
 
-  listRoles(): RoleDefinition[] {
+  /**
+   * 整表替换角色集合（M2 RoleLoader 的热重载入口）。
+   *
+   * 运行中的 Agent 不受影响：spawn 时角色定义已被快照进实例
+   * （systemPrompt / 白名单在那一刻定死），改角色只影响**之后**的 spawn。
+   * 这是有意为之——热改导致在跑任务中途换性格，对用户是惊吓不是惊喜。
+   */
+  updateRoles(entries: RoleEntry[]): void {
+    this.roles = new Map(entries.map((entry) => [entry.role.name, entry]));
+    this.emit('roles.changed', { entries }, ROOT_PATH);
+  }
+
+  listRoles(): RoleEntry[] {
     return [...this.roles.values()];
   }
 
@@ -92,8 +107,9 @@ export class AxonHost {
    * 先算权限再切上下文，是因为切片不改变权限，反之则不成立。
    */
   spawn(payload: SpawnAgentPayload): AgentSnapshot {
-    const role = this.roles.get(payload.role);
-    if (!role) throw new Error(`角色不存在: ${payload.role}`);
+    const entry = this.roles.get(payload.role);
+    if (!entry) throw new Error(`角色不存在: ${payload.role}`);
+    const role = entry.role;
 
     const parent = payload.parent ?? ROOT_PATH;
     const parentNode = this.registry.get(parent);
@@ -186,8 +202,8 @@ export class AxonHost {
   /** 某个 Agent 实际可用的工具名集合。根节点返回 undefined（无限制）。 */
   private toolNamesOf(path: AgentPath): string[] | undefined {
     if (path === ROOT_PATH) return undefined;
-    const role = this.roles.get(this.registry.get(path)?.snapshot.role ?? '');
-    return role?.tools;
+    const entry = this.roles.get(this.registry.get(path)?.snapshot.role ?? '');
+    return entry?.role.tools;
   }
 
   private setStatus(path: AgentPath, status: AgentSnapshot['status'], error?: string) {

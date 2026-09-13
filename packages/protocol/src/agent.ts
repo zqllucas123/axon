@@ -209,6 +209,39 @@ export interface RoleDefinition {
   approval?: ApprovalMode;
 }
 
+// ─────────────────────────────────────────────────────────────
+// 角色加载（M2 RoleLoader）
+// ─────────────────────────────────────────────────────────────
+
+/** 角色文件加载/校验时发现的问题。 */
+export interface RoleIssue {
+  /** 机器可读的问题代码，UI 据此选择展示方式。 */
+  code: 'parse_error' | 'validation' | 'duplicate_name';
+  message: string;
+  /** 出自哪个文件；内置/全局问题则缺省。 */
+  file?: string;
+}
+
+export type RoleSource = 'builtin' | 'user';
+
+/**
+ * 角色列表条目 = 角色定义 + 来源 + 加载健康度。
+ *
+ * 为什么带 errors 而不是遇见坏文件就抛：角色文件是用户手写物，
+ * 一个坏文件不该打瘸整棵树。errors 留给 UI 渲染成红条，
+ * 加载器只承诺「坏文件不生效、好文件不受牵连」。
+ */
+export interface RoleEntry {
+  role: RoleDefinition;
+  source: RoleSource;
+  /** 用户角色覆盖了同名内置角色时为 true。 */
+  overridesBuiltin?: boolean;
+  /** 用户角色的落盘文件路径。 */
+  filePath?: string;
+  /** 该条目自身的加载问题；解析失败的文件不会出现在列表里，其错误由 role.list 结果另行携带。 */
+  errors: RoleIssue[];
+}
+
 export interface UsageTotals {
   inputTokens: number;
   outputTokens: number;

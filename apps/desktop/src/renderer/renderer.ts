@@ -12,7 +12,7 @@
  * 框架等 UI 真正复杂起来再上，避免过早引入构建复杂度。
  */
 
-import type { AgentSnapshot, AxonBridge, RoleDefinition } from '@axon/protocol';
+import type { AgentSnapshot, AxonBridge, RoleEntry } from '@axon/protocol';
 
 declare global {
   interface Window {
@@ -41,9 +41,9 @@ function log(text: string, cls = '') {
 }
 
 async function renderRoles() {
-  const roles: RoleDefinition[] = await axon.invoke('role.list', {});
+  const entries: RoleEntry[] = await axon.invoke('role.list', {});
   rolesEl.replaceChildren();
-  for (const role of roles) {
+  for (const { role } of entries) {
     const el = document.createElement('div');
     el.className = 'role';
     const mode = String(role.defaultForkMode ?? 'none');
