@@ -218,7 +218,7 @@ planner running(占满) → spawn 2 子：child1 running…child2 gate 满 → p
 
 ## 七、实施计划（切片，每步可独立验证）
 
-> **进度（2026-09-13）**：切片 1–3 ✅，切片 4–7 待做。
+> **进度（2026-09-13）**：切片 1–4 ✅，切片 5–7 待做。
 
 - [x] **切片 1 ✅**（kernel）：`budget.ts`（BudgetGuard 阀值跃迁一次性）+ registry 闸门重构（running-only 计数 / idle→waiting / `promote()` 免检）+ fork 后代校验（`assertWaitable` 限后代 + `isDescendantOf`）。单测 75 例全绿。
 - [x] **切片 2 ✅**（kernel）：`engine.steer()` 进 AxonEngine 五方法之一（pi `Agent.steer` 的透传，0.85.1 dist 已确认「injected after the current assistant turn finishes」）。契约测试改用 `createAxonEngine` + steer 时序（9 例）。
@@ -226,7 +226,10 @@ planner running(占满) → spawn 2 子：child1 running…child2 gate 满 → p
   - **两个实测逼出的补丁**（都进了 kernel/provider.ts）：
     1. faux `setResponses` 的消费语义是「每轮 LLM 调用 shift 一条」，多 Agent 交错时与引擎异步启动有竞态——新增 `scriptedSource`（按最近一条 user 消息文本路由，永不耗尽）作为多 Agent 测试的确定性来源。
     2. `withTurnCost` 漏 await async streamFn（`for await` 不会 await 裸 Promise）→ 全链路 TypeError——补 await。且 `agent-loop` 的 done 分支用 `response.result()`（EventStream 的 `resolveFinalResult` 由 done 事件的 `isComplete` 触发）而非事件 payload——终值与 done 事件要双写成本。
-- [ ] **切片 4** orchestrator.ts：六工具对 fake driver 单测（spawn→wait→resolve→state 断言；超时不杀子；message/steer 时序；execute 抛错路径）
+- [x] **切片 4 ✅**（main/orchestrator.ts）：`OrchestrationDriver` 接口 + 六工具双闭包工厂（agent / agent_wait / agent_check / agent_message / agent_resume / agent_interrupt）。不 import electron/host，FakeDriver 单测 13 例全绿。
+  - **两个落地时定型的小决策**（与 §4.6 草案的微调，测试钉死）：
+    1. driver.beginWait 改为 Promise 形态（`beginWait(targets): Promise<void>` + `endWait()`），工具 execute 里 `await` 即挂起——宿主已实测支撑；§4.6 草案的「返回回调」形态没采纳。
+    2. `agent_resume` **不 await** requestRun（fire 语义）：额满时目标进 parked 排队、Promise 直到跑完才 resolve，工具若 await = 父占着额度等一个没额度的子，`maxConcurrent=1` 时结构性死锁。等结果必须走 agent_wait（退位让额）。
 - [ ] **切片 5** roles.ts 授权矩阵 + index.ts 装配（typecheck + host 冒烟：planner 白名单含 agent 等，blank 无）
 - [ ] **切片 6** UI 预算条（`bun run ui-smoke` 扩：faux 脚本故意触发 budget.warning → banner 出现；frozen → composer 禁用）
 - [ ] **切片 7** E2E 集成测试（milestone 验收）：faux 三幕走完「planner spawn developer wait resume 收尾」+ gate=1 死锁免检路径，断言全事件序列

@@ -16,6 +16,8 @@ export {
   type ToolGateResult,
   type AgentEvent,
   type AgentMessage,
+  type AgentTool,
+  type AgentToolResult,
   type StreamFn,
   type Model,
 } from './engine.ts';

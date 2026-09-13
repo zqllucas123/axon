@@ -24,12 +24,14 @@ import type {
   AgentEvent,
   AgentMessage,
   AgentState,
+  AgentTool,
+  AgentToolResult,
   StreamFn,
 } from '@earendil-works/pi-agent-core';
 import type { Model } from '@earendil-works/pi-ai';
 import type { MessageLike } from '@axon/protocol';
 
-export type { AgentEvent, AgentMessage, StreamFn, Model };
+export type { AgentEvent, AgentTool, AgentToolResult, AgentMessage, StreamFn, Model };
 
 /**
  * Axon 编排层看到的引擎面 —— **刻意小于 `Agent` 的全部能力**。
