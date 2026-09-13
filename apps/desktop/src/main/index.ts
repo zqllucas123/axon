@@ -12,9 +12,10 @@
  * 渲染进程只发意图、收事件，不持有 Agent 实例。
  */
 
-import { app, BrowserWindow, ipcMain } from 'electron';
+import { app, BrowserWindow, ipcMain, shell } from 'electron';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
+import { homedir } from 'node:os';
 import {
   IPC_COMMAND_CHANNEL,
   ipcEventChannel,
@@ -25,6 +26,7 @@ import {
 import { createFauxSource } from '@axon/kernel';
 import { AxonHost } from './host.ts';
 import { ALL_ROLES } from './roles.ts';
+import { RoleBridge } from './role-bridge.ts';
 
 /**
  * 构建产物是 ESM（pi 包 ESM-only，见 scripts/build.mjs），所以用 `import.meta.url`
@@ -32,8 +34,15 @@ import { ALL_ROLES } from './roles.ts';
  */
 const here = dirname(fileURLToPath(import.meta.url));
 
+/**
+ * 用户角色目录。默认 ~/.axon/roles；AXON_ROLES_DIR 供开发/冒烟测试隔离，
+ * 防止把真用户的角色目录写脏。
+ */
+const ROLES_DIR = process.env.AXON_ROLES_DIR || join(homedir(), '.axon', 'roles');
+
 let win: BrowserWindow | null = null;
 let host: AxonHost | null = null;
+let roleBridge: RoleBridge | null = null;
 
 async function createHost(): Promise<AxonHost> {
   // 目前用 faux provider 起步 —— 真 provider 接入是下一步的事。
@@ -85,6 +94,8 @@ function createWindow(): void {
 
 app.whenReady().then(async () => {
   host = await createHost();
+  roleBridge = new RoleBridge({ dir: ROLES_DIR, builtinRoles: ALL_ROLES, host });
+  await roleBridge.init();
 
   ipcMain.handle(
     IPC_COMMAND_CHANNEL,
@@ -93,6 +104,24 @@ app.whenReady().then(async () => {
       request: RequestEnvelope,
     ): Promise<ResponseEnvelope> => {
       try {
+        // 角色层三条命令直接路由到 RoleBridge（fs 职责，不属于 host 编排逻辑）。
+        if (request.command === 'role.save') {
+          const result = await roleBridge!.save(
+            (request.payload as { role: never })['role'],
+          );
+          return { id: request.id, ok: true, result };
+        }
+        if (request.command === 'role.delete') {
+          const result = await roleBridge!.remove(
+            (request.payload as { name: string }).name,
+          );
+          return { id: request.id, ok: true, result };
+        }
+        if (request.command === 'role.openDir') {
+          await shell.openPath(ROLES_DIR);
+          return { id: request.id, ok: true, result: { path: ROLES_DIR } };
+        }
+
         const result = await host!.execute(
           request.command as keyof CommandMap,
           request.payload as never,
@@ -122,4 +151,8 @@ app.whenReady().then(async () => {
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit();
+});
+
+app.on('will-quit', () => {
+  roleBridge?.dispose();
 });
