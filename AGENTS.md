@@ -39,7 +39,7 @@ bun run dev          # 手工过一遍本里程碑的用户可见能力
 
 1. **包管理器只有 bun**（`scripts/check-bun-only.mjs` guard）；禁止任何 npm/yarn/pnpm 命令与锁文件
 2. **pi import 只许在三个边界文件**：`packages/kernel/src/engine.ts`、`engine.contract.test.ts`、`provider.ts`；其余文件一律 import `@axon/kernel`。要放宽先改 guard 白名单
-3. **渲染进程零 Node**：`contextIsolation: true` + `nodeIntegration: false` 不许松；renderer 保持无状态薄壳（kalo `chat-store.ts` 1405 行的教训），状态真相只存在于主进程
+3. **渲染进程零 Node**：`contextIsolation: true` + `nodeIntegration: false` 不许松；renderer 保持无状态薄壳（kalo `chat-store.ts` 1405 行的教训），状态真相只存在于主进程。渲染层技术栈为 **React 19**（M2 拍板，五组件全量迁移，见 M2 文档 §4.8）：组件只做「渲染 + 发意图」，编排决策一律留在主进程
 4. **多会话纪律**：同一工作树里**同时只允许一个会话写代码、动 git**；其他并行会话只能做只读调研，且只许写自己产出的新文档（产出路径见任务指派）。commit 由主线会话统一收口
 5. **不推翻已拍板决策**：三条拍板（ForkMode 默认 `none` / Electron / 直接开发 Electron）见 02 §5，要推翻需用户重新拍板
 

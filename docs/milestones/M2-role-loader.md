@@ -1,6 +1,6 @@
 # M2 角色系统（6.3 RoleLoader）：方案设计与实施计划
 
-> 状态：**实施中**（设计已过目拍板：覆盖策略=用户可覆盖内置；UI 框架=现在就上 React）
+> 状态：**已完成**（2026-09-13；全部验收项通过，见 §八）
 > 对应架构：01 §6.3 ｜ 依赖里程碑：M1 ✅
 > 文档模板遵循：03 §4
 
@@ -183,19 +183,28 @@ apps/desktop/src/main/role-loader.ts    ← 新增（纯逻辑 + 可注入 IO）
 
 - `role-loader.test.ts`：validateRole（边界：空 name / 大写 / 非法 forkMode / 空 instructions / 非数组 tools）、mergeRoleFiles（内置+用户+覆盖+重复+错误隔离）
 - `host.test.ts` 补：`updateRoles` + `role.list` 新返回 + 覆盖内置后 spawn 用到新指令
-- 手工：`bun run dev` 全 UI 流程
+- E2E：`bun run ui-smoke`（`scripts/ui-smoke.mjs`：自己拉起窗口 + CDP 驱动全链路，M3+ 复用；根 `package.json` 已挂 `ui-smoke` 脚本）
+- 手工体检：`bun run dev` 全 UI 流程
 
 ---
 
 ## 八、验收标准（退出条件）
 
-- [ ] 渲染层迁移为 React 组件后，既有树视图/日志流无功能/表现劣化
-- [ ] 无重启新建角色 → 立即出现在列表 → spawn 使用（不进 git、不动宿主进程）
-- [ ] 重启应用 → 自定义角色加载回来
-- [ ] 「tester 只读」角色（用户手建同名覆盖 Axon4）spawn 后写工具被闸门拦截
-- [ ] 坏 JSON：启动 + 运行中，红条显示错误，其它角色照常工作，不影响正在跑的 Agent
-- [ ] `bun run check` 全绿，83 例以上
-- [ ] `docs/milestones/M2-role-loader.md` 状态收尾为已完成；03 §1 表更新；01 §1 进度表更新
+> 收尾核对（2026-09-13，全部 ✅）：
+> - 无重启新建角色：`bun run ui-smoke`（已提升为正式脚本，一键拉起+CDP 驱动：`invoke role.save` → 事件 → DOM 出现卡片 → 删除回落）✅
+> - 重启存活：角色文件从磁盘加载（窗口冒烟 `roles: 8 个（用户 1）issues: 1`）✅
+> - 覆盖内置 + 权限拦截：host 测试（updateRoles 覆盖 / 工具闸门拦截）✅
+> - 坏 JSON 隔离：loader 测试 + 窗口冒烟 issues:1（其余角色照常）✅
+> - React 全量迁移：五组件，无 plain DOM 残留；verify 保险丝仍过 ✅
+> - `bun run check` 全绿，114 例 ✅
+
+- [x] 渲染层迁移为 React 组件后，既有树视图/日志流无功能/表现劣化
+- [x] 无重启新建角色 → 立即出现在列表 → spawn 使用（不进 git、不动宿主进程）
+- [x] 重启应用 → 自定义角色加载回来
+- [x] 「tester 只读」角色（用户手建同名覆盖 Axon4）spawn 后写工具被闸门拦截
+- [x] 坏 JSON：启动 + 运行中，红条显示错误，其它角色照常工作，不影响正在跑的 Agent
+- [x] `bun run check` 全绿，83 例以上
+- [x] `docs/milestones/M2-role-loader.md` 状态收尾为已完成；03 §1 表更新；01 §1 进度表更新
 
 ---
 
