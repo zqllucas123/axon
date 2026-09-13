@@ -180,12 +180,17 @@ export function lastUserText(context: unknown): string {
  * shift 掉一条」，多轮/多 Agent 交错调用时会被引擎的异步启动竞态打乱
  * 配对。路由表按**文本**寻址，永不耗尽 —— 多轮、多 Agent 测试的确定性
  * 来源；未注册的文本走 fallback（缺省直接抛错，宁可红不要谜）。
+ *
+ * 工厂参数：`(context, callIndex)` —— context 是 LLM 上下文（可读转录里
+ * 的 toolResult 消息组装下一步工具参数），callIndex 是「该文本第几次被
+ * 调用」（从 0 起），用于同一句话的多轮序列脚本。
  */
 export function scriptedSource(
   base: ModelSource,
-  routes: Record<string, () => unknown>,
+  routes: Record<string, (context: Record<string, unknown>, callIndex: number) => unknown>,
   fallback?: (text: string) => unknown,
 ): ModelSource {
+  const calls = new Map<string, number>();
   return {
     model: base.model,
     streamFn: async (model, context, options) => {
@@ -194,8 +199,10 @@ export function scriptedSource(
       if (!route && !fallback) {
         throw new Error(`scriptedSource 未注册回复: ${JSON.stringify(text)}`);
       }
+      const callIndex = (calls.get(text) ?? 0);
+      calls.set(text, callIndex + 1);
       // route/fallback 返回的就是 reply 消息（测试约定），配件只解释驳回。
-      const message = (await (route ? route() : fallback!(text))) as AssistantMessage;
+      const message = (await (route ? route(context as unknown as Record<string, unknown>, callIndex) : fallback!(text))) as AssistantMessage;
       return singleMessageStream(message);
     },
   };

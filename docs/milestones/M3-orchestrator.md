@@ -218,7 +218,7 @@ planner running(占满) → spawn 2 子：child1 running…child2 gate 满 → p
 
 ## 七、实施计划（切片，每步可独立验证）
 
-> **进度（2026-09-13）**：切片 1–6 ✅，切片 7（E2E 三幕验收）待做。
+> **进度（2026-09-13）**：切片 1–7 ✅，收尾/验收待做。
 
 - [x] **切片 1 ✅**（kernel）：`budget.ts`（BudgetGuard 阀值跃迁一次性）+ registry 闸门重构（running-only 计数 / idle→waiting / `promote()` 免检）+ fork 后代校验（`assertWaitable` 限后代 + `isDescendantOf`）。单测 75 例全绿。
 - [x] **切片 2 ✅**（kernel）：`engine.steer()` 进 AxonEngine 五方法之一（pi `Agent.steer` 的透传，0.85.1 dist 已确认「injected after the current assistant turn finishes」）。契约测试改用 `createAxonEngine` + steer 时序（9 例）。
@@ -231,8 +231,8 @@ planner running(占满) → spawn 2 子：child1 running…child2 gate 满 → p
     1. driver.beginWait 改为 Promise 形态（`beginWait(targets): Promise<void>` + `endWait()`），工具 execute 里 `await` 即挂起——宿主已实测支撑；§4.6 草案的「返回回调」形态没采纳。
     2. `agent_resume` **不 await** requestRun（fire 语义）：额满时目标进 parked 排队、Promise 直到跑完才 resolve，工具若 await = 父占着额度等一个没额度的子，`maxConcurrent=1` 时结构性死锁。等结果必须走 agent_wait（退位让额）。
 - [x] **切片 5 ✅**（roles.ts + host 装配）：七个内置角色全部白名单 + 六件套（决策 #1 全员全件套）；host `spawn` 现造并 bind 工具集——`toolsFor` = 宇宙叶子工具 + 白名单裁剪后的编排工具；`steer()` / `driverFor()` / `orchestrationToolsFor(path, allowSet)` 公开面。集成测试 6 例（真实 host × 真工具：agent spawn 子 → 子跑完 → wait 拿终态 → check 摘要 → resume 拉起 → 冻结直达 agent 工具拒 spawn）。
-- [x] **切片 6 ✅**（UI 预算条）：App 订阅 budget.warning / budget.frozen → banner（黄→红）+ 日志；frozen 禁用 Composer 输入与发送（中断保留）；冒烟钩子 `AXON_SMOKE_SCRIPT` / `AXON_SMOKE_BUDGET_COST` / `_HARD`（只冒烟生效）；ui-smoke 新增第 5 幕「两轮 prompt 走完 warning→frozen」。
-- [ ] **切片 7** E2E 集成测试（milestone 验收）：faux 三幕走完「planner spawn developer wait resume 收尾」+ gate=1 死锁免检路径，断言全事件序列
+- [x] **切片 6 ✅**（UI 预算条）：App 订阅 budget.warning / budget.frozen → banner（黄→红）+ 日志；frozen 禁用 Composer 输入与发送（中断保留）；冒烟钩子 `AXON_SMOKE_SCRIPT` / `AXON_SMOKE_BUDGET_COST` / `_HARD`（只冒烟生效）；ui-smoke 新增第 5 幕「两轮 prompt 走完 warning→frozen」（banner + 输入框禁用断言）。
+- [x] **切片 7 ✅** E2E 集成测试（`main/orchestration.e2e.test.ts`，真实 pi 引擎 × AxonHost）：幕 1 三幕 happy path（spawn→wait→resume→wait→收尾，工具参数从 LLM 转录 toolResult 文本解析，回复门钉死 wait 挂起点）；幕 2 gate=1 死锁免检（父占唯一额度 spawn 双子全 parked → 父退位 → FIFO 串行补位 → 父唤醒收尾，铁证 d1 done 事件先于 d2 running 事件）。配套升级 `scriptedSource` 路由工厂签名为 `(context, callIndex)`（读转录 + 同文本多轮序列）。
 - [ ] **切片 8** 收尾：`bun run check` 全绿 + 文档同步（§十）+ 语义化 commit
 
 ## 八、测试策略
