@@ -96,6 +96,10 @@ app.whenReady().then(async () => {
   host = await createHost();
   roleBridge = new RoleBridge({ dir: ROLES_DIR, builtinRoles: ALL_ROLES, host });
   await roleBridge.init();
+  const state = host.listRoles();
+  console.log(
+    `[desktop] roles: ${state.entries.length} 个（用户 ${state.entries.filter((e) => e.source === 'user').length}），issues: ${state.issues.length}，目录 ${ROLES_DIR}`,
+  );
 
   ipcMain.handle(
     IPC_COMMAND_CHANNEL,

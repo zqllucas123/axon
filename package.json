@@ -27,9 +27,15 @@
     "@earendil-works/pi-agent-core": "0.85.1",
     "@earendil-works/pi-ai": "0.85.1",
     "@types/node": "22.10.2",
+    "@types/react": "19",
+    "@types/react-dom": "19",
     "electron": "33.2.1",
     "esbuild": "0.24.2",
     "typescript": "5.7.2",
     "vitest": "2.1.8"
+  },
+  "dependencies": {
+    "react": "19",
+    "react-dom": "19"
   }
 }

@@ -3,11 +3,13 @@
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
     "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    /* React 19：automatic runtime，组件文件无需 import React。 */
+    "jsx": "react-jsx",
     "baseUrl": "../..",
     "paths": {
       "@axon/protocol": ["./packages/protocol/src/index.ts"],
       "@axon/kernel": ["./packages/kernel/src/index.ts"]
     }
   },
-  "include": ["src/renderer/**/*.ts"]
+  "include": ["src/renderer/**/*.ts", "src/renderer/**/*.tsx"]
 }

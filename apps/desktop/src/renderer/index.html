@@ -25,23 +25,31 @@
         font: 13px/1.6 -apple-system, "Segoe UI", "PingFang SC", sans-serif;
         background: var(--bg); color: var(--text);
       }
+      #root { flex: 1; display: flex; min-width: 0; }
+
+      /* ── 左侧栏 ── */
       aside {
         width: 300px; flex: none; border-right: 1px solid var(--line);
         display: flex; flex-direction: column; background: var(--panel);
       }
-      h2 {
-        margin: 0; padding: 12px 14px; font-size: 11px; letter-spacing: .08em;
+      .panel-head {
+        padding: 10px 14px 6px; font-size: 11px; letter-spacing: .08em;
         text-transform: uppercase; color: var(--dim);
-        border-bottom: 1px solid var(--line);
+        display: flex; justify-content: space-between; align-items: center;
       }
-      .roles { padding: 8px; border-bottom: 1px solid var(--line); }
+      .panel-head + .roles, .panel-head + .tree { padding-top: 2px; }
+      .roles { padding: 0 8px 8px; }
+      .group-label {
+        padding: 6px 6px 2px; font-size: 10px; color: var(--dim);
+        text-transform: uppercase; letter-spacing: .05em;
+      }
       .role {
         display: flex; justify-content: space-between; align-items: center;
-        gap: 8px; padding: 7px 8px; border-radius: 6px; cursor: pointer;
+        gap: 6px; padding: 6px 8px; border-radius: 6px; cursor: pointer;
       }
       .role:hover { background: #23272f; }
-      .role .meta { min-width: 0; }
-      .role .name { font-weight: 500; }
+      .role .meta { min-width: 0; flex: 1; }
+      .role .name { font-weight: 500; display: flex; align-items: center; gap: 5px; }
       .role .desc {
         color: var(--dim); font-size: 11px; white-space: nowrap;
         overflow: hidden; text-overflow: ellipsis;
@@ -51,7 +59,14 @@
         border: 1px solid var(--line); color: var(--dim);
       }
       .role .fork[data-mode="all"] { color: var(--warn); border-color: #4a3c22; }
-      #tree { flex: 1; overflow: auto; padding: 8px; }
+      .role-actions { flex: none; display: flex; gap: 2px; opacity: 0; }
+      .role:hover .role-actions { opacity: 1; }
+      .badge-override {
+        font-size: 9px; color: var(--warn); border: 1px solid #4a3c22;
+        border-radius: 3px; padding: 0 3px;
+      }
+
+      .tree { flex: 1; overflow: auto; padding: 0 8px 8px; }
       .node {
         padding: 6px 8px; border-radius: 6px; cursor: pointer;
         display: flex; align-items: center; gap: 8px;
@@ -62,41 +77,85 @@
       .dot[data-s="running"] { background: var(--accent); }
       .dot[data-s="done"] { background: var(--ok); }
       .dot[data-s="failed"] { background: var(--err); }
-      .dot[data-s="waiting"] { background: var(--warn); }
+      .dot[data-s="waiting"], .dot[data-s="interrupted"] { background: var(--warn); }
+
+      /* ── 主区 ── */
       main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
-      #log { flex: 1; overflow: auto; padding: 14px; font-family: ui-monospace, monospace; font-size: 12px; }
-      #log div { padding: 1px 0; white-space: pre-wrap; word-break: break-word; }
-      #log .t { color: var(--dim); }
-      #log .e { color: var(--err); }
-      #log .k { color: var(--accent); }
+      .log {
+        flex: 1; overflow: auto; padding: 14px;
+        font-family: ui-monospace, monospace; font-size: 12px;
+      }
+      .log div { padding: 1px 0; white-space: pre-wrap; word-break: break-word; }
+      .log .ts { color: var(--dim); margin-right: 2px; }
+      .log .t { color: var(--dim); }
+      .log .e { color: var(--err); }
+      .log .k { color: var(--accent); }
       footer { border-top: 1px solid var(--line); padding: 10px 14px; display: flex; gap: 8px; }
-      input {
+      footer button.danger { color: var(--err); }
+
+      input, select, textarea {
         flex: 1; background: #12141a; border: 1px solid var(--line);
         color: var(--text); padding: 7px 10px; border-radius: 6px; font: inherit;
+        font-family: inherit;
       }
-      input:focus { outline: none; border-color: var(--accent); }
+      input:focus, textarea:focus, select:focus {
+        outline: none; border-color: var(--accent);
+      }
       button {
         background: #2a3140; border: 1px solid var(--line); color: var(--text);
         padding: 7px 14px; border-radius: 6px; cursor: pointer; font: inherit;
       }
       button:hover { border-color: var(--accent); }
+      button.mini { padding: 1px 7px; font-size: 11px; }
+
+      /* ── 轻提示 ── */
+      .dim { color: var(--dim); padding: 8px; }
+      .issues {
+        margin: 6px 2px; padding: 6px 8px; border-radius: 6px;
+        background: #2a2022; border: 1px solid #4a2428;
+      }
+      .issue { color: var(--err); font-size: 11px; padding: 1px 0; }
+      .issue b { margin-right: 4px; }
+
+      /* ── 模态 ── */
+      .modal-backdrop {
+        position: fixed; inset: 0; background: rgba(8, 10, 14, .6);
+        display: flex; align-items: center; justify-content: center; z-index: 10;
+      }
+      .modal {
+        width: 560px; max-height: 84vh; display: flex; flex-direction: column;
+        background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+        overflow: hidden;
+      }
+      .modal-head {
+        display: flex; justify-content: space-between; align-items: center;
+        padding: 12px 16px; border-bottom: 1px solid var(--line); font-weight: 600;
+      }
+      .modal-body {
+        padding: 14px 16px; overflow: auto; display: flex;
+        flex-direction: column; gap: 10px;
+      }
+      .modal-body label {
+        display: flex; flex-direction: column; gap: 4px;
+        font-size: 11px; color: var(--dim);
+      }
+      .form-row { display: flex; gap: 10px; align-items: end; }
+      .form-row label { flex: 1; }
+      input.narrow { max-width: 90px; }
+      .modal-body details { font-size: 12px; }
+      .modal-body pre {
+        background: #12141a; border: 1px solid var(--line); border-radius: 6px;
+        padding: 10px; overflow: auto; max-height: 180px; font-size: 11px;
+      }
+      .modal-foot {
+        display: flex; justify-content: flex-end; gap: 8px;
+        padding: 12px 16px; border-top: 1px solid var(--line);
+      }
+      button.primary { background: #2f4a7a; border-color: #3d5f9e; }
     </style>
   </head>
   <body>
-    <aside>
-      <h2>角色 · 点击创建分身</h2>
-      <div class="roles" id="roles"></div>
-      <h2>Agent 树</h2>
-      <div id="tree"></div>
-    </aside>
-    <main>
-      <div id="log"></div>
-      <footer>
-        <input id="input" placeholder="给选中的 Agent 发消息…" autocomplete="off" />
-        <button id="send">发送</button>
-        <button id="stop">中断</button>
-      </footer>
-    </main>
+    <div id="root"></div>
     <script type="module" src="./renderer.js"></script>
   </body>
 </html>

@@ -76,6 +76,7 @@ await build({
 
 // renderer 走浏览器目标：它绝不该碰到 node 内置模块，
 // platform: 'browser' 会在误引入时直接报错——这是想要的。
+// React 19：jsx 'automatic' 免掉每文件 import React。
 await build({
   bundle: true,
   platform: 'browser',
@@ -83,7 +84,9 @@ await build({
   sourcemap: true,
   logLevel: 'info',
   alias,
-  entryPoints: [join(appRoot, 'src/renderer/renderer.ts')],
+  jsx: 'automatic',
+  minify: true, // React 体系不压缩会从 ~180KB 膨胀到 1.2MB
+  entryPoints: [join(appRoot, 'src/renderer/main.tsx')],
   outfile: join(out, 'renderer/renderer.js'),
   format: 'esm',
 });
