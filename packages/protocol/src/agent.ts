@@ -216,7 +216,7 @@ export interface RoleDefinition {
 /** 角色文件加载/校验时发现的问题。 */
 export interface RoleIssue {
   /** 机器可读的问题代码，UI 据此选择展示方式。 */
-  code: 'parse_error' | 'validation' | 'duplicate_name';
+  code: 'parse_error' | 'validation';
   message: string;
   /** 出自哪个文件；内置/全局问题则缺省。 */
   file?: string;

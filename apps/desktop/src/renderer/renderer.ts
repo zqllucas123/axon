@@ -41,7 +41,7 @@ function log(text: string, cls = '') {
 }
 
 async function renderRoles() {
-  const entries: RoleEntry[] = await axon.invoke('role.list', {});
+  const { entries } = await axon.invoke('role.list', {});
   rolesEl.replaceChildren();
   for (const { role } of entries) {
     const el = document.createElement('div');

@@ -72,7 +72,10 @@ export interface CommandMap {
   /** 级联删除整棵子树。 */
   'agent.remove': { payload: { path: AgentPath }; result: { removed: AgentPath[] } };
 
-  'role.list': { payload: Record<string, never>; result: RoleEntry[] };
+  'role.list': {
+    payload: Record<string, never>;
+    result: { entries: RoleEntry[]; issues: RoleIssue[] };
+  };
   /** 创建或覆盖同名用户角色；校验失败时 accepted=false 且带 errors。 */
   'role.save': {
     payload: { role: RoleDefinition };
@@ -130,7 +133,7 @@ export interface EventMap {
   'agent.message.received': { from: AgentPath; kind: 'task' | 'note'; text: string };
 
   /** 角色集合变化（保存/删除/编辑器外部改文件后热重载）。UI 直接拿 entries 重绘。 */
-  'roles.changed': { entries: RoleEntry[] };
+  'roles.changed': { entries: RoleEntry[]; issues: RoleIssue[] };
 
   'approval.request': { requestId: string; message: string; detail?: unknown };
   'question.request': { requestId: string; message: string };

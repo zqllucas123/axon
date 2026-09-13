@@ -19,6 +19,7 @@ import {
   type MessageLike,
   type RoleDefinition,
   type RoleEntry,
+  type RoleIssue,
   type SpawnAgentPayload,
 } from '@axon/protocol';
 import {
@@ -51,6 +52,8 @@ export interface HostOptions {
 export class AxonHost {
   private readonly registry: AgentRegistry;
   private roles = new Map<string, RoleEntry>();
+  /** 加载期坏文件的错误（不在 roles 里，单独携带给 UI 渲染红条）。 */
+  private roleIssues: RoleIssue[] = [];
   private readonly emit: EmitFn;
   private readonly modelSource: ModelSource;
   private readonly tools: unknown[];
@@ -74,13 +77,14 @@ export class AxonHost {
    * （systemPrompt / 白名单在那一刻定死），改角色只影响**之后**的 spawn。
    * 这是有意为之——热改导致在跑任务中途换性格，对用户是惊吓不是惊喜。
    */
-  updateRoles(entries: RoleEntry[]): void {
+  updateRoles(entries: RoleEntry[], issues: RoleIssue[]): void {
     this.roles = new Map(entries.map((entry) => [entry.role.name, entry]));
-    this.emit('roles.changed', { entries }, ROOT_PATH);
+    this.roleIssues = issues;
+    this.emit('roles.changed', { entries, issues }, ROOT_PATH);
   }
 
-  listRoles(): RoleEntry[] {
-    return [...this.roles.values()];
+  listRoles(): { entries: RoleEntry[]; issues: RoleIssue[] } {
+    return { entries: [...this.roles.values()], issues: [...this.roleIssues] };
   }
 
   list(): AgentSnapshot[] {

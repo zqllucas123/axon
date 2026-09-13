@@ -95,7 +95,7 @@ describe('AxonHost —— 分身创建', () => {
     h.host.spawn({ role: 'boss', overrides: { displayName: '临时主管' } });
     expect(h.host.list().find((s) => s.role === 'boss')?.displayName).toBe('临时主管');
     // 角色定义本身不受影响
-    expect(h.host.listRoles().find((r) => r.role.name === 'boss')?.role.displayName).toBe('主管');
+    expect(h.host.listRoles().entries.find((r) => r.role.name === 'boss')?.role.displayName).toBe('主管');
   });
 
   it('未知角色报错', async () => {
@@ -113,20 +113,23 @@ describe('AxonHost —— 分身创建', () => {
     const h = await harness();
     const builtinBoss = ROLES.find((r) => r.name === 'boss')!;
     const builtinReader = ROLES.find((r) => r.name === 'reader')!;
-    h.host.updateRoles([
-      { role: builtinBoss, source: 'builtin' as const, errors: [] },
-      {
-        role: {
-          ...builtinReader,
-          displayName: '披着只读外套的主管',
-          instructions: '覆盖后的指令',
-          tools: ['poke'],
+    h.host.updateRoles(
+      [
+        { role: builtinBoss, source: 'builtin' as const, errors: [] },
+        {
+          role: {
+            ...builtinReader,
+            displayName: '披着只读外套的主管',
+            instructions: '覆盖后的指令',
+            tools: ['poke'],
+          },
+          source: 'user' as const,
+          overridesBuiltin: true,
+          errors: [],
         },
-        source: 'user' as const,
-        overridesBuiltin: true,
-        errors: [],
-      },
-    ]);
+      ],
+      [],
+    );
 
     const changed = h.events.filter((e) => e.event === 'roles.changed');
     expect(changed.length).toBe(1);
@@ -134,7 +137,7 @@ describe('AxonHost —— 分身创建', () => {
     // 覆盖生效：spawn 出来后指令/白名单用的是用户版本
     const reader = h.host.spawn({ role: 'reader' });
     expect(reader.displayName).toBe('披着只读外套的主管');
-    expect(h.host.listRoles().find((r) => r.role.name === 'reader')?.overridesBuiltin).toBe(true);
+    expect(h.host.listRoles().entries.find((r) => r.role.name === 'reader')?.overridesBuiltin).toBe(true);
 
     // 被新表替换掉的角色（heir 未在表中）不再可 spawn
     expect(() => h.host.spawn({ role: 'heir' })).toThrow(/角色不存在/);
@@ -142,7 +145,7 @@ describe('AxonHost —— 分身创建', () => {
 
   it('内置角色条目默认 source=builtin 且 overridesBuiltin 缺省', async () => {
     const h = await harness();
-    const boss = h.host.listRoles().find((r) => r.role.name === 'boss')!;
+    const boss = h.host.listRoles().entries.find((r) => r.role.name === 'boss')!;
     expect(boss.source).toBe('builtin');
     expect(boss.overridesBuiltin).toBeUndefined();
     expect(boss.errors).toEqual([]);
@@ -156,7 +159,7 @@ describe('AxonHost —— 分身创建', () => {
     await h.host.prompt(boss.path, 'x');
 
     // 换表之后，旧实例照常能继续跑（引擎/白名单都已快照在 spawn 时）
-    h.host.updateRoles([]);
+    h.host.updateRoles([], []);
     h.setResponses([fauxAssistantMessage('次答')]);
     await expect(h.host.prompt(boss.path, 'y')).resolves.toBeUndefined();
     expect(h.host.list().find((s) => s.path === boss.path)?.status).toBe('done');
