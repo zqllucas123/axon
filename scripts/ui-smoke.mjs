@@ -38,6 +38,11 @@ if (launch) {
         ELECTRON_RUN_AS_NODE: undefined, // 宿主（kalo）可能注入，必须剥掉
         ELECTRON_ENABLE_LOGGING: '1',
         AXON_ROLES_DIR: rolesDir,
+        // 冒烟钩子：脚本化回复永不耗尽 + 每轮固定成本 0.05（软线 0.048 / 硬线 0.06），
+        // 恰好两轮 prompt 走完 warning → frozen 两段 UI。
+        AXON_SMOKE_SCRIPT: '1',
+        AXON_SMOKE_BUDGET_COST: '0.05',
+        AXON_SMOKE_BUDGET_HARD: '0.06',
       },
     },
   );
@@ -168,6 +173,39 @@ try {
   }
   log(gone, '删除后 DOM 回落（清理成功）');
   if (!found || !gone) exit(1);
+
+  // ── 5. 预算熔断（M3 切片 6）：AI-agent prompt×2 走完 warning → frozen
+  const spawned = await evalJs(
+    `window.axon.invoke('agent.spawn', { role: 'blank', parent: '/root' }).then(r => r.path)`,
+  );
+  if (!spawned) {
+    log(false, '冒烟 Agent 创建失败');
+    exit(1);
+  }
+  log(true, `冒烟 Agent 已创建（${spawned}）`);
+
+  await evalJs(`window.axon.invoke('agent.prompt', { path: '${spawned}', text: '第一轮' })`);
+  let warned = false;
+  for (let i = 0; i < 40; i++) {
+    warned = await evalJs(`!!document.querySelector('.budget.warning')`);
+    if (warned) break;
+    await new Promise((r) => setTimeout(r, 250));
+  }
+  log(warned, '第一轮 prompt 后出现预算警告 banner（budget.warning → React 重渲染）');
+  if (!warned) exit(1);
+
+  await evalJs(`window.axon.invoke('agent.prompt', { path: '${spawned}', text: '第二轮' })`);
+  let frozen = false;
+  for (let i = 0; i < 40; i++) {
+    frozen = await evalJs(
+      `!!document.querySelector('.budget.frozen') && document.querySelector('footer input')?.disabled === true`,
+    );
+    if (frozen) break;
+    await new Promise((r) => setTimeout(r, 250));
+  }
+  log(frozen, '第二轮 prompt 后预算冻结：banner 变红 + 输入框禁用（budget.frozen → React 重渲染）');
+  if (!frozen) exit(1);
+
   exit(0);
 } catch (err) {
   console.error('冒烟异常:', err);

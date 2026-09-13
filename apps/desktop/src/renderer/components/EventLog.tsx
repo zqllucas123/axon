@@ -7,7 +7,7 @@ import { useEffect, useRef } from 'react';
 export interface LogLine {
   at: string;
   text: string;
-  cls?: 't' | 'e' | 'k';
+  cls?: 't' | 'e' | 'k' | 'w';
 }
 
 export function EventLog({ lines }: { lines: LogLine[] }) {

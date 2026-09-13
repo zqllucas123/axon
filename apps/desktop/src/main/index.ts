@@ -23,7 +23,7 @@ import {
   type RequestEnvelope,
   type ResponseEnvelope,
 } from '@axon/protocol';
-import { createFauxSource } from '@axon/kernel';
+import { createFauxSource, fauxAssistantMessage, scriptedSource, withTurnCost, type ModelSource } from '@axon/kernel';
 import { AxonHost } from './host.ts';
 import { ALL_ROLES } from './roles.ts';
 import { RoleBridge } from './role-bridge.ts';
@@ -50,9 +50,32 @@ async function createHost(): Promise<AxonHost> {
   const source = await createFauxSource({ provider: 'axon-dev' });
   source.setResponses([]);
 
+  // ── 冒烟钩子（只有 ui-smoke 通过 env 打开，生产路径不受影响）──
+  // AXON_SMOKE_SCRIPT：任何 user 文本都得到脚本化答复。faux 的响应队列是
+  // 「每条消费一个」（pi-ai providers/faux.js:337 shift），普通模式几轮就空；
+  // scriptedSource 按文本路由永不耗尽，冒烟可以连发多轮。
+  let modelSource: ModelSource = source;
+  if (process.env.AXON_SMOKE_SCRIPT) {
+    modelSource = scriptedSource(
+      source,
+      {},
+      (text) => fauxAssistantMessage(`${text}（脚本答复）`),
+    );
+  }
+  // AXON_SMOKE_BUDGET_COST / _HARD：每轮注入固定成本 + 硬线阈值，
+  // 供 ui-smoke 驱动预算熔断的 warning→frozen 两段 UI。
+  if (process.env.AXON_SMOKE_BUDGET_COST) {
+    const cost = Number(process.env.AXON_SMOKE_BUDGET_COST);
+    modelSource = withTurnCost(modelSource, () => cost);
+  }
+  const budget = process.env.AXON_SMOKE_BUDGET_HARD
+    ? { hardUsd: Number(process.env.AXON_SMOKE_BUDGET_HARD) }
+    : undefined;
+
   return new AxonHost({
-    modelSource: source,
+    modelSource,
     roles: ALL_ROLES,
+    budget,
     emit: (event, payload, sourcePath) => {
       // 窗口可能已关闭（用户退出时仍有在途事件），静默丢弃。
       if (!win || win.isDestroyed()) return;

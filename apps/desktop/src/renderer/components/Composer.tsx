@@ -1,5 +1,6 @@
 /**
  * 输入条 —— 发消息 / 中断 / 删除选中子树。
+ * disabled（预算冻结）时输入与发送被禁；中断仍可用——用户可以停掉在跑的任务。
  */
 
 import { useState } from 'react';
@@ -9,14 +10,23 @@ export interface ComposerProps {
   onInterrupt: () => void;
   onRemove: () => void;
   canRemove: boolean;
+  disabled?: boolean;
+  disabledReason?: string;
 }
 
-export function Composer({ onSend, onInterrupt, onRemove, canRemove }: ComposerProps) {
+export function Composer({
+  onSend,
+  onInterrupt,
+  onRemove,
+  canRemove,
+  disabled = false,
+  disabledReason,
+}: ComposerProps) {
   const [text, setText] = useState('');
 
   const submit = () => {
     const t = text.trim();
-    if (!t) return;
+    if (!t || disabled) return;
     setText('');
     onSend(t);
   };
@@ -25,14 +35,15 @@ export function Composer({ onSend, onInterrupt, onRemove, canRemove }: ComposerP
     <footer>
       <input
         value={text}
-        placeholder="给选中的 Agent 发消息…"
+        disabled={disabled}
+        placeholder={disabled ? disabledReason : '给选中的 Agent 发消息…'}
         autoComplete="off"
         onChange={(e) => setText(e.target.value)}
         onKeyDown={(e) => {
           if (e.key === 'Enter') submit();
         }}
       />
-      <button onClick={submit}>发送</button>
+      <button onClick={submit} disabled={disabled}>发送</button>
       <button onClick={onInterrupt}>中断</button>
       {canRemove && (
         <button

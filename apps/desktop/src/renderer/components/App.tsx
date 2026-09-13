@@ -12,6 +12,7 @@ import type {
   AgentSnapshot,
   RoleEntry,
   RoleIssue,
+  UsageTotals,
 } from '@axon/protocol';
 import { RolePanel } from './RolePanel.tsx';
 import { AgentTree } from './AgentTree.tsx';
@@ -27,6 +28,15 @@ interface EditorState {
   editing?: string;
 }
 
+/** 预算档位（M3 §4.4）：主进程事件驱动，这里只做呈现。 */
+interface BudgetView {
+  state: 'ok' | 'warning' | 'frozen';
+  usage?: UsageTotals;
+  limitUsd?: number;
+}
+
+const usd = (n?: number) => (n === undefined ? '?' : n.toFixed(2));
+
 export function App() {
   const [roles, setRoles] = useState<RoleEntry[]>([]);
   const [issues, setIssues] = useState<RoleIssue[]>([]);
@@ -34,6 +44,7 @@ export function App() {
   const [selected, setSelected] = useState<AgentPath>('/root');
   const [log, setLog] = useState<LogLine[]>([]);
   const [editor, setEditor] = useState<EditorState | null>(null);
+  const [budget, setBudget] = useState<BudgetView>({ state: 'ok' });
 
   const pushLog = useCallback((text: string, cls?: LogLine['cls']) => {
     const at = new Date().toLocaleTimeString('zh-CN', { hour12: false });
@@ -89,6 +100,14 @@ export function App() {
           't',
         );
         void reloadAgents();
+      }),
+      window.axon.subscribe('budget.warning', ({ usage, limitUsd }) => {
+        setBudget({ state: 'warning', usage, limitUsd });
+        pushLog(`⚠ 预算警告：已用 $${usd(usage.costUsd)} / 上限 $${usd(limitUsd)}`, 'w');
+      }),
+      window.axon.subscribe('budget.frozen', ({ usage, limitUsd }) => {
+        setBudget({ state: 'frozen', usage, limitUsd });
+        pushLog(`✗ 预算冻结：已用 $${usd(usage.costUsd)} / 上限 $${usd(limitUsd)}，新任务被拒绝`, 'e');
       }),
     ];
     pushLog('Axon 已启动。点击左侧角色创建分身。', 'k');
@@ -191,12 +210,21 @@ export function App() {
         />
       </aside>
       <main>
+        {budget.state !== 'ok' && (
+          <div className={`budget ${budget.state}`} data-smoke="budget-banner">
+            {budget.state === 'frozen'
+              ? `预算已冻结（已用 $${usd(budget.usage?.costUsd)} ／上限 $${usd(budget.limitUsd)}）：新分身与新任务被拒绝，在跑任务不受影响。`
+              : `预算警告（已用 $${usd(budget.usage?.costUsd)} ／上限 $${usd(budget.limitUsd)}）：接近熔断线，注意成本。`}
+          </div>
+        )}
         <EventLog lines={log} />
         <Composer
           onSend={(text) => void send(text)}
           onInterrupt={() => void interrupt()}
           onRemove={() => void removeAgent()}
           canRemove={selected !== '/root'}
+          disabled={budget.state === 'frozen'}
+          disabledReason="预算已冻结"
         />
       </main>
       {editor && (

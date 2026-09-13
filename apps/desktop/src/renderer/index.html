@@ -81,6 +81,11 @@
 
       /* ── 主区 ── */
       main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+      .budget {
+        padding: 7px 14px; font-size: 12px; border-bottom: 1px solid var(--line);
+      }
+      .budget.warning { background: #2e2817; color: var(--warn); }
+      .budget.frozen { background: #301a1d; color: var(--err); }
       .log {
         flex: 1; overflow: auto; padding: 14px;
         font-family: ui-monospace, monospace; font-size: 12px;
@@ -90,6 +95,7 @@
       .log .t { color: var(--dim); }
       .log .e { color: var(--err); }
       .log .k { color: var(--accent); }
+      .log .w { color: var(--warn); }
       footer { border-top: 1px solid var(--line); padding: 10px 14px; display: flex; gap: 8px; }
       footer button.danger { color: var(--err); }
 
@@ -106,6 +112,9 @@
         padding: 7px 14px; border-radius: 6px; cursor: pointer; font: inherit;
       }
       button:hover { border-color: var(--accent); }
+      button:disabled, input:disabled {
+        opacity: .5; cursor: not-allowed; border-color: var(--line);
+      }
       button.mini { padding: 1px 7px; font-size: 11px; }
 
       /* ── 轻提示 ── */
