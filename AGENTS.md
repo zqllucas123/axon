@@ -21,7 +21,7 @@
 
 ## 2. 工作流（用户拍板，2026-09-13）
 
-- **按里程碑推进**：总览见 03 §1，当前只有 M0/M1 完成，下一个是 M2 角色系统
+- **按里程碑推进**：总览见 03 §1，M0~M3 已完成，下一个是 M4 协作动作与落账
 - **每个里程碑开工前**，先在 `docs/milestones/M<id>-<短名>.md` 写「方案设计 + 实施计划」（模板在 03 §4），经用户过目后才许写实现代码
 - **每个里程碑收尾**过质量门（§3）后才算完成，且文档同步（03 §1 状态列、01 §1 进度表）
 
@@ -30,8 +30,9 @@
 ```bash
 bun run guard        # 6 项：包管理约束 / pi import 白名单 / electron 落地等
 bun run typecheck    # root + renderer 双 tsc
-bun run test         # 现有 83 例不能回退
+bun run test         # 现有 162 例不能回退
 bun run build:desktop && bun run verify-lazy   # 打包保险丝（pi 懒加载不能被提升）
+bun run ui-smoke     # UI 端到端冒烟（CDP 五幕）
 bun run dev          # 手工过一遍本里程碑的用户可见能力
 ```
 
@@ -50,6 +51,8 @@ bun run dev          # 手工过一遍本里程碑的用户可见能力
 - ForkMode 默认 `none`（三产品独立收敛的结论）；`all` 是显式逃生门，内置角色仅 Axon5 用
 - 能力 = **工具白名单 × 审批档**双正交；角色只能减能不能越权
 - 协作动作**枚举化 + 落账**（consult/fork/delegate/handoff），不做自由消息总线；不设特权 planning/review 角色
+- **编排工具只能由 host/orchestrator 发放，tools universe 必须由 roles whitelist 解出**（M3 不变量：六工具 per-spawn 双闭包 bind selfPath，禁止自由传目标）
+- 并发闸门语义：gate 只数 running；waiting = parked（排队）或 suspended（父等后代，退位让额）；promote 免检；wait 仅限后代 ⇒ 死锁结构性不可能
 - pi 包 **ESM-only**：主进程/preload 必须输出 `.mjs`；esbuild 必须 external pi 相关包（风险 B 保险丝）
 - `ELECTRON_RUN_AS_NODE` 可能被宿主（kalo）注入，electron 启动一律 `env -u ELECTRON_RUN_AS_NODE`（dev 脚本已含）
 - 版本锁定：pi 0.85.1 / electron 33.2.1 / esbuild 0.24.2；升级 = 先跑 contract test + 对照 02 §4 风险

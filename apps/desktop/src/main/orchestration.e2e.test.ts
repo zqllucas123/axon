@@ -264,3 +264,33 @@ describe('M3 E2E 幕 2：gate=1 父等两子，退位补位无死锁', () => {
     for (const e of events) expect(e.payload.error).toBeUndefined();
   });
 });
+
+// ── 幕 3：非法目标在真实引擎里的 struct 抛错 ─────────────────────────
+
+describe('M3 E2E 幕 3：非后代 wait 目标 → 工具抛错不掀翻整轮', () => {
+  it('父 wait 已存在的旁系 agent → tool 失败（ok:false），父轮继续走完收尾', async () => {
+    const { host, events } = await e2e({
+      routes: {
+        '做 X': (_ctx, i) => {
+          if (i === 0) return toolCallMsg('agent_wait', { ids: ['/root/blank-1'] });
+          return fauxAssistantMessage('目标非法，换路收尾');
+        },
+      },
+    });
+
+    host.spawn({ role: 'blank' }); // 旁系（/root 的另一子）——存在但非 planner 的后代
+    const planner = host.spawn({ role: 'planner' });
+    await host.requestRun(planner.path, '做 X');
+    await waitFor(() => host.get(planner.path)?.status === 'done');
+
+    // 工具失败已落账：requireTarget 的「只能等待自己的后代」struct 抛错。
+    const toolEnd = events.find((e) => e.event === 'agent.tool.end' && e.source === planner.path);
+    expect(toolEnd?.payload.ok).toBe(false);
+    const errored = (toolEnd?.payload.result as { content?: { text?: string }[] } | undefined)?.content?.[0]?.text ?? '';
+    expect(errored).toContain('只能等待自己的后代');
+
+    // 父未被误挂起（never waiting），且整轮照常收尾。
+    expect(statusRail(events, planner.path)).toEqual(['running', 'done']);
+    expect(assistantTexts(host, planner.path).at(-1)).toBe('目标非法，换路收尾');
+  });
+});

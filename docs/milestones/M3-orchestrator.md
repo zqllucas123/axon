@@ -1,6 +1,6 @@
 # M3 编排内核：方案设计与实施计划
 
-> 状态：实施中（2026-09-13 拍板通过，按 §〇 决策执行）
+> 状态：**已完成**（2026-09-13 拍板 → 同日完工；切片 1–8 ✅，验收清单全勾）
 > 对应架构：01 §6.5（Orchestrator）+ 01 §8（预算熔断遗留项）｜ 依赖里程碑：M2 ✅
 > 前置条件：无 API key 要求（faux 驱动全链路）
 
@@ -183,23 +183,25 @@ root: requestRun('/root/planner-1', '做 X')
       └ toolResult{id, role} 回灌 → 模型继续
   └ 模型(factory call#2) 输出 toolCall agent_wait{ids:['/root/planner-1/developer-1']}
       └ agent_wait.execute → beginWait([child])：
-          setStatus(planner, 'waiting')        // 父退位，额度-1
-          把「父 → 子」边挂进 wait 图
-      └ generator 轮询子快照（500ms），子终态：
-          └ host: 子 'done' → drain():
-              promote(planner)                  // waiting→running 免检（决策 #2）
-              wait 图摘边，agent_wait.resolve({statuses:[{id:'developer-1',status:'done'}]})
+          · 已在终态的目标直接剔除（不挂起就 resolve）——子先跑完则这一步是 no-op
+          · 有未终态目标：setStatus(planner, 'waiting')（父退位，额度-1）+ 挂 wait 图边 + Promise 挂起
+      └ 子 'done' → host drain()：
+            wait 图摘边 → agent_wait 的 Promise resolve({statuses:[{id,status:'done'}]})
+            planner 已无待等边 → promote(planner)（waiting→running 免检，决策 #2）
       └ toolResult 回灌 → 模型(final factory call) 输出总结文本
       └ turn_end → addUsage(+预算) → host.prompt 收敛：planner 'done'
 ```
 
-闸门满路径（gate=1，M3 测试重点）：
+闸门满路径（gate=1，E2E 幕 2 实测同款）：
 
 ```
-planner running(占满) → spawn 2 子：child1 running…child2 gate 满 → parked(waiting)
+planner running(独占唯一额度) → spawn 2 子：child1 parked(waiting)、child2 parked(waiting)
+（父在跑，两位都挤不进来——不是 "child1 running"，额度被父占着）
 → planner agent_wait([child1, child2]) → 退位 suspended(waiting)，额度空出
-→ drain(): 先 promote 出队 child2（队首填额）→ child2 running
-→ 子终态逐个：先规划其父（无待等边后）promote(planner) → planner 续跑
+→ drain(): FIFO 队首填额 → promote child1 → running → done
+→ drain(): 队首续填 → promote child2 → running → done
+→ 子全终态 → drain 解挂父 → promote(planner) → planner 续跑收尾
+（不再空额时新 spawn 继续出队补位）
 ```
 
 ## 六、边界情况与风险
@@ -218,7 +220,7 @@ planner running(占满) → spawn 2 子：child1 running…child2 gate 满 → p
 
 ## 七、实施计划（切片，每步可独立验证）
 
-> **进度（2026-09-13）**：切片 1–7 ✅，收尾/验收待做。
+> **进度（2026-09-13）**：切片 1–8 全部 ✅，M3 已完工。
 
 - [x] **切片 1 ✅**（kernel）：`budget.ts`（BudgetGuard 阀值跃迁一次性）+ registry 闸门重构（running-only 计数 / idle→waiting / `promote()` 免检）+ fork 后代校验（`assertWaitable` 限后代 + `isDescendantOf`）。单测 75 例全绿。
 - [x] **切片 2 ✅**（kernel）：`engine.steer()` 进 AxonEngine 五方法之一（pi `Agent.steer` 的透传，0.85.1 dist 已确认「injected after the current assistant turn finishes」）。契约测试改用 `createAxonEngine` + steer 时序（9 例）。
@@ -232,8 +234,8 @@ planner running(占满) → spawn 2 子：child1 running…child2 gate 满 → p
     2. `agent_resume` **不 await** requestRun（fire 语义）：额满时目标进 parked 排队、Promise 直到跑完才 resolve，工具若 await = 父占着额度等一个没额度的子，`maxConcurrent=1` 时结构性死锁。等结果必须走 agent_wait（退位让额）。
 - [x] **切片 5 ✅**（roles.ts + host 装配）：七个内置角色全部白名单 + 六件套（决策 #1 全员全件套）；host `spawn` 现造并 bind 工具集——`toolsFor` = 宇宙叶子工具 + 白名单裁剪后的编排工具；`steer()` / `driverFor()` / `orchestrationToolsFor(path, allowSet)` 公开面。集成测试 6 例（真实 host × 真工具：agent spawn 子 → 子跑完 → wait 拿终态 → check 摘要 → resume 拉起 → 冻结直达 agent 工具拒 spawn）。
 - [x] **切片 6 ✅**（UI 预算条）：App 订阅 budget.warning / budget.frozen → banner（黄→红）+ 日志；frozen 禁用 Composer 输入与发送（中断保留）；冒烟钩子 `AXON_SMOKE_SCRIPT` / `AXON_SMOKE_BUDGET_COST` / `_HARD`（只冒烟生效）；ui-smoke 新增第 5 幕「两轮 prompt 走完 warning→frozen」（banner + 输入框禁用断言）。
-- [x] **切片 7 ✅** E2E 集成测试（`main/orchestration.e2e.test.ts`，真实 pi 引擎 × AxonHost）：幕 1 三幕 happy path（spawn→wait→resume→wait→收尾，工具参数从 LLM 转录 toolResult 文本解析，回复门钉死 wait 挂起点）；幕 2 gate=1 死锁免检（父占唯一额度 spawn 双子全 parked → 父退位 → FIFO 串行补位 → 父唤醒收尾，铁证 d1 done 事件先于 d2 running 事件）。配套升级 `scriptedSource` 路由工厂签名为 `(context, callIndex)`（读转录 + 同文本多轮序列）。
-- [ ] **切片 8** 收尾：`bun run check` 全绿 + 文档同步（§十）+ 语义化 commit
+- [x] **切片 7 ✅** E2E 集成测试（`main/orchestration.e2e.test.ts`，真实 pi 引擎 × AxonHost，3 幕）：幕 1 三幕 happy path（spawn→wait→resume→wait→收尾，工具参数从 LLM 转录 toolResult 文本解析，回复门钉死 wait 挂起点）；幕 2 gate=1 死锁免检（父占唯一额度 spawn 双子全 parked → 父退位 → FIFO 串行补位 → 父唤醒收尾，铁证 d1 done 事件先于 d2 running 事件）；幕 3 非后代 wait 在真实引擎里 struct 抛错不掀翻整轮（ok:false 落账 + 父照常收尾）。配套升级 `scriptedSource` 路由工厂签名为 `(context, callIndex)`（读转录 + 同文本多轮序列）。
+- [x] **切片 8 ✅** 收尾：`bun run check` 全绿（typecheck + build + 懒加载保险丝）；**162 测试全绿**（预算 5 / registry 26 / fork 44 / contract 9 / host 18 / role-loader 21 / role-bridge 7 / orchestration 10 / orchestrator 13 / host×角色集成 6 / E2E 3）；`ui-smoke` 五幕通过；文档同步（§十）完成。
 
 ## 八、测试策略
 
@@ -245,22 +247,23 @@ planner running(占满) → spawn 2 子：child1 running…child2 gate 满 → p
 
 ## 九、验收标准
 
-- [ ] 6 个编排工具在 faux 下真实可用：模型（脚本）spawn 子 Agent → 子跑完 → 父等到结果继续，全事件流正确
-- [ ] gate=1 下「父等 2 子」完跑（无死锁、无状态漂移、waiting 状态正确出现在 UI 快照）
-- [ ] 预算熔断：记录到 80% 发 warning、100% 发 frozen、frozen 拒绝新 spawn/prompt、在跑不受影响
-- [ ] 死锁不可能性：非后代 wait 全部被 struct 抛错（4 例单测外，集成随一条）
-- [ ] watchdog：无活动 5min 的 running Agent 被 interrupt（测试用缩时 5s；断言「按空闲而非总时长」：拍拍即归零）
-- [ ] `bun run check` 全绿，**114 例以上**
-- [ ] `bun run ui-smoke` 通过
-- [ ] 文档同步（§十）+ M3 状态收尾
+- [x] 6 个编排工具在 faux 下真实可用：模型（脚本）spawn 子 Agent → 子跑完 → 父等到结果继续，全事件流正确 —— E2E 幕 1（工具四次调用全落账：agent / wait / resume / wait）
+- [x] gate=1 下「父等 2 子」完跑（无死锁、无状态漂移、waiting 状态正确出现在 UI 快照）—— E2E 幕 2（子 parked 先于 running、串行 FIFO 铁证）
+- [x] 预算熔断：记录到 80% 发 warning、100% 发 frozen、frozen 拒绝新 spawn/prompt、在跑不受影响 —— budget 单测 5 例 + orchestration 单测 + ui-smoke 第 5 幕实测
+- [x] 死锁不可能性：非后代 wait 全部被 struct 抛错 —— orchestrator 单测 13 例（含 4 例后代校验）+ E2E 幕 3（真实引擎 `只能等待自己的后代`）
+- [x] watchdog：无活动 5min 的 running Agent 被 interrupt（测试用缩时，断言「按空闲而非总时长」：拍拍即归零）—— orchestration 单测；E2E 全链路 500ms 级跑完无误伤
+- [x] `bun run check` 全绿，**162 例**（远超 114 基线）
+- [x] `bun run ui-smoke` 通过（五幕，含预算 warning→frozen）
+- [x] 文档同步（§十）+ M3 状态收尾（本文件 + 01/03/AGENTS.md）
 
 ## 十、文档同步（完工后）
 
-- `docs/03-实施框架与里程碑.md`：§1 表 M3 → 已完成+证据；§2 完成区补 M3 条目；§3 规划区删除 M3 段
-- `docs/01-架构决策-方案B.md`：§1 表格 6.5 行 → ✅（含证据）；§8 风险表「预算熔断待 6.5」→ 🔒；§9「接下来」M3 移除
-- `docs/milestones/M3-orchestrator.md`：状态改已完成；§四/五与实际代码同步（如有出入）；验收清单打钩
-- `AGENTS.md`：不变量 §5 补充「编排工具只能由 host/orchestrator 发放；tools universe 必须由 roles whitelist 解出」
+- [x] `docs/03-实施框架与里程碑.md`：§1 表 M3 → 已完成+证据；§2 完成区补 M3 条目；§3 规划区删除 M3 段
+- [x] `docs/01-架构决策-方案B.md`：§1 表格 6.5 行 → ✅（含证据）；§8 风险表「预算熔断待 6.5」→ 🔒；§9「接下来」M3 移除
+- [x] `docs/milestones/M3-orchestrator.md`：状态改已完成；§五与实际代码同步（beginWait 终态直给 / gate=1 两子同 parked / FIFO 补位序）；验收清单打钩
+- [x] `AGENTS.md`：不变量 §5 补充「编排工具只能由 host/orchestrator 发放；tools universe 必须由 roles whitelist 解出」
 
 ## 十一、里程碑决策记录
 
 - **开工拍板（2026-09-13）**：M3 是「自主派发（工具驱动）」的第一个里程碑——手动指派（用户在 UI spawn）M2 已交付；01 §7「两者都要、先手动」因此落账：手动 ✅（M2），自主 ✅（M3）。§〇 五条决策全部拍板：编排工具全员全件套（用户否决推荐矩阵，取最大自由度，风险交预算熔断抢底）、闸门重构、wait 限后代、熔断不杀在跑、超时不杀子 + idle 看门狗。
+- **完工（2026-09-13）**：8 切片全绿，162 测试 + ui-smoke 五幕。三处「设计 vs 实测」出入以实测胜出并回写入 §五：beginWait 对已终态目标直接 resolve（不挂起）；gate=1 时 spawn 与父同轮则子全 parked（不是 child1 直跑）；wait 无 500ms generator 轮询（Promise + drain 摘边）。另有两处代码层 BUG 在 E2E 里被逼出：子路径解析正则吞掉全角括号（`(\S+)` → `(\S+?)(?:（|$)`）；`scriptedSource` 路由工厂无上下文参数（升级 `(context, callIndex)`）。
