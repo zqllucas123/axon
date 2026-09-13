@@ -48,6 +48,15 @@ export interface AxonEngine {
   subscribe(listener: (event: AgentEvent) => void | Promise<void>): () => void;
   /** 当前 transcript 快照（拷贝）。 */
   messages(): MessageLike[];
+  /**
+   * 投递指导消息：本轮结束后注入，下一轮首条生效（M3 决策最重上的
+   * message 工具的通道）。
+   *
+   * pi 侧的承载：`Agent.steer()`（`dist/agent.d.ts:84`「injected after the
+   * current assistant turn finishes」）；agent-loop 在轮间（`agent-loop.js:103`）
+   * 拉取 steering 队列。对不在跑的 Agent 是「下一轮开始时生效」。
+   */
+  steer(text: string): void;
 }
 
 /** 创建一个受 Axon 管理的 pi Agent 所需的最小参数。 */
@@ -126,6 +135,12 @@ export function wrapEngine(agent: Agent): AxonEngine {
     abort: () => agent.abort(),
     subscribe: (listener) => agent.subscribe(listener),
     messages: () => snapshotMessages(agent),
+    steer: (text) =>
+      agent.steer({
+        role: 'user',
+        content: [{ type: 'text', text }],
+        timestamp: Date.now(),
+      } as AgentMessage),
   };
 }
 

@@ -7,9 +7,11 @@ import {
   type MessageLike,
 } from '@axon/protocol';
 import {
+  assertWaitable,
   forkMessages,
   groupIntoRounds,
   intersectTools,
+  isDescendantOf,
   repairMessages,
 } from './fork.ts';
 
@@ -427,5 +429,48 @@ describe('intersectTools —— 角色只能减能', () => {
     const parent = ['read', 'edit'];
     const got = intersectTools(parent, undefined);
     expect(got).not.toBe(parent);
+  });
+});
+
+describe('assertWaitable —— M3 收紧为「仅后代」', () => {
+  const exists = () => true;
+
+  it('等自己的后代合法', () => {
+    expect(() =>
+      assertWaitable('/root/planner-1', '/root/planner-1/developer-1', exists),
+    ).not.toThrow();
+  });
+
+  it('等自己抛错', () => {
+    expect(() => assertWaitable('/root/a', '/root/a', exists)).toThrow(/不能等待自己/);
+  });
+
+  it('等祖先抛错（祖先等我是死锁）', () => {
+    expect(() =>
+      assertWaitable('/root/planner-1/developer-1', '/root/planner-1', exists),
+    ).toThrow(/只能等待自己的后代/);
+  });
+
+  it('等兄弟/旁支抛错（横向等边是环的入口）', () => {
+    expect(() =>
+      assertWaitable('/root/planner-1', '/root/developer-9', exists),
+    ).toThrow(/只能等待自己的后代/);
+  });
+
+  it('等不存在的目标抛错', () => {
+    expect(() =>
+      assertWaitable('/root/a', '/root/a/ghost-1', () => false),
+    ).toThrow(/等待目标不存在/);
+  });
+});
+
+describe('isDescendantOf —— 边界', () => {
+  it('前缀相似不误判', () => {
+    expect(isDescendantOf('/root/a', '/root/ab-1')).toBe(false);
+    expect(isDescendantOf('/root/a', '/root/a-1')).toBe(false); // 兄弟
+    expect(isDescendantOf('/root/a', '/root/a/b-1')).toBe(true);
+  });
+  it('自身不算是后代', () => {
+    expect(isDescendantOf('/root/a', '/root/a')).toBe(false);
   });
 });

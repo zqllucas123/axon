@@ -160,13 +160,35 @@ describe('AgentRegistry —— 并发闸门', () => {
     expect(() => r.setStatus(c.path, 'running')).toThrow(/并发已达上限/);
   });
 
-  it('闸门拦的是新占额度，waiting→running 不受影响', () => {
+  it('闸门拦的是新占额度；waiting→running 走 promote 免检（M3 语义）', () => {
     const r = mk({ maxConcurrent: 1 });
     const a = r.register({ role: 'a', displayName: 'A' });
+    const b = r.register({ role: 'b', displayName: 'B' });
     r.setStatus(a.path, 'running');
-    r.setStatus(a.path, 'waiting');
-    // 已经占着额度了，回到 running 不是新增占用
-    expect(() => r.setStatus(a.path, 'running')).not.toThrow();
+    r.setStatus(a.path, 'waiting'); // 退位让额
+    expect(r.activeCount()).toBe(0); // waiting 不占额度
+    r.setStatus(b.path, 'running'); // b 拿走了额度
+    // a 的提升走免检通道——额度本来自它等待的对象（kalo resume 免信号量同理）
+    expect(() => r.promote(a.path)).not.toThrow();
+    expect(r.snapshot(a.path)?.status).toBe('running');
+  });
+
+  it('parked（idle→waiting）排队本身不受闸门阻挡', () => {
+    const r = mk({ maxConcurrent: 1 });
+    const a = r.register({ role: 'a', displayName: 'A' });
+    const b = r.register({ role: 'b', displayName: 'B' });
+    r.setStatus(a.path, 'running'); // 满员
+    expect(() => r.setStatus(b.path, 'waiting')).not.toThrow(); // 排队成功
+    expect(r.activeCount()).toBe(1); // 只有 running 在燃烧额度
+    expect(r.snapshot(b.path)?.status).toBe('waiting');
+  });
+
+  it('promote 只接受 waiting 状态的 Agent', () => {
+    const r = mk();
+    const a = r.register({ role: 'a', displayName: 'A' });
+    expect(() => r.promote(a.path)).toThrow(/只有 waiting/);
+    r.setStatus(a.path, 'running');
+    expect(() => r.promote(a.path)).toThrow(/只有 waiting/);
   });
 
   it('释放额度后可再启动', () => {

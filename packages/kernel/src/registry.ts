@@ -39,9 +39,11 @@ import type { AxonEngine } from './engine.ts';
  *    Agent 完成后仍可被重新唤起，不必重建实例（kalo 的 `reviveChild` 同理）。
  *  - `interrupted` 也能回 `idle`，否则用户一按停止，这个 Agent 就废了。
  *  - 任何状态都能进 `failed`：错误可以在任何时刻发生，包括 idle 时的外部崩溃。
+ *  - `idle` 可以进 `waiting`（M3 新增）：并发额度满时新任务先排队（parked），
+ *    等有额度再由 `promote()` 免检提升——排队本身不失败、不丢任务。
  */
 const TRANSITIONS: Record<AgentStatus, readonly AgentStatus[]> = {
-  idle: ['running', 'failed'],
+  idle: ['running', 'waiting', 'failed'],
   running: ['waiting', 'done', 'failed', 'interrupted'],
   waiting: ['running', 'done', 'failed', 'interrupted'],
   done: ['idle', 'failed'],
@@ -132,12 +134,18 @@ export class AgentRegistry {
     return node ? structuredClone(node.snapshot) : null;
   }
 
-  /** 当前占用并发额度的 Agent 数（running + waiting）。 */
+  /**
+   * 当前占用并发额度的 Agent 数。
+   *
+   * M3 语义（决策 #2 拍板）：**只有 running 占额度**。
+   * waiting 分两种，都不该占额——parked（排队等额度）与 suspended
+   * （父 Agent 在等后代，主动退位让额）。占额语义错位会让「父等子」
+   * 与并发上限交织出结构性死锁（父占 1 + 6 子 > 6）。
+   */
   activeCount(): number {
     let n = 0;
     for (const node of this.nodes.values()) {
-      const s = node.snapshot.status;
-      if (s === 'running' || s === 'waiting') n++;
+      if (node.snapshot.status === 'running') n++;
     }
     return n;
   }
@@ -234,11 +242,12 @@ export class AgentRegistry {
       throw new Error(`非法状态跃迁: ${path} ${current} → ${next}`);
     }
 
-    // 并发闸门：只在「新占额度」时检查。waiting→running 不增加占用，放行。
-    const wasActive = current === 'running' || current === 'waiting';
-    const willActive = next === 'running' || next === 'waiting';
-    if (!wasActive && willActive && !this.canRun()) {
-      throw new Error(`并发已达上限 ${this.maxConcurrent}，${path} 无法进入 ${next}`);
+    // 并发闸门（M3 语义）：只在「进入 running 且此前不在 running」时检查。
+    // waiting 不占额；waiting→running 一律走 promote()（免检），不走这里。
+    const wasRunning = current === 'running';
+    const willRun = next === 'running';
+    if (!wasRunning && willRun && !this.canRun()) {
+      throw new Error(`并发已达上限 ${this.maxConcurrent}，${path} 无法进入 running`);
     }
 
     node.snapshot.status = next;
@@ -252,6 +261,25 @@ export class AgentRegistry {
 
   canRun(): boolean {
     return this.maxConcurrent === 0 || this.activeCount() < this.maxConcurrent;
+  }
+
+  /**
+   * 免检提升：waiting → running，不查并发闸门（M3 决策 #2）。
+   *
+   * 免检的正当性来自两句不变式：
+   *  - suspended 父：额度就是「它等待的子刚结束」腾出来的，理应还给它（kalo
+   *    「resume 跳过信号量避免死锁」的同构语义）；
+   *  - parked 排队：只有 `canRun()` 为真时 host 才会从队首调它。
+   */
+  promote(path: AgentPath): AgentSnapshot {
+    const node = this.nodes.get(path);
+    if (!node) throw new Error(`Agent 不存在: ${path}`);
+    if (node.snapshot.status !== 'waiting') {
+      throw new Error(`只有 waiting 状态的 Agent 可以 promote: ${path} 当前 ${node.snapshot.status}`);
+    }
+    node.snapshot.status = 'running';
+    node.snapshot.updatedAt = this.now();
+    return structuredClone(node.snapshot);
   }
 
   /** 累加用量。父链同时累加，这样根节点天然是全局总账。 */

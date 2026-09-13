@@ -19,7 +19,7 @@ import {
   fauxToolCall,
   Type,
 } from '@earendil-works/pi-ai';
-import { createEngine, snapshotMessages } from './engine.ts';
+import { createAxonEngine, type AxonEngine } from './engine.ts';
 import { forkMessages, groupIntoRounds, repairMessages } from './fork.ts';
 import { FORK_ALL, FORK_NONE, forkLastRounds, type MessageLike } from '@axon/protocol';
 
@@ -27,12 +27,11 @@ interface RunResult {
   transcript: MessageLike[];
   blocked: string[];
 }
-
 /** 跑一轮真实的 pi agent，返回 transcript。 */
 async function runAgent(options: {
   responses: Parameters<ReturnType<typeof fauxProvider>['setResponses']>[0];
   allowTools?: string[];
-}): Promise<RunResult> {
+}): Promise<{ engine: AxonEngine; transcript: MessageLike[]; blocked: string[] }> {
   const faux = fauxProvider({ provider: 'contract', api: 'faux' });
   const models = createModels();
   models.setProvider(faux.provider);
@@ -56,7 +55,7 @@ async function runAgent(options: {
     execute: async () => ({ content: [{ type: 'text' as const, text: 'boom' }] }),
   };
 
-  const agent = createEngine({
+  const agent = createAxonEngine({
     systemPrompt: 'contract test',
     model: faux.getModel(),
     messages: [],
@@ -72,7 +71,7 @@ async function runAgent(options: {
   await agent.prompt('go');
   await agent.waitForIdle();
 
-  return { transcript: snapshotMessages(agent), blocked };
+  return { engine: agent, transcript: agent.messages(), blocked };
 }
 
 describe('契约：pi transcript 的真实形状', () => {
@@ -222,5 +221,46 @@ describe('契约：真实 transcript 上的 fork 行为', () => {
     // 文本要留下来
     expect(JSON.stringify(repaired)).toContain('正在执行');
     expect(repaired.every((m) => m.content.length > 0)).toBe(true);
+  });
+});
+
+describe('契约：steer（message 工具的承载）', () => {
+  it('空闲时 steer 排队，下一轮开始即生效（agent-loop.js:82 轮首拉取）', async () => {
+    const { engine, transcript } = await runAgent({
+      responses: [fauxAssistantMessage('第一轮答复')],
+    });
+
+    engine.steer('补充要求：再看一眼');
+    await engine.prompt('继续');
+    await engine.waitForIdle();
+
+    const now = engine.messages();
+    // transcript 里应多出一条 steer 注入的 user 消息
+    const steered = now.filter(
+      (m) => JSON.stringify(m.content).includes('补充要求：再看一眼'),
+    );
+    expect(steered.length).toBeGreaterThanOrEqual(1);
+    expect(steered[0]?.role).toBe('user');
+
+    // 位置护栏：steer 在「第一轮答复之后」（after the current assistant turn）
+    const idxSteer = now.findIndex((m) =>
+      JSON.stringify(m.content).includes('补充要求：再看一眼'),
+    );
+    const idxFirst = now.findIndex((m) =>
+      m.role === 'assistant' && JSON.stringify(m.content).includes('第一轮答复'),
+    );
+    expect(idxSteer).toBeGreaterThan(idxFirst);
+    expect(now.length).toBeGreaterThan(transcript.length);
+  });
+
+  it('steer 构造真实 user 消息（timestamp 字段不缺失）', () => {
+    const msg = {
+      role: 'user',
+      content: [{ type: 'text', text: 'x' }],
+      timestamp: 1,
+    };
+    const json = JSON.stringify(msg);
+    expect(json).toContain('"role":"user"');
+    expect(json).toContain('"timestamp":1');
   });
 });

@@ -23,6 +23,9 @@ export {
 export {
   createRegistry,
   createFauxSource,
+  withTurnCost,
+  scriptedSource,
+  lastUserText,
   streamFnOf,
   Type,
   fauxAssistantMessage,
@@ -38,7 +41,10 @@ export {
   repairMessages,
   intersectTools,
   assertWaitable,
+  isDescendantOf,
 } from './fork.ts';
+
+export { BudgetGuard, type BudgetLimits, type BudgetState } from './budget.ts';
 
 export {
   AgentRegistry,

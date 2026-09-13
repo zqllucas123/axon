@@ -17,8 +17,8 @@
  * 参见 `docs/02-调研补充与结论复核.md` §4 风险 B。
  */
 
-import { createModels } from '@earendil-works/pi-ai';
-import type { Model } from '@earendil-works/pi-ai';
+import { createModels, createAssistantMessageEventStream } from '@earendil-works/pi-ai';
+import type { AssistantMessage, AssistantMessageEvent, Model } from '@earendil-works/pi-ai';
 import type { StreamFn } from '@earendil-works/pi-agent-core';
 
 export type { Model };
@@ -89,4 +89,130 @@ export async function createFauxSource(options?: {
     streamFn: streamFnOf(registry),
     setResponses: (responses) => faux.setResponses(responses as never),
   };
+}
+
+/**
+ * 给 model source 的每一轮 LLM 调用注入成本 —— 测试预算熔断用的注水层。
+ *
+ * 为什么需要它：faux provider 的 `withUsageEstimate` 把 usage.cost **硬编码成全 0**
+ * （`pi-ai/dist/providers/faux.js:147`），不管模型定义里 cost 配多少都归零。
+ * 而 Axon 的预算熔断（M3）吃的正是 turn_end 的 `usage.cost.total`。
+ *
+ * 这一层包在流外：把 done 事件里的 assistant 消息 cost.total 改写成回调给的值。
+ * 回调拿到「流调用上下文」与调用序号 —— 既可按序号计价，也可用
+ * {@link lastUserText} 按最近一条 user 消息文本计价（多 Agent 交错调用时更稳）。
+ * 仅在测试/示例用；真 provider（M6）自带真实成本，不需要它。
+ */
+export function withTurnCost(
+  source: ModelSource,
+  costUsd: (context: unknown, turnIndex: number) => number,
+): ModelSource {
+  let turn = 0;
+  return {
+    model: source.model,
+    streamFn: async (model, context, options) => {
+      // source.streamFn 可能是 async（如 scriptedSource），必须 await 出真正的流。
+      // for-await 不会 await 裸 Promise——不 await 这里就是 TypeError。
+      const inner = await source.streamFn(model, context, options);
+      const outer = createAssistantMessageEventStream();
+      const usd = costUsd(context, turn);
+      turn += 1;
+      void (async () => {
+        let final: unknown;
+        try {
+          for await (const ev of inner) {
+            if (ev.type === 'done') {
+              // agent-loop 的 done 分支用 `response.result()` 而非事件里的
+              // message（agent-loop.js），所以 end() 的终值也要一并改写。
+              const patched = patchUsage(ev, usd);
+              final = patched.message;
+              outer.push(patched);
+              continue;
+            }
+            outer.push(ev);
+          }
+          outer.end((final as AssistantMessage | undefined) ?? (await inner.result()));
+        } catch {
+          // 上游 abort/异常：把失败透传成 error 事件，避免外层永远悬挂。
+          outer.push({
+            type: 'error',
+            reason: 'error',
+            error: new Error('withTurnCost 包装的流中断'),
+          } as unknown as AssistantMessageEvent);
+        }
+      })();
+      return outer;
+    },
+  };
+}
+
+/** done 事件的 assistant 消息可能完全没有 usage（如脚本化消息），此时也要补上。 */
+type DoneEvent = Extract<AssistantMessageEvent, { type: 'done' }>;
+
+export function patchUsage(ev: DoneEvent, usd: number): DoneEvent {
+  const message = ev.message as AssistantMessage & {
+    usage?: { cost?: Partial<{ total: number }> };
+  };
+  return {
+    ...ev,
+    message: {
+      ...message,
+      usage: { ...message.usage, cost: { ...message.usage?.cost, total: usd } },
+    },
+  };
+}
+
+/** 从流调用上下文里抽出最近一条 user 消息的纯文本（LLM 消息两种 content 形态都吃）。 */
+export function lastUserText(context: unknown): string {
+  const messages = (context as { messages?: { role: string; content: unknown }[] })?.messages ?? [];
+  const last = [...messages].reverse().find((m) => m.role === 'user');
+  if (typeof last?.content === 'string') return last.content;
+  if (Array.isArray(last?.content)) {
+    return last.content.map((c) => (c as { text?: string }).text ?? '').join('');
+  }
+  return '';
+}
+
+/**
+ * 脚本化回复源：按「最近一条 user 消息文本」路由到注册的回复工厂。
+ *
+ * 为什么不用 faux 的 setResponses 队列：它的消费语义是「每轮 LLM 调用
+ * shift 掉一条」，多轮/多 Agent 交错调用时会被引擎的异步启动竞态打乱
+ * 配对。路由表按**文本**寻址，永不耗尽 —— 多轮、多 Agent 测试的确定性
+ * 来源；未注册的文本走 fallback（缺省直接抛错，宁可红不要谜）。
+ */
+export function scriptedSource(
+  base: ModelSource,
+  routes: Record<string, () => unknown>,
+  fallback?: (text: string) => unknown,
+): ModelSource {
+  return {
+    model: base.model,
+    streamFn: async (model, context, options) => {
+      const text = lastUserText(context);
+      const route = routes[text];
+      if (!route && !fallback) {
+        throw new Error(`scriptedSource 未注册回复: ${JSON.stringify(text)}`);
+      }
+      // route/fallback 返回的就是 reply 消息（测试约定），配件只解释驳回。
+      const message = (await (route ? route() : fallback!(text))) as AssistantMessage;
+      return singleMessageStream(message);
+    },
+  };
+}
+
+/** 把一条现成消息包成模型流（done + end 即可，agent-loop 自行播 message_start/end）。 */
+function singleMessageStream(
+  message: AssistantMessage,
+): ReturnType<typeof createAssistantMessageEventStream> {
+  const stream = createAssistantMessageEventStream();
+  const declared = (message as { stopReason?: unknown }).stopReason;
+  const stopReason = (typeof declared === 'string' && declared !== 'pending'
+    ? declared
+    : 'stop') as 'stop' | 'length' | 'toolUse' | 'deferred';
+  void (async () => {
+    stream.push({ type: 'done', reason: stopReason, message });
+    stream.end(message);
+  })();
+  return stream;
 }

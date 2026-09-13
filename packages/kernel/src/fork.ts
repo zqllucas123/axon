@@ -17,7 +17,7 @@
  */
 
 import type { ContentBlockLike, MessageLike } from '@axon/protocol';
-import { type AgentPath, type ForkMode, isAncestorOf } from '@axon/protocol';
+import { type AgentPath, type ForkMode } from '@axon/protocol';
 
 /**
  * 按 round 切分消息历史。
@@ -170,7 +170,10 @@ export function intersectTools(
 /**
  * 校验 wait 目标合法性，防止编排层自己造出死锁。
  *
- * 三类非法：等自己、等自己的祖先（祖先正阻塞在等我）、等不存在的 agent。
+ * M3 收紧（决策 #3 拍板）：只能等**自己的后代**。
+ * 等自己 → 即死；等祖先 → 祖先在等我 ⇒ 死锁；等兄弟/旁支 → 引入横向等边，
+ * 才有成环可能。限制为「后代」之后等边只沿树向下，图无环 ⇒
+ * 树内死锁结构性不可能，不必实现环检测。
  */
 export function assertWaitable(
   self: AgentPath,
@@ -180,10 +183,16 @@ export function assertWaitable(
   if (self === target) {
     throw new Error(`agent ${self} 不能等待自己`);
   }
-  if (isAncestorOf(target, self)) {
-    throw new Error(`agent ${self} 不能等待其祖先 ${target}，会立即死锁`);
+  if (!isDescendantOf(self, target)) {
+    throw new Error(`agent ${self} 只能等待自己的后代（收到 ${target}）`);
   }
   if (!exists(target)) {
     throw new Error(`等待目标不存在: ${target}`);
   }
+}
+
+/** a 是否为 b 的严格后代（子/孙/…；同代与自身均否）。 */
+export function isDescendantOf(a: AgentPath, b: AgentPath): boolean {
+  if (a === b) return false;
+  return b.startsWith(a.endsWith('/') ? a : `${a}/`);
 }
