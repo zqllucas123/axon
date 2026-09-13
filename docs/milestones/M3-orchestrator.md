@@ -218,14 +218,19 @@ planner running(占满) → spawn 2 子：child1 running…child2 gate 满 → p
 
 ## 七、实施计划（切片，每步可独立验证）
 
-1. **kernel：BudgetGuard + registry 闸门重构 + fork 后代校验**（单测：BudgetGuard 跃迁一次性；activeCount 只数 running；idle→waiting；promote 免检；assertDescendantOf 边界）
-2. **kernel：engine.steer**（契约测试：running 状态 steer → 本轮结束后下一轮首条生效；steer 在 parked 无副作用）
-3. **host 重构：requestRun / parked FIFO / drain / wait 图 / watchdog / 预算接线**（host.test 补：gate 满→parked→drain 依次唤醒；suspended 父免检 promote；remove/interrupt 清队；watchdog 超时 interrupt；frozen 拒 spawn）
-4. **orchestrator.ts：六工具对 fake driver 单测**（spawn→wait→resolve→state 断言；超时不杀子；message/steer 时序；execute 抛错路径）
-5. **roles.ts 授权矩阵 + index.ts 装配**（typecheck + host 冒烟：planner 白名单含 agent 等，blank 无）
-6. **UI 预算条**（`bun run ui-smoke` 扩：faux 脚本故意触发 budget.warning → banner 出现；frozen → composer 禁用）
-7. **E2E 集成测试（milestone 验收）**：faux 三幕走完「planner spawn developer wait resume 收尾」+ gate=1 死锁免检路径，断言全事件序列
-8. **收尾**：`bun run check` 全绿 + 文档同步（§十）+ 语义化 commit
+> **进度（2026-09-13）**：切片 1–3 ✅，切片 4–7 待做。
+
+- [x] **切片 1 ✅**（kernel）：`budget.ts`（BudgetGuard 阀值跃迁一次性）+ registry 闸门重构（running-only 计数 / idle→waiting / `promote()` 免检）+ fork 后代校验（`assertWaitable` 限后代 + `isDescendantOf`）。单测 75 例全绿。
+- [x] **切片 2 ✅**（kernel）：`engine.steer()` 进 AxonEngine 五方法之一（pi `Agent.steer` 的透传，0.85.1 dist 已确认「injected after the current assistant turn finishes」）。契约测试改用 `createAxonEngine` + steer 时序（9 例）。
+- [x] **切片 3 ✅**（host）：`requestRun`（终态归位 + 闸门 + parked FIFO）/ `beginWait`/`endWait`（退位让额 + wait 图）/ `drain()`（先解父后补位）/ BudgetGuard 接线 / per-agent idle 看门狗 / `dispose()`。`host.orchestration.test.ts` 10 例全绿。
+  - **两个实测逼出的补丁**（都进了 kernel/provider.ts）：
+    1. faux `setResponses` 的消费语义是「每轮 LLM 调用 shift 一条」，多 Agent 交错时与引擎异步启动有竞态——新增 `scriptedSource`（按最近一条 user 消息文本路由，永不耗尽）作为多 Agent 测试的确定性来源。
+    2. `withTurnCost` 漏 await async streamFn（`for await` 不会 await 裸 Promise）→ 全链路 TypeError——补 await。且 `agent-loop` 的 done 分支用 `response.result()`（EventStream 的 `resolveFinalResult` 由 done 事件的 `isComplete` 触发）而非事件 payload——终值与 done 事件要双写成本。
+- [ ] **切片 4** orchestrator.ts：六工具对 fake driver 单测（spawn→wait→resolve→state 断言；超时不杀子；message/steer 时序；execute 抛错路径）
+- [ ] **切片 5** roles.ts 授权矩阵 + index.ts 装配（typecheck + host 冒烟：planner 白名单含 agent 等，blank 无）
+- [ ] **切片 6** UI 预算条（`bun run ui-smoke` 扩：faux 脚本故意触发 budget.warning → banner 出现；frozen → composer 禁用）
+- [ ] **切片 7** E2E 集成测试（milestone 验收）：faux 三幕走完「planner spawn developer wait resume 收尾」+ gate=1 死锁免检路径，断言全事件序列
+- [ ] **切片 8** 收尾：`bun run check` 全绿 + 文档同步（§十）+ 语义化 commit
 
 ## 八、测试策略
 
