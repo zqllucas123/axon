@@ -1,18 +1,18 @@
 # M3 编排内核：方案设计与实施计划
 
-> 状态：设计评审中
+> 状态：实施中（2026-09-13 拍板通过，按 §〇 决策执行）
 > 对应架构：01 §6.5（Orchestrator）+ 01 §8（预算熔断遗留项）｜ 依赖里程碑：M2 ✅
 > 前置条件：无 API key 要求（faux 驱动全链路）
 
 ## 〇、需拍板的决策（读完全文后作答）
 
-| # | 决策 | 推荐 | 理由一句话 |
+| # | 决策 | 拍板（2026-09-13） | 备注 |
 |---|---|---|---|
-| 1 | 编排工具授权矩阵 | 见 §4.1 表：planner / developer / clone 全件套，architect / tester / aligner 仅 check，blank 无 | 编排 = 管理能力，按「谁带团队」授权，避免 tester 顺手拉起子 Agent 烧 token |
-| 2 | 并发闸门语义重构 | `maxConcurrent` 只数 running；新增 parked 队列（waiting）+ 免检 promote；等子 Agent 时父级退位让出额度 | 不重构就会死锁：父(1)+6 子 > 上限 6，第 6 子永远起不来，父永远等下去（kalo「resume 跳过信号量」同理） |
-| 3 | wait 目标限制 | 只能等自己的后代（`assertWaitable` 之上再加 isDescendant 检查） | 树内祖先→后代等待的图无环 ⇒ M3 阶段死锁结构性不可能，不必实现环检测 |
-| 4 | 预算熔断行为 | 软线 80% 发 `budget.warning`；硬线 100% 发 `budget.frozen` 并拒绝新 spawn/prompt；**不杀在跑 Agent** | 在跑任务杀半截比超支更糟；模型拿到错误 toolResult 自己会止损 |
-| 5 | wait 超时行为 + 活性看门狗 | 超时只放弃等待、**不杀子 Agent**；另设 idle 看门狗（5 分钟无活动→interrupt，抄 kalo `IDLE_TIMEOUT_MS=5min`） | 看门狗管「卡死」，超时管「别耽误父级」——两个概念分开，互不越界 |
+| 1 | 编排工具授权矩阵 | **全员全件套**（7 个内置角色全给 6 工具） | 用户否决推荐矩阵，取最大自由度；token 风险交给预算熔断（#4）与个人自觉；用户自定义角色仍自由裁剪 |
+| 2 | 并发闸门语义重构 | ✅ 按推荐 | running-only 计数 + parked FIFO + 父退位 + 免检 promote |
+| 3 | wait 目标限制 | ✅ 按推荐 | 仅限后代，死锁结构性不可能 |
+| 4 | 预算熔断行为 | ✅ 按推荐 | 80% 警告 / 100% 冻结拒绝新活 / 不杀在跑 |
+| 5 | wait 超时 + 看门狗 | ✅ 按推荐 | 超时不杀子；idle 看门狗 5min 专治卡死 |
 
 ## 一、目标与范围
 
@@ -78,15 +78,13 @@
 - 6 个工具是**双闭包**：`host`（生命周期）+ `selfPath`（调用者）。因为 `AgentTool.execute(toolCallId, params, ...)` 签名里没有「谁在调我」，必须每个 engine 生成时 bind 自己的 path。leaf 工具是共享单例，编排工具必须 per-spawn 现造。
 - 若角色白名单中含编排工具名，host 在 `spawn()` 时现造并 bind path；白名单中的叶子工具名在 universe 里查找，查不到即跳过（现状查不到一切叶子工具，M3 合法空集）。
 
-**授权矩阵（决策 #1 推荐值，落在 `roles.ts`）**：
+**授权矩阵（决策 #1 拍板：全员全件套，2026-09-13）**：
 
 | 角色 | agent | agent_wait | agent_check | agent_message | agent_resume | agent_interrupt |
 |---|:-:|:-:|:-:|:-:|:-:|:-:|
-| planner（Axon1·带团队） | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| developer（Axon3·可分子任务） | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| clone（内核分身·镜像主 Agent） | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| architect / tester / aligner | — | — | ✅ | — | — | — |
-| blank（轻量分身） | — | — | — | — | — | — |
+| 全部 7 个内置角色（planner/architect/developer/tester/aligner/blank/clone） | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+
+> 用户否决了推荐矩阵，取最大自由度。token 风险改由两条底线兜住：预算熔断（§4.4）硬线冻结新活；树深上限 2（registry `DEFAULT_MAX_DEPTH`）限制递归 spawn。用户自定义角色仍可按白名单自由裁剪（`tools` 字段为数据，非代码）。
 
 ### 4.2 并发闸门语义重构（本里程碑的机制核心）
 
@@ -257,4 +255,4 @@ planner running(占满) → spawn 2 子：child1 running…child2 gate 满 → p
 
 ## 十一、里程碑决策记录
 
-- **开工拍板（2026-09-13）**：M3 是「自主派发（工具驱动）」的第一个里程碑——手动指派（用户在 UI spawn）M2 已交付；01 §7「两者都要、先手动」因此落账：手动 ✅（M2），自主 ✅（M3）。
+- **开工拍板（2026-09-13）**：M3 是「自主派发（工具驱动）」的第一个里程碑——手动指派（用户在 UI spawn）M2 已交付；01 §7「两者都要、先手动」因此落账：手动 ✅（M2），自主 ✅（M3）。§〇 五条决策全部拍板：编排工具全员全件套（用户否决推荐矩阵，取最大自由度，风险交预算熔断抢底）、闸门重构、wait 限后代、熔断不杀在跑、超时不杀子 + idle 看门狗。
