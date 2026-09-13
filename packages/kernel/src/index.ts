@@ -25,6 +25,7 @@ export {
 export {
   createRegistry,
   createFauxSource,
+  createOpenAICompatSource,
   withTurnCost,
   scriptedSource,
   lastUserText,
@@ -35,6 +36,8 @@ export {
   fauxToolCall,
   type ModelSource,
   type ModelRegistry,
+  type OpenAICompatSpec,
+  type OpenAICompatModel,
 } from './provider.ts';
 
 export {

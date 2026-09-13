@@ -34,12 +34,19 @@ const FORBIDDEN = [
   ['@anthropic-ai/sdk', 'Anthropic SDK'],
   ['protobufjs', 'protobufjs'],
   ['google-auth-library', 'google-auth-library'],
+  // 自真模型接入（走 openai-completions API）后，`openai` 成了最可能被内联的那个：
+  // provider.ts 引的是 `api/openai-completions.lazy`，它背后才是 `openai` SDK。
+  // 一旦有人把 external 去掉，这条会先炸。
+  ['openai', 'OpenAI SDK'],
 ];
 
 /** 必须保持为运行时 require 的包（即 external 生效的证据）。 */
 const MUST_BE_EXTERNAL = [
   '@earendil-works/pi-ai',
   '@earendil-works/pi-agent-core',
+  // 真 provider 走的懒 API 子路径。它与主包分开断言：external 对子路径的
+  // 前缀匹配是 esbuild 的行为细节，不是显式契约，值得单独钉住。
+  '@earendil-works/pi-ai/api/openai-completions.lazy',
 ];
 
 const kb = (bytes) => `${(bytes / 1024).toFixed(0)} KB`;

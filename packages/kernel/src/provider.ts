@@ -17,7 +17,8 @@
  * 参见 `docs/02-调研补充与结论复核.md` §4 风险 B。
  */
 
-import { createModels, createAssistantMessageEventStream } from '@earendil-works/pi-ai';
+import { createModels, createAssistantMessageEventStream, createProvider } from '@earendil-works/pi-ai';
+import { openAICompletionsApi } from '@earendil-works/pi-ai/api/openai-completions.lazy';
 import type { AssistantMessage, AssistantMessageEvent, Model } from '@earendil-works/pi-ai';
 import type { StreamFn } from '@earendil-works/pi-agent-core';
 
@@ -88,6 +89,135 @@ export async function createFauxSource(options?: {
     model: faux.getModel(),
     streamFn: streamFnOf(registry),
     setResponses: (responses) => faux.setResponses(responses as never),
+  };
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// 真实模型接入（OpenAI 兼容网关）
+// ────────────────────────────────────────────────────────────────────────────
+
+/**
+ * 一个模型的最小声明。
+ *
+ * 为什么要手写而不是拉 pi 内置的 44 个 provider 目录：企业网关（如寒武智能/
+ * 研究院网关）是**自定义 baseUrl + 自定义模型名**的组合，`/v1/models` 往往
+ * 不实现（实测 kotei 网关返回 404），内置目录里也不会有这些模型 id。
+ * 与其猜，不如让用户在配置里写清楚——写错了立刻 400，比静默走错模型强。
+ *
+ * `cost` 单位是**美元 / 百万 token**（pi 的 `calculateCost` 除以 1e6，
+ * `pi-ai/dist/models.js:543-547`）。填 0 不会报错，只是预算熔断永远不触发。
+ */
+export interface OpenAICompatModel {
+  id: string;
+  name?: string;
+  /** 模型是否会吐 reasoning/thinking 内容（如 deepseek-r1）。默认 false。 */
+  reasoning?: boolean;
+  contextWindow?: number;
+  maxTokens?: number;
+  cost?: Partial<{ input: number; output: number; cacheRead: number; cacheWrite: number }>;
+}
+
+export interface OpenAICompatSpec {
+  /** provider id，会出现在 assistant 消息的 `provider` 字段里。默认 `axon-gateway`。 */
+  providerId?: string;
+  providerName?: string;
+  /** 网关根地址，形如 `https://host/path/v1`（不含 `/chat/completions`）。 */
+  baseUrl: string;
+  apiKey: string;
+  models: OpenAICompatModel[];
+  /** 默认模型 id；缺省用 models[0]。 */
+  defaultModel?: string;
+  headers?: Record<string, string>;
+}
+
+/** 默认值集中一处，免得三个调用点各写一套。 */
+const MODEL_DEFAULTS = {
+  contextWindow: 128_000,
+  maxTokens: 8_192,
+  cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+} as const;
+
+/**
+ * 静态 key 的 ApiKeyAuth —— 不走 env、不走 credential store。
+ *
+ * pi 自带的 `envApiKeyAuth` 只认环境变量或已登录凭据（`auth/helpers.js:7-30`），
+ * 而 Axon 的 key 来自 `~/.axon/config.json`（用户可编辑、可多网关），
+ * 硬塞进 `process.env` 会污染子进程与日志。这里直接给一个常量 resolve。
+ */
+function staticApiKeyAuth(name: string, apiKey: string) {
+  return {
+    name,
+    resolve: async () => ({
+      auth: { apiKey },
+      source: 'axon config',
+    }),
+    check: async () => ({ type: 'api_key' as const, source: 'axon config' }),
+  };
+}
+
+/**
+ * 建一个 OpenAI 兼容网关的 {@link ModelSource}。
+ *
+ * 走 `openAICompletionsApi()` 这条**懒 API**（`pi-ai/dist/api/openai-completions.lazy.js`）
+ * 而不是直接 import 实现：`openai` SDK 有 ~40 个传递依赖，懒加载让它只在
+ * 第一次真的发请求时才进内存。这条性质由 `scripts/verify-lazy-loading.mjs` 守着。
+ *
+ * 返回值多带一个 `selectModel`：同一个网关下按角色切模型（M6 的 per-role
+ * model 映射）需要它，而 `ModelSource` 本身只装得下一个 model。
+ */
+export function createOpenAICompatSource(
+  spec: OpenAICompatSpec,
+): ModelSource & {
+  models: Model<'openai-completions'>[];
+  selectModel: (id: string) => ModelSource;
+} {
+  if (!spec.models.length) throw new Error('createOpenAICompatSource: models 不能为空');
+  const providerId = spec.providerId ?? 'axon-gateway';
+  // baseUrl 末尾斜杠会让 openai SDK 拼出 `//chat/completions`，部分网关 404。
+  const baseUrl = spec.baseUrl.replace(/\/+$/, '');
+
+  const models: Model<'openai-completions'>[] = spec.models.map((m) => ({
+    id: m.id,
+    name: m.name ?? m.id,
+    api: 'openai-completions',
+    provider: providerId,
+    baseUrl,
+    reasoning: m.reasoning ?? false,
+    input: ['text'],
+    cost: { ...MODEL_DEFAULTS.cost, ...m.cost },
+    contextWindow: m.contextWindow ?? MODEL_DEFAULTS.contextWindow,
+    maxTokens: m.maxTokens ?? MODEL_DEFAULTS.maxTokens,
+    ...(spec.headers ? { headers: spec.headers } : {}),
+  }));
+
+  const provider = createProvider<'openai-completions'>({
+    id: providerId,
+    name: spec.providerName ?? providerId,
+    baseUrl,
+    auth: { apiKey: staticApiKeyAuth(`${spec.providerName ?? providerId} API key`, spec.apiKey) },
+    models,
+    api: openAICompletionsApi(),
+  });
+
+  const registry = createRegistry();
+  registry.setProvider(provider);
+  const streamFn = streamFnOf(registry);
+
+  const pick = (id: string): Model<'openai-completions'> => {
+    const found = models.find((m) => m.id === id);
+    if (!found) {
+      throw new Error(
+        `模型 ${id} 不在网关 ${providerId} 的清单里（已配置：${models.map((m) => m.id).join(', ')}）`,
+      );
+    }
+    return found;
+  };
+
+  return {
+    model: pick(spec.defaultModel ?? models[0]!.id),
+    streamFn,
+    models,
+    selectModel: (id) => ({ model: pick(id), streamFn }),
   };
 }
 

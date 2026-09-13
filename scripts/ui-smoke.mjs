@@ -38,6 +38,9 @@ if (launch) {
         ELECTRON_RUN_AS_NODE: undefined, // 宿主（kalo）可能注入，必须剥掉
         ELECTRON_ENABLE_LOGGING: '1',
         AXON_ROLES_DIR: rolesDir,
+        // 冒烟绝不允许碰真网关：开发机上 ~/.axon/config.json 往往配了真 key，
+        // 而 AXON_SMOKE_SCRIPT 只替换 streamFn —— 靠它「恰好不发请求」是巧合不是保证。
+        AXON_PROVIDER: 'faux',
         // 冒烟钩子：脚本化回复永不耗尽 + 每轮固定成本 0.05（软线 0.048 / 硬线 0.06），
         // 恰好两轮 prompt 走完 warning → frozen 两段 UI。
         AXON_SMOKE_SCRIPT: '1',

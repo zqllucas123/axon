@@ -23,10 +23,24 @@ import {
   type RequestEnvelope,
   type ResponseEnvelope,
 } from '@axon/protocol';
-import { createFauxSource, fauxAssistantMessage, scriptedSource, withTurnCost, type ModelSource } from '@axon/kernel';
+import {
+  createFauxSource,
+  createOpenAICompatSource,
+  fauxAssistantMessage,
+  scriptedSource,
+  withTurnCost,
+  type ModelSource,
+} from '@axon/kernel';
 import { AxonHost } from './host.ts';
 import { ALL_ROLES } from './roles.ts';
 import { RoleBridge } from './role-bridge.ts';
+import {
+  CONFIG_PATH,
+  loadConfig,
+  maskKey,
+  resolveModelChoice,
+  type AxonConfig,
+} from './model-config.ts';
 
 /**
  * 构建产物是 ESM（pi 包 ESM-only，见 scripts/build.mjs），所以用 `import.meta.url`
@@ -44,11 +58,43 @@ let win: BrowserWindow | null = null;
 let host: AxonHost | null = null;
 let roleBridge: RoleBridge | null = null;
 
+/**
+ * 选一个 model source：真网关（`~/.axon/config.json` 配好了）或 faux。
+ *
+ * 降级而非报错，是因为「没配 key 就启动不了」会把整个开发/测试链路绑在
+ * 一个外部依赖上；冒烟、CI、以及新克隆的仓库都应该能直接 `bun run dev`。
+ */
+async function createModelSource(): Promise<{ source: ModelSource; label: string; config: AxonConfig }> {
+  const { config, error } = await loadConfig();
+  if (error) console.warn(`[desktop] ${error}`);
+  const choice = resolveModelChoice(config);
+
+  if (choice.kind === 'openai-compat') {
+    const real = createOpenAICompatSource({
+      providerId: choice.providerId,
+      providerName: choice.providerName,
+      baseUrl: choice.baseUrl,
+      apiKey: choice.apiKey,
+      models: choice.models,
+      defaultModel: choice.defaultModel,
+      ...(choice.headers ? { headers: choice.headers } : {}),
+    });
+    return {
+      config,
+      source: real,
+      label: `真模型 ${choice.providerId}/${choice.defaultModel} @ ${choice.baseUrl}（key ${maskKey(choice.apiKey)}）`,
+    };
+  }
+
+  // faux：零成本、无需 API key、可重复。它不是残留物，是测试通道的正式成员。
+  const faux = await createFauxSource({ provider: 'axon-dev' });
+  faux.setResponses([]);
+  return { config, source: faux, label: `faux（${choice.reason}；配置文件 ${CONFIG_PATH}）` };
+}
+
 async function createHost(): Promise<AxonHost> {
-  // 目前用 faux provider 起步 —— 真 provider 接入是下一步的事。
-  // 好处是现在就能端到端跑通 UI↔IPC↔编排，不被 API key 卡住。
-  const source = await createFauxSource({ provider: 'axon-dev' });
-  source.setResponses([]);
+  const { source, label, config } = await createModelSource();
+  console.log(`[desktop] model source: ${label}`);
 
   // ── 冒烟钩子（只有 ui-smoke 通过 env 打开，生产路径不受影响）──
   // AXON_SMOKE_SCRIPT：任何 user 文本都得到脚本化答复。faux 的响应队列是
@@ -68,9 +114,13 @@ async function createHost(): Promise<AxonHost> {
     const cost = Number(process.env.AXON_SMOKE_BUDGET_COST);
     modelSource = withTurnCost(modelSource, () => cost);
   }
+  // 预算硬线：冒烟 env 优先，否则读配置。接了真模型之后这行不再是演习——
+  // faux 时代 cost 恒为 0（faux.js:147 硬编码），没人会真的花钱。
   const budget = process.env.AXON_SMOKE_BUDGET_HARD
     ? { hardUsd: Number(process.env.AXON_SMOKE_BUDGET_HARD) }
-    : undefined;
+    : config.budgetUsd
+      ? { hardUsd: config.budgetUsd }
+      : undefined;
 
   return new AxonHost({
     modelSource,

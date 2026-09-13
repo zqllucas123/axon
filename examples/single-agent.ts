@@ -38,7 +38,8 @@ const listDir = {
   name: 'list_dir',
   description: '列出目录内容',
   parameters: Type.Object({ path: Type.String() }),
-  execute: async (args: { path: string }) => ({
+  // pi 工具签名：`(toolCallId, args, signal, ctx)` —— 第一参不是 args。
+  execute: async (_toolCallId: string, args: { path: string }) => ({
     content: [{ type: 'text' as const, text: `packages/\ndocs/  (from ${args.path})` }],
   }),
 };
@@ -47,7 +48,9 @@ const dangerousShell = {
   name: 'shell',
   description: '执行 shell 命令',
   parameters: Type.Object({ cmd: Type.String() }),
-  execute: async () => ({ content: [{ type: 'text' as const, text: 'done' }] }),
+  execute: async (_toolCallId: string) => ({
+    content: [{ type: 'text' as const, text: 'done' }],
+  }),
 };
 
 // ── 3. 角色减能：这个角色只准列目录，不准执行 shell ───────────
