@@ -13,7 +13,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { ROOT_PATH, type EventMap, type RoleDefinition } from '@axon/protocol';
+import { ROOT_PATH, type AgentPath, type EventMap, type RoleDefinition } from '@axon/protocol';
 import {
   createFauxSource,
   fauxAssistantMessage,
@@ -23,6 +23,8 @@ import {
   type ModelSource,
 } from '@axon/kernel';
 import { AxonHost, type HostOptions } from './host.ts';
+import { ALL_ROLES } from './roles.ts';
+import { ORCHESTRATION_TOOL_NAMES } from './orchestrator.ts';
 
 const ROLES: RoleDefinition[] = [
   {
@@ -41,6 +43,8 @@ interface HarnessOpts {
   routes?: Record<string, () => unknown>;
   /** 按最近一条 user 文本计价的成本注水（预算测试用）。 */
   costByText?: Record<string, number>;
+  /** 角色表；缺省只给一个无 tools 字段的 boss。 */
+  roles?: RoleDefinition[];
 }
 
 async function harness(opts: HarnessOpts = {}) {
@@ -56,7 +60,7 @@ async function harness(opts: HarnessOpts = {}) {
   const events: { event: keyof EventMap; source: string }[] = [];
   const host = new AxonHost({
     modelSource,
-    roles: ROLES,
+    roles: opts.roles ?? ROLES,
     emit: (event, _payload, source) => events.push({ event, source }),
     maxConcurrent: opts.maxConcurrent,
     budget: opts.budget,
@@ -282,3 +286,115 @@ describe('M3 idle 看门狗', () => {
     expect(h.host.get(ROOT_PATH)!.children.length).toBe(1);
   });
 });
+
+describe('M3 授权矩阵与工具绑定（切片 5）', () => {
+  it('内置角色全部拿到六件套（按其角色白名单裁剪）', async () => {
+    const h = await harness({ roles: ALL_ROLES });
+    for (const role of ALL_ROLES) {
+      const a = h.host.spawn({ role: role.name });
+      const names = h.host.orchestrationToolsFor(a.path, new Set(role.tools)).map((t) => t.name);
+      expect(names.sort()).toEqual([...ORCHESTRATION_TOOL_NAMES].sort());
+    }
+  });
+
+  it('角色白名单不含编排工具名时，不发编排工具（裁剪而非拒绝）', async () => {
+    const h = await harness({
+      roles: [
+        {
+          name: 'leaf_only',
+          displayName: '只有叶子工具',
+          description: '',
+          instructions: 'x',
+          defaultForkMode: 'none',
+          tools: ['read', 'grep'],
+        },
+      ],
+    });
+    const a = h.host.spawn({ role: 'leaf_only' });
+    expect(h.host.orchestrationToolsFor(a.path, new Set(['read', 'grep']))).toHaveLength(0);
+  });
+
+  it('半授权：只写 agent / agent_wait 的角色只拿到这俩', async () => {
+    const h = await harness({
+      roles: [
+        {
+          name: 'half',
+          displayName: '半授权',
+          description: '',
+          instructions: 'x',
+          defaultForkMode: 'none',
+          tools: ['agent', 'agent_wait'],
+        },
+      ],
+    });
+    const a = h.host.spawn({ role: 'half' });
+    expect(h.host.orchestrationToolsFor(a.path, new Set(['agent', 'agent_wait'])).map((t) => t.name).sort()).toEqual(
+      ['agent', 'agent_wait'],
+    );
+  });
+
+  it('集成：agent 工具在真实宿主上立 pid 子 Agent，子跑完 wait/check 拿到终态', async () => {
+    const h = await harness({ roles: ALL_ROLES, maxConcurrent: 2 });
+    const planner = h.host.spawn({ role: 'planner' });
+    const byName = new Map(h.host.orchestrationToolsFor(planner.path).map((t) => [t.name, t]));
+
+    // ① agent：spawn 子（挂在 planner 名下），子立刻开跑（scripted fallback 回复）
+    const spawnR = await byName.get('agent')!.execute('c', { role: 'developer', task: '实现 A' } as never);
+    const childId = (spawnR as { details: { id: string } }).details.id;
+    expect(childId).toBe(`${planner.path}/developer-1`);
+
+    // ② 子跑完（fake letter 直接答复）
+    await viWaitFor(() => h.host.get(childId as AgentPath)?.status === 'done');
+    expect(h.host.get(planner.path)!.children).toContain(childId);
+
+    // ③ agent_wait：目标已终态 → 立返终态清单
+    const waitR = await byName.get('agent_wait')!.execute('c', { ids: [childId] } as never);
+    const statuses = (waitR as { details: { statuses: { id: string; status: string }[] } }).details.statuses;
+    expect(statuses).toEqual([{ id: childId, status: 'done', lastError: undefined, timedOut: false }]);
+
+    // ④ agent_check：摘要 + 消息预览
+    const checkR = await byName.get('agent_check')!.execute('c', { id: childId } as never);
+    const summary = (checkR as { details: { id: string; status: string; preview?: string } }).details;
+    expect(summary.status).toBe('done');
+    expect(summary.preview).toContain('实现 A');
+  });
+
+  it('集成：agent_resume + agent_wait 把终态子 Agent 重新拉起', async () => {
+    const h = await harness({ roles: ALL_ROLES, maxConcurrent: 2 });
+    const planner = h.host.spawn({ role: 'planner' });
+    const byName = new Map(h.host.orchestrationToolsFor(planner.path).map((t) => [t.name, t]));
+
+    const spawnR = await byName.get('agent')!.execute('c', { role: 'developer', task: '初稿' } as never);
+    const childId = (spawnR as { details: { id: string } }).details.id;
+    await viWaitFor(() => h.host.get(childId as AgentPath)?.status === 'done');
+
+    // resume 是 fire 语义：立刻返回，任务在后台跑
+    await byName.get('agent_resume')!.execute('c', { id: childId, text: '返工' } as never);
+    await viWaitFor(() => h.host.get(childId as AgentPath)?.status === 'running');
+    await viWaitFor(() => h.host.get(childId as AgentPath)?.status === 'done');
+
+    // 细查：消息里有『返工』的答复
+    const msgs = h.host.messagesOf(childId as AgentPath);
+    const lastAssistant = [...msgs].reverse().find((m) => m.role === 'assistant');
+    expect(JSON.stringify(lastAssistant?.content)).toContain('返工');
+  });
+
+  it('预算冻结直达 agent 工具：spawn 子被拒', async () => {
+    const h = await harness({
+      roles: ALL_ROLES,
+      budget: { hardUsd: 0.01 },
+      costByText: { 撞线: 0.02 },
+    });
+    const planner = h.host.spawn({ role: 'planner' });
+    await h.host.requestRun(planner.path, '撞线');
+    expect(h.host.budgetState()).toBe('frozen');
+
+    const byName = new Map(h.host.orchestrationToolsFor(planner.path).map((t) => [t.name, t]));
+    await expect(
+      byName.get('agent')!.execute('c', { role: 'developer', task: 'x' } as never),
+    ).rejects.toThrow(/预算已冻结/);
+  });
+});
+
+/** host 测试里的路径字面量类型收窄（AgentPath 是模板字符串类型）。 */
+type RootedPath = '/root/boss-1/developer-1' | (string & {});

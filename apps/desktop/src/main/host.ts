@@ -48,6 +48,10 @@ import {
   type BudgetState,
   type ModelSource,
 } from '@axon/kernel';
+import {
+  createOrchestrationTools,
+  type OrchestrationDriver,
+} from './orchestrator.ts';
 
 export type EmitFn = <E extends keyof EventMap>(
   event: E,
@@ -206,7 +210,7 @@ export class AxonHost {
       model: this.modelSource.model,
       streamFn: this.modelSource.streamFn,
       messages: fromMessageLike(inherited),
-      tools: this.tools as never,
+      tools: this.toolsFor(snapshot.path, allowSet) as never,
       sessionId: snapshot.path,
       // 闸门兜底：即使工具在 tools 全集里，未获角色授权也执行不了。
       // 与其指望上游正确裁剪 tools 数组，不如在执行前再拦一道。
@@ -468,6 +472,58 @@ export class AxonHost {
     if (path === ROOT_PATH) return undefined;
     const entry = this.roles.get(this.registry.get(path)?.snapshot.role ?? '');
     return entry?.role.tools;
+  }
+
+  /**
+   * 向 Agent 投递指导消息（agent_message 的落点）。
+   * pi 的 steer 是"本轮结束后注入、下一轮生效"；对 parked 目标是下一轮开始时生效。
+   */
+  steer(path: AgentPath, text: string): void {
+    this.registry.get(path)?.engine?.steer(text);
+  }
+
+  /**
+   * 为该 Agent 现造编排工具（per-spawn bind selfPath），并按其角色白名单
+   * 裁剪：allowSet 里有的工具名才发放（M3 §4.1）。
+   * 公开是为了测试与将来的工具自省（M6 诊断）；宿主内部在 spawn 时调用。
+   */
+  orchestrationToolsFor(path: AgentPath, allowSet?: Set<string>) {
+    return createOrchestrationTools(this.driverFor(path)).filter(
+      (t) => !allowSet || allowSet.has(t.name),
+    );
+  }
+
+  /**
+   * 该 Agent 实际拿到的工具数组：宇宙里的叶子工具 + 现造的编排工具。
+   * 叶子工具同样按白名单过滤——模型只能看到自己有权唤起的工具。
+   */
+  private toolsFor(path: AgentPath, allowSet?: Set<string>): unknown[] {
+    const leaves = allowSet
+      ? this.tools.filter((t) => (t as { name?: unknown }).name !== undefined
+          && allowSet.has((t as { name: string }).name))
+      : this.tools;
+    return [...leaves, ...this.orchestrationToolsFor(path, allowSet)];
+  }
+
+  /** 把宿主能力收窄成编排工具需要的驱动面（调用者身份在此 bind）。 */
+  private driverFor(path: AgentPath): OrchestrationDriver {
+    return {
+      selfPath: path,
+      spawnChild: (spec) =>
+        this.spawn({
+          role: spec.role,
+          parent: path,
+          initialPrompt: spec.task,
+          forkMode: spec.forkMode,
+        }).path,
+      requestRun: (p, text) => this.requestRun(p, text),
+      interrupt: (p) => this.interrupt(p),
+      snapshot: (p) => this.get(p),
+      messagesOf: (p) => this.messagesOf(p),
+      beginWait: (targets) => this.beginWait(path, targets),
+      endWait: () => this.endWait(path),
+      steerTo: (p, text) => this.steer(p, text),
+    };
   }
 
   private setStatus(path: AgentPath, status: AgentSnapshot['status'], error?: string) {

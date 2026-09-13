@@ -218,7 +218,7 @@ planner running(占满) → spawn 2 子：child1 running…child2 gate 满 → p
 
 ## 七、实施计划（切片，每步可独立验证）
 
-> **进度（2026-09-13）**：切片 1–4 ✅，切片 5–7 待做。
+> **进度（2026-09-13）**：切片 1–5 ✅，切片 6–7 待做。
 
 - [x] **切片 1 ✅**（kernel）：`budget.ts`（BudgetGuard 阀值跃迁一次性）+ registry 闸门重构（running-only 计数 / idle→waiting / `promote()` 免检）+ fork 后代校验（`assertWaitable` 限后代 + `isDescendantOf`）。单测 75 例全绿。
 - [x] **切片 2 ✅**（kernel）：`engine.steer()` 进 AxonEngine 五方法之一（pi `Agent.steer` 的透传，0.85.1 dist 已确认「injected after the current assistant turn finishes」）。契约测试改用 `createAxonEngine` + steer 时序（9 例）。
@@ -230,7 +230,7 @@ planner running(占满) → spawn 2 子：child1 running…child2 gate 满 → p
   - **两个落地时定型的小决策**（与 §4.6 草案的微调，测试钉死）：
     1. driver.beginWait 改为 Promise 形态（`beginWait(targets): Promise<void>` + `endWait()`），工具 execute 里 `await` 即挂起——宿主已实测支撑；§4.6 草案的「返回回调」形态没采纳。
     2. `agent_resume` **不 await** requestRun（fire 语义）：额满时目标进 parked 排队、Promise 直到跑完才 resolve，工具若 await = 父占着额度等一个没额度的子，`maxConcurrent=1` 时结构性死锁。等结果必须走 agent_wait（退位让额）。
-- [ ] **切片 5** roles.ts 授权矩阵 + index.ts 装配（typecheck + host 冒烟：planner 白名单含 agent 等，blank 无）
+- [x] **切片 5 ✅**（roles.ts + host 装配）：七个内置角色全部白名单 + 六件套（决策 #1 全员全件套）；host `spawn` 现造并 bind 工具集——`toolsFor` = 宇宙叶子工具 + 白名单裁剪后的编排工具；`steer()` / `driverFor()` / `orchestrationToolsFor(path, allowSet)` 公开面。集成测试 6 例（真实 host × 真工具：agent spawn 子 → 子跑完 → wait 拿终态 → check 摘要 → resume 拉起 → 冻结直达 agent 工具拒 spawn）。
 - [ ] **切片 6** UI 预算条（`bun run ui-smoke` 扩：faux 脚本故意触发 budget.warning → banner 出现；frozen → composer 禁用）
 - [ ] **切片 7** E2E 集成测试（milestone 验收）：faux 三幕走完「planner spawn developer wait resume 收尾」+ gate=1 死锁免检路径，断言全事件序列
 - [ ] **切片 8** 收尾：`bun run check` 全绿 + 文档同步（§十）+ 语义化 commit

@@ -62,6 +62,16 @@ export interface OrchestrationDriver {
 
 // ── 常量与辅助 ────────────────────────────────────────────────
 
+/** 六个编排工具的名字。角色白名单通过引用这些名字来授权（M3 §4.1 矩阵）。 */
+export const ORCHESTRATION_TOOL_NAMES = [
+  'agent',
+  'agent_wait',
+  'agent_check',
+  'agent_message',
+  'agent_resume',
+  'agent_interrupt',
+] as const;
+
 /** agent_wait 默认超时 600s（M3 §4.5）。 */
 const DEFAULT_WAIT_TIMEOUT_SEC = 600;
 

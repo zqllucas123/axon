@@ -19,12 +19,21 @@
  */
 
 import type { RoleDefinition } from '@axon/protocol';
+import { ORCHESTRATION_TOOL_NAMES } from './orchestrator.ts';
 
 /** 只读工具集 —— 能看不能改。 */
 const READ_ONLY = ['read', 'grep', 'glob', 'ls'];
 
 /** 读写工具集 —— 加上编辑与执行。 */
 const READ_WRITE = [...READ_ONLY, 'edit', 'write', 'bash'];
+
+/**
+ * 编排工具（M3 决策 #1 拍板）：七个内置角色**全部**拿到六件套。
+ * 用户否决了推荐矩阵，取最大自由度——token 风险改由预算熔断（M3 §4.4）
+ * 硬线冻结新活 + 树深上限 2（registry DEFAULT_MAX_DEPTH）两条底线兑住。
+ * 用户自定义角色仍按自己的 tools 白名单自由裁剪（名字引用即授权，不引用即无）。
+ */
+const withOrchestration = (...tools: string[]) => [...tools, ...ORCHESTRATION_TOOL_NAMES];
 
 export const BUILTIN_ROLES: RoleDefinition[] = [
   {
@@ -39,7 +48,7 @@ export const BUILTIN_ROLES: RoleDefinition[] = [
       '遇到进度风险时明确说出「什么会晚、晚多久、因为什么」，不要含糊。',
     ].join('\n'),
     // 只读：进度管理不需要改文件，给了写权限反而会越界去"顺手修一下"
-    tools: READ_ONLY,
+    tools: withOrchestration(...READ_ONLY),
     approval: 'auto',
     defaultForkMode: 'none',
   },
@@ -55,7 +64,7 @@ export const BUILTIN_ROLES: RoleDefinition[] = [
       '你可以写设计文档，但不写实现代码——那是 Axon3 的事。',
     ].join('\n'),
     // 能写文档，不能跑 bash：架构决策不需要执行副作用
-    tools: [...READ_ONLY, 'write'],
+    tools: withOrchestration(...READ_ONLY, 'write'),
     approval: 'auto',
     defaultForkMode: 'none',
   },
@@ -69,7 +78,7 @@ export const BUILTIN_ROLES: RoleDefinition[] = [
       '每次改动后自己先跑一遍验证（typecheck / 测试），不要把未验证的代码交出去。',
       '注释解释**为什么**，不解释「做了什么」——那是代码本身的事。',
     ].join('\n'),
-    tools: READ_WRITE,
+    tools: withOrchestration(...READ_WRITE),
     // 全能力角色必须配最严的审批档：它是唯一能造成不可逆副作用的角色
     approval: 'always_ask',
     defaultForkMode: 'none',
@@ -86,7 +95,7 @@ export const BUILTIN_ROLES: RoleDefinition[] = [
       '你可以写测试文件，但不修改被测代码——那会让测试变成自证。',
     ].join('\n'),
     // 能写（测试文件）能跑（执行测试），但这是刻意的：测试角色需要执行能力
-    tools: [...READ_ONLY, 'write', 'bash'],
+    tools: withOrchestration(...READ_ONLY, 'write', 'bash'),
     approval: 'always_ask',
     defaultForkMode: 'none',
   },
@@ -102,7 +111,7 @@ export const BUILTIN_ROLES: RoleDefinition[] = [
       '你的问题要具体到可以用一句话回答，不要问「你觉得怎么样」。',
     ].join('\n'),
     // 只有读能力——它的价值在判断而非行动。连 write 都不给，避免它"顺手帮忙改一下"
-    tools: READ_ONLY,
+    tools: withOrchestration(...READ_ONLY),
     approval: 'auto',
     // ★ 唯一继承上下文的角色：它的职责就是核对「实际做的」与「当初说的」，
     //   没有上下文就无从核对。这是 all 作为"显式逃生门"的正当用例。
@@ -121,7 +130,7 @@ export const BLANK_ROLE: RoleDefinition = {
   displayName: '轻量分身',
   description: '纯净上下文、无角色预设的通用分身',
   instructions: '你是一个通用助手。保持简洁，直接回答问题。',
-  tools: READ_ONLY,
+  tools: withOrchestration(...READ_ONLY),
   approval: 'always_ask',
   defaultForkMode: 'none',
 };
@@ -138,7 +147,7 @@ export const CLONE_ROLE: RoleDefinition = {
   displayName: '内核分身',
   description: '继承主 Agent 全部上下文的分身',
   instructions: '你是主 Agent 的分身，继承了它的全部上下文。延续之前的工作。',
-  tools: READ_WRITE,
+  tools: withOrchestration(...READ_WRITE),
   approval: 'always_ask',
   defaultForkMode: 'all',
 };
