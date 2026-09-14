@@ -177,7 +177,15 @@ try {
   log(gone, '删除后 DOM 回落（清理成功）');
   if (!found || !gone) exit(1);
 
-  // ── 5. 预算熔断（M3 切片 6）：AI-agent prompt×2 走完 warning → frozen
+  // 小工具：轮询一个表达式直到它真（DOM 是事件驱动的，必然有延迟）。
+  const until = async (expr, tries = 40) => {
+    for (let i = 0; i < tries; i++) {
+      if (await evalJs(expr)) return true;
+      await new Promise((r) => setTimeout(r, 250));
+    }
+    return false;
+  };
+
   const spawned = await evalJs(
     `window.axon.invoke('agent.spawn', { role: 'blank', parent: '/root' }).then(r => r.path)`,
   );
@@ -187,7 +195,40 @@ try {
   }
   log(true, `冒烟 Agent 已创建（${spawned}）`);
 
-  await evalJs(`window.axon.invoke('agent.prompt', { path: '${spawned}', text: '第一轮' })`);
+  // ── 5. 协作账本（M4 / UX S4）：发一句话 → Agent 用 agent 工具派活
+  //     → 落 delegate 账 → 子终态后结算 → 人点「采纳」。
+  await evalJs(`window.axon.invoke('agent.prompt', { path: '${spawned}', text: '协作冒烟' })`);
+  const recorded = await until(`!!document.querySelector('[data-smoke="ledger-row"]')`);
+  log(recorded, '账本面板出现协作记录（ledger.recorded → React upsert）');
+  if (!recorded) exit(1);
+
+  // 等结算：只有 settled + pending 的行才给「采纳」按钮
+  const adoptable = await until(`!!document.querySelector('[data-smoke="ledger-adopt"]')`);
+  log(adoptable, '子 Agent 终态后记录自动结算，出现「采纳」按钮（ledger.updated）');
+  if (!adoptable) exit(1);
+
+  await evalJs(`document.querySelector('[data-smoke="ledger-adopt"]').click()`);
+  const adopted = await until(
+    `!!document.querySelector('[data-smoke="ledger-row"][data-adoption="adopted"]')`,
+  );
+  log(adopted, '点击「采纳」后记录转 adopted（ledger.adopt → 人工署名落账）');
+  if (!adopted) exit(1);
+
+  // ── 6. 审批穿透（M4 / UX S5）：blank 角色是 always_ask，父链到 root 无人代批
+  //     ⇒ 叶子工具必须停下来等人。编排工具豁免（D5）已由上一幕反证：
+  //     刚才那次 agent 工具调用没有弹审批就直接成功了。
+  await evalJs(`window.axon.invoke('agent.prompt', { path: '${spawned}', text: '动手试试' })`);
+  const asked = await until(`!!document.querySelector('[data-smoke="approval-banner"]')`);
+  log(asked, '叶子工具触发 HITL 门，审批 banner 弹出（approval.request 穿透到人）');
+  if (!asked) exit(1);
+
+  await evalJs(`document.querySelector('[data-smoke="approval-approve"]').click()`);
+  const cleared = await until(`!document.querySelector('[data-smoke="approval-banner"]')`);
+  log(cleared, '点「批准」后 banner 消失，工具放行（pending.resolved）');
+  if (!cleared) exit(1);
+
+  // ── 7. 预算熔断（M3 切片 6）：含「烧钱」的 prompt×2 走完 warning → frozen
+  await evalJs(`window.axon.invoke('agent.prompt', { path: '${spawned}', text: '烧钱第一轮' })`);
   let warned = false;
   for (let i = 0; i < 40; i++) {
     warned = await evalJs(`!!document.querySelector('.budget.warning')`);
@@ -197,7 +238,7 @@ try {
   log(warned, '第一轮 prompt 后出现预算警告 banner（budget.warning → React 重渲染）');
   if (!warned) exit(1);
 
-  await evalJs(`window.axon.invoke('agent.prompt', { path: '${spawned}', text: '第二轮' })`);
+  await evalJs(`window.axon.invoke('agent.prompt', { path: '${spawned}', text: '烧钱第二轮' })`);
   let frozen = false;
   for (let i = 0; i < 40; i++) {
     frozen = await evalJs(

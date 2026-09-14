@@ -1,6 +1,7 @@
 # M4 协作动作与落账：方案设计与实施计划
 
-> 状态：设计评审中 → **实施中**（2026-09-13 用户评审通过，D2 有修正） → 已完成
+> 状态：设计评审中 → 实施中 → **✅ 已完成（2026-09-14）**
+> 评审：2026-09-13 用户评审通过，D2 有修正（见 §〇）
 > 对应架构：01 §6.4 MessageBus ｜ 依赖里程碑：M3（编排内核）
 > 并行输入：`docs/ux/00-信息架构与屏幕清单.md`（MX，§6.6「M4 必补清单」）、`docs/spikes/S1-真实模型尖峰报告.md`
 
@@ -429,19 +430,21 @@ developer-1 跑完 → setStatus(done)
 
 ## 九、验收标准
 
-- [ ] 四种协作动作按 §4.1 映射表落账，`origin.toolCallId` 幂等
-- [ ] `ledger.query` 支持 agent/子树/动作/adoption 过滤与分页
-- [ ] 每笔记录在目标终态时自动 `settled`，带 usage 增量与摘要
-- [ ] 人可对 consult/delegate 记录表态，状态变化实时推到 UI
-- [ ] AutoAdoption：开关可设；裁决者为被裁决方（或其后代）时回落人工并写明原因；
-      `adoptedBy` 在账本上区分 human/agent；非 arbiter 调 `ledger_adopt` 被拒
-- [ ] `always_ask` 角色的工具调用会挂起并冒泡到人；父有权时父代批不惊动人
-- [ ] `approval.respond` 幂等；超时视为拒绝且原因回灌给模型
-- [ ] `pending.list` 能在 UI 刷新后补拉挂起请求
-- [ ] 预算事件的 spent 与 limits 是两个不同的数；`budget.get` 可拉当前档位
-- [ ] `AgentSnapshot` 带 sessionId/forkMode/waitingOn
-- [ ] 两个死事件已删除，无残留引用
-- [ ] `bun run check` 全绿 + `ui-smoke` 七幕 + `example:orchestration` 五问
+- [x] 四种协作动作按 §4.1 映射表落账，`origin.toolCallId` 幂等 —— `orchestrator.test.ts`（27 例）
+- [x] `ledger.query` 支持 agent/子树/动作/adoption 过滤与分页 —— `ledger.test.ts`（21 例）
+- [x] 每笔记录在目标终态时自动 `settled`，带 usage 增量与摘要 —— `host.ledger.test.ts`
+- [x] 人可对 consult/delegate 记录表态，状态变化实时推到 UI —— ui-smoke 幕 5
+- [x] AutoAdoption：开关可设；裁决者为被裁决方（或其后代）时回落人工并写明原因；
+      `adoptedBy` 在账本上区分 human/agent；非 arbiter 调 `ledger_adopt` 被拒 —— `adoption.test.ts`（14 例）+ `host.ledger.test.ts`
+- [x] `always_ask` 角色的工具调用会挂起并冒泡到人；父有权时父代批不惊动人 —— `approval.test.ts`（25 例）
+- [x] `approval.respond` 幂等；超时视为拒绝且原因回灌给模型
+- [x] `pending.list` 能在 UI 刷新后补拉挂起请求 —— `App.tsx` 冷启动 `reloadM4()`
+- [x] 预算事件的 spent 与 limits 是两个不同的数；`budget.get` 可拉当前档位
+- [x] `AgentSnapshot` 带 sessionId/forkMode/waitingOn
+- [x] 两个死事件已删除，无残留引用
+- [x] `bun run check` 全绿（274 测试）+ `ui-smoke` **九幕** + `example:orchestration` 五问
+
+实测总数：176 → **274** 例（原估 ~225；多出的来自 host 层账本生命周期与审批接线的集成测试）。
 
 ## 十、文档同步
 
@@ -449,3 +452,53 @@ developer-1 跑完 → setStatus(done)
 - `docs/01-架构决策-方案B.md` §1 进度表 + §6.4 落地说明
 - 本文件状态行 + §五「设计 vs 实测出入」回写（M3 的惯例）
 - `docs/ux/00-信息架构与屏幕清单.md`：M4 已定的协议面回写（由 MX 会话或主线收口）
+
+---
+
+## 十一、设计 vs 实测出入（收尾回写）
+
+M3 的惯例：设计文档不改成「事后正确」，把出入单列，让下一个里程碑知道哪些推断靠不住。
+
+### 1. `always_ask` 一开闸就咬人（内置角色 + 测试夹具全中）
+
+D5 只说了「拦叶子工具不拦编排工具」，但没算到**测试夹具里的角色也会被拦**。
+HITL 门接进 `onBeforeTool` 的那一刻，`host.test.ts` 里三个没写 `approval` 字段的角色
+（boss/reader/heir）集体挂起等人批 —— 因为缺省档不是 `auto`。
+
+这是新门的第一次真实捕获，不是 bug：夹具的角色本来就没声明自己的审批档，
+以前没人执行这个字段所以看不出来。修法是夹具显式写 `approval: 'auto'`，
+而不是把缺省档改宽 —— 缺省宽松等于把「没想清楚」默认成「放行」。
+
+### 2. 冒烟里没有叶子工具，审批门根本无从演示
+
+设计时默认「always_ask 角色调工具会弹审批」，实测发现 **desktop 生产路径的
+tools universe 是空的**（`index.ts` 从不传 `tools`，六件套是 host 现造的编排工具），
+而编排工具按 D5 豁免。于是 HITL 门在真实应用里**一次也触发不了**。
+
+补法：冒烟模式注入一个无害的 `smoke_echo` 叶子工具。这暴露了一个真问题 ——
+**M4 交付的审批能力在 M6/M7 给出真实叶子工具之前，对最终用户是不可见的**。
+记在这里，M6 接真实工具集时第一件事就是回来验这条链路。
+
+### 3. 白名单补丁必须单一源，否则热重载会冲掉
+
+冒烟给角色白名单加 `smoke_echo` 时，第一版只改了 `AxonHost` 构造处，
+结果 `RoleBridge` 拿着原始 `ALL_ROLES` 又跑了一遍 `updateRoles`，补丁被冲掉，
+表现为「工具在 universe 里但模型调用时报 not found」。
+
+教训不限于冒烟：**角色集合有两个注入点（host 构造 + RoleBridge 热重载），
+任何对内置角色的加工都必须在两者的共同上游做**。已用 `EFFECTIVE_ROLES` 常量收口。
+
+### 4. 冒烟幕次之间的隐形耦合：预算是终态
+
+原冒烟给每一轮都注入 0.05 成本（硬线 0.06），M4 新增两幕后额度在账本幕就烧光了，
+后面的幕全被 frozen 拒掉。预算冻结是**终态**，所以任何「消耗额度」的幕必须排在最后，
+或者根本不消耗。
+
+改法是让计费只认含「烧钱」的 prompt —— 幕次顺序重新变得自由。
+一般原则：**冒烟里任何单向不可逆的状态（冻结、删除、终态）都会给后续幕次制造隐形依赖**。
+
+### 5. `usage` 归因确实不精确，且已能在真模型下看见
+
+设计里写明「并发下差值会重叠计数，账本 usage 是归因估算」。真模型尖峰（qwen3-max，
+单次 $0.033）下 delegate 记录的 usage 与 root 累计能对上，是因为**只派生了一个子**。
+多子并发时的重叠仍未实测 —— M5 落盘后若要做成本报表，这是第一个要重新设计的地方。

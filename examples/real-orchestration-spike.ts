@@ -12,6 +12,7 @@
  *   - `agent` 工具的 role 参数，模型会不会瞎填一个不存在的角色？
  *   - spawn 之后它会不会主动 `agent_wait`，还是直接向用户交差（编排的最大失败模式）？
  *   - 真实 token 成本在父链上汇总得对不对
+ *   - （M4）模型自主驱动的协作是否真的落了账，且子终态后自动结算
  *
  * 失败是有价值的输出：模型不会用工具 = prompt/description 要改，而不是代码有 bug。
  */
@@ -93,7 +94,19 @@ const children = agents.filter((a) => a.path !== planner.path && a.path !== ROOT
 const waited = timeline.some((l) => l.includes('waiting'));
 const root = agents.find((a) => a.path === ROOT_PATH);
 
-console.log('\n四问验收：');
+// ── M4：账本盘点 ──────────────────────────────────────────
+const ledger = await host.execute('ledger.query', {});
+console.log('\n协作账本：');
+for (const r of ledger.records) {
+  console.log(
+    `  ${r.action.padEnd(9)} ${r.from} → ${r.to}  ${r.status.padEnd(8)} ` +
+      `${r.adoption.padEnd(15)} $${(r.usage?.costUsd ?? 0).toFixed(6)}`,
+  );
+  if (r.summary) console.log(`      ↳ ${r.summary.slice(0, 120)}`);
+}
+if (ledger.records.length === 0) console.log('  (空)');
+
+console.log('\n五问验收：');
 const checks: [string, boolean, string][] = [
   ['① 模型会 spawn', children.length > 0, `派生了 ${children.length} 个子 Agent`],
   [
@@ -106,6 +119,17 @@ const checks: [string, boolean, string][] = [
     '④ 成本沿父链汇总',
     (root?.usage?.costUsd ?? 0) > 0,
     `root 累计 $${(root?.usage?.costUsd ?? 0).toFixed(6)}`,
+  ],
+  // 第五问是 M4 新增的：FakeDriver 单测只能证明「工具被调用时会落账」，
+  // 证不了真模型自主选工具时账也落得上——中间隔着参数解析与 forkMode 判定。
+  [
+    '⑤ 协作已落账且结算',
+    ledger.records.length > 0 && ledger.records.every((r) => r.status === 'settled'),
+    ledger.records.length === 0
+      ? '账本为空 —— 模型没用编排工具，或落账拦截点漏了'
+      : `${ledger.records.length} 笔，` +
+        `未结算 ${ledger.records.filter((r) => r.status !== 'settled').length} 笔，` +
+        `动作 ${[...new Set(ledger.records.map((r) => r.action))].join('/')}`,
   ],
 ];
 for (const [name, ok, detail] of checks) console.log(`  ${ok ? '✓' : '✗'} ${name}：${detail}`);
