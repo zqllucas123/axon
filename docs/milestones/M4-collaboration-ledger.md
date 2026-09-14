@@ -1,6 +1,6 @@
 # M4 协作动作与落账：方案设计与实施计划
 
-> 状态：**设计评审中** → 实施中 → 已完成
+> 状态：设计评审中 → **实施中**（2026-09-13 用户评审通过，D2 有修正） → 已完成
 > 对应架构：01 §6.4 MessageBus ｜ 依赖里程碑：M3（编排内核）
 > 并行输入：`docs/ux/00-信息架构与屏幕清单.md`（MX，§6.6「M4 必补清单」）、`docs/spikes/S1-真实模型尖峰报告.md`
 
@@ -8,17 +8,19 @@
 
 ## 〇、需要用户拍板的决策（评审时逐条过）
 
-MX 文档列出 13 个开放问题，其中 6 个是真正需要用户拿主意的（其余我在 §4 直接给了技术答案）。
-每条给推荐项 + 反方理由，**请逐条确认或否决**。
+MX 文档列出 13 个开放问题，其中 6 个是真正需要用户拿主意的（其余在 §4 直接给技术答案）。
 
-| # | 决策 | 推荐 | 反方理由（为什么可能选另一个） |
+**评审结果（2026-09-13）**：D1 / D5 照推荐执行；D3 / D4 / D6 评审未异议，照推荐执行；
+**D2 被用户修正**——不是「只有人能表态」，而是「默认人表态，但提供全局开关把决策权交给指定 Agent」。
+
+| # | 决策 | 结论 | 理由 |
 |---|---|---|---|
-| D1 | **人能不能手动发起协作动作**（把 A 的活 handoff 给 B） | ❌ **M4 不做**，只做 Agent 工具触发 | 反方：用户会想手动接管。但 tutti 的协作记录全部由「哪个 turn 的哪次 tool call 派生」定义（02 §3.2），引入 `actor: user` 会让账本出现一类**没有发起方转录**的记录，from 字段语义分裂。留到 MU 有了会话视图再谈 |
-| D2 | **adoption 由谁表态** | **只有人能表态**（UI 发 `ledger.adopt`） | 反方：让父 Agent 自动表态更省事。但"Agent 自己批准自己的协作成果"就是给编排层开天窗（01 §6.4 反对特权角色的同一条理由）。代价：没人点就永远 pending |
-| D3 | **`agent.message.received` 事件的去留** | **删掉**，账本是唯一口径 | 反方：保留可承载"轻通知"。但 MX §6.1 明确警告双口径风险，而这个事件**从未有过发射方**（死声明），删掉零成本 |
-| D4 | **`orchestration.deadlock` 事件的去留** | **删掉** | M3 决策 #3（wait 仅限后代）之后死锁结构性不可能（`host.ts:20-24`）。留着会误导 MU 去设计一个永不出现的界面 |
-| D5 | **审批默认档的实际行为**——`always_ask` 现在是七个内置角色里 4 个的配置值（`roles.ts:83,99,134,151`），但**从未执行过**。M4 接线后它会立刻生效 | **生效，但只拦「叶子工具」，不拦六个编排工具** | 反方：编排工具（spawn/interrupt）也该问人。但现在 tools universe 里叶子工具是空的（`host.ts:116` `options.tools ?? []`），若拦编排工具，`always_ask` 的四个角色一 spawn 就卡住等人批，M3 的 E2E 与真模型尖峰全部失效。等 M6/M7 有了真叶子工具再放开 |
-| D6 | **账本落在哪** | **纯内存 + 协议暴露，M4 不落盘** | 反方：重启即丢。但落盘布局是 M5 的正题（03 §7 已决「M5 schema 带版本号并为 M4 账本预留扩展位」）。M4 把 `LedgerRecord` 带上 `version` 外箱，M5 直接序列化 |
+| D1 | **人能不能手动发起协作动作**（把 A 的活 handoff 给 B） | ✅ **M4 不做**，只做 Agent 工具触发 | tutti 的协作记录全部由「哪个 turn 的哪次 tool call 派生」定义（02 §3.2），引入 `actor: user` 会让账本出现一类**没有发起方转录**的记录，from 字段语义分裂。留到 MU 有了会话视图再谈 |
+| D2 | **adoption 由谁表态** | ✅ **默认人表态 + 可选 AutoAdoption 委派给指定 Agent**（用户修正，详见 §4.5） | 人工表态的代价是「没人点就永远 pending」，长跟踪任务不现实。但委派必须带两条硬约束，否则退化成 01 §6.4 反对的天窗（§4.5） |
+| D3 | **`agent.message.received` 事件的去留** | ✅ **删掉**，账本是唯一口径 | MX §6.1 明确警告双口径风险；该事件**从未有过发射方**（死声明），删掉零成本 |
+| D4 | **`orchestration.deadlock` 事件的去留** | ✅ **删掉** | M3 决策 #3（wait 仅限后代）之后死锁结构性不可能（`host.ts:20-24`）。留着会误导 MU 去设计一个永不出现的界面 |
+| D5 | **审批默认档的实际行为**——`always_ask` 是 4 个内置角色的配置值（`roles.ts:83,99,134,151`）但**从未执行过** | ✅ **生效，但只拦叶子工具，不拦六个编排工具** | tools universe 里叶子工具现在是空的（`host.ts:116` `options.tools ?? []`），若拦编排工具，`always_ask` 的四个角色一 spawn 就卡住等人批，M3 的 E2E 与真模型尖峰全部失效。等 M6/M7 有了真叶子工具再放开 |
+| D6 | **账本落在哪** | ✅ **纯内存 + 协议暴露，M4 不落盘** | 落盘布局是 M5 正题（03 §7 已决「M5 schema 带版本号并为 M4 账本预留扩展位」）。M4 把 `LedgerRecord` 带上 `version` 外箱，M5 直接序列化 |
 
 ---
 
@@ -31,7 +33,8 @@ MX 文档列出 13 个开放问题，其中 6 个是真正需要用户拿主意�
 
 1. **协作动作枚举化 + 落账**：`consult | fork | delegate | handoff` 四种动作，
    由六个编排工具的调用派生，每笔进账本（`LedgerRecord`），可按 agent/子树/动作/adoption 查询
-2. **adoption 裁决**：`pending → adopted | rejected | not_applicable`，人在 UI 表态
+2. **adoption 裁决**：`pending → adopted | rejected | not_applicable`，默认人在 UI 表态；
+   可开 **AutoAdoption** 把决策权委派给指定 Agent（§4.5，带两条硬约束 + 全量审计）
 3. **审批父链穿透**：工具执行前的 HITL 门，请求沿父链向上直到人；响应端三件套
    （`approval.respond` / `question.respond` / `pending.list`）全部接线
 4. **协议数据正确性修订**：预算事件的 `limitUsd` 语义 bug（G9.1）、`budget.get`（G7.3）、
@@ -110,6 +113,11 @@ export interface LedgerRecord {
   adoption: Adoption;
   adoptedAt?: number;
   adoptedNote?: string;
+  /**
+   * 谁做的裁决。自动裁决必须与人工裁决**在账本上可区分** ——
+   * 否则开了 AutoAdoption 之后，整本账就失去了「这条是人看过的」这个最关键的信息。
+   */
+  adoptedBy?: { kind: 'human' } | { kind: 'agent'; path: AgentPath; policyAt: number };
   /** 这笔协作**增量**消耗（子树 usage 快照差值，非累计）。 */
   usage?: UsageTotals;
   at: number;
@@ -228,6 +236,58 @@ G4.2（当前任务文本）**不进快照**：任务文本长度无上限，快
 （`agent.list` + 每次 `agent.status`），把它塞进去等于每次状态变化都重传一遍任务全文。
 协议答案是「UI 用 `agent.messages` 取 transcript 首条 user 文本」——已有命令够用（G3.1）。
 
+### 4.5 AutoAdoption：把裁决权委派给 Agent（D2 用户修正）
+
+默认人工表态的真实代价是「没人点就永远 pending」——一个跑一晚上的任务树会积几十笔无人裁决的记录。
+所以设全局开关。但委派必须带三件东西，否则就是 01 §6.4 反对的那个天窗：
+
+```ts
+export type AdoptionPolicy =
+  | { mode: 'human' }                                        // 默认
+  | { mode: 'delegate'; arbiter: AgentPath }                 // 指定实例
+  | { mode: 'delegate'; arbiterRole: string };               // 指定角色（取该角色最早的存活实例）
+```
+
+**约束一：裁决者不得是被裁决方（或其后代）。**
+`adoption` 裁的是「`to` 的产出该不该被采纳」。所以：
+
+| arbiter 与记录的关系 | 判定 | 理由 |
+|---|---|---|
+| `arbiter === to` | ❌ 禁止，回落人工 | 自己给自己发合格证 |
+| `arbiter` 是 `to` 的后代 | ❌ 禁止，回落人工 | 上条的变体（下属给上级背书） |
+| `arbiter === from` | ✅ 允许 | 发起方判断成果好不好，是正当的编排语义 |
+| 第三方（如 aligner） | ✅ 允许，最干净 | 与两端都无利益关系 |
+
+回落人工时记录保持 `pending` 并在 `adoptedNote` 写明回落原因，**不静默失败**。
+
+**约束二：裁决要留署名。**
+`adoptedBy` 字段区分 human / agent，agent 还要记 `policyAt`（当时生效的策略设置时间）。
+UI 上自动裁决的记录必须能一眼认出来，否则开了开关之后整本账的可信度归零。
+
+**约束三：裁决权靠工具行使，且走 host 发放。**
+新增第七个编排工具 `ledger_adopt(recordId, adoption, note)`。按 M3 不变量（AGENTS.md §5）：
+它与其他六个一样 per-spawn 双闭包 bind `selfPath`，**不允许模型传目标身份**；
+host 在 execute 时校验「你是不是当前策略的 arbiter」，不是就 throw（错误回灌给模型）。
+工具按 M3 决策 #1（全员全件套）发给所有角色，鲁棒性交给运行期校验——
+因为策略可以在 spawn 之后才改，按 spawn 时的策略发工具会得到一个改不动的静态授权。
+
+**触发时机**：记录 `settled`（目标终态、summary 已有）且 `adoption === 'pending'` 时，
+host 向 arbiter 投递一条裁决请求（走 `requestRun`，受闸门与预算管）：
+
+```
+[协作裁决] 记录 L1：delegate /root/planner-1 → /root/planner-1/developer-1
+交付摘要：<summary>
+请用 ledger_adopt 工具给出 adopted 或 rejected，并用一句话说明理由。
+```
+
+**两个必须堵的递归**：
+1. 裁决请求本身不落账（它不是四种协作动作之一），否则会无限自繁殖；
+2. arbiter 跑裁决轮时产生的新协作（如它又去 spawn）照常落账，但那些记录的裁决请求
+   不得再发给同一个 arbiter 形成环 —— 用「每条记录最多发一次裁决请求」的幂等标记堵住。
+
+**策略怎么设**：配置文件 `~/.axon/config.json` 的 `adoptionPolicy`（启动默认值）
+\+ 运行时命令 `ledger.setAdoptionPolicy`（UI 开关）。配置文件里只能写 `arbiterRole`（path 是运行期生成的）。
+
 ### 4.4 装配关系
 
 ```
@@ -243,7 +303,11 @@ AxonHost.recordCollab() ──► Ledger.record() ──► emit('ledger.recorde
     ▼
 Ledger.settle(id, {usage 增量, summary}) ──► emit('ledger.updated')
 
-UI 表态 ledger.adopt ──► Ledger.adopt() ──► emit('ledger.updated')
+表态（二选一，§4.5）
+  人：UI 发 ledger.adopt        ──► Ledger.adopt(by=human)  ──► emit('ledger.updated')
+  Agent：settled 后 host 投递裁决请求给 arbiter
+        → arbiter 调 ledger_adopt 工具（host 校验身份 + 两条约束）
+        → Ledger.adopt(by=agent) ──► emit('ledger.updated')
 ```
 
 审批链路：
@@ -337,7 +401,7 @@ developer-1 跑完 → setStatus(done)
 
 | # | 切片 | 验证 |
 |---|---|---|
-| 1 | `protocol/ledger.ts` + `ipc.ts`/`agent.ts` 协议扩展（含删两个死事件、修预算事件形状） | `bun run typecheck` 全绿；guard 无新增 pi import |
+| 1 | `protocol/ledger.ts` + `ipc.ts`/`agent.ts` 协议扩展（含 `AdoptionPolicy`、删两个死事件、修预算事件形状） | `bun run typecheck` 全绿；guard 无新增 pi import |
 | 2 | `kernel/ledger.ts` Ledger 类（record/settle/adopt/query + 幂等 + 上限） | 单测 ~18 例：四动作映射、幂等键、查询过滤（agent/subtree/action/adoption/分页）、上限淘汰 |
 | 3 | `orchestrator.ts` driver 加 `record`，六工具接落账（三个工具不落账） | 单测：FakeDriver 断言"哪些工具落账、动作是什么、forkMode 如何决定 delegate/fork" |
 | 4 | `host.ts` 装配 Ledger + settle 钩子 + usage 增量归因 + 三条 `ledger.*` 命令 | host 单测：spawn→跑完→记录 open→settled；remove 时 settle |
@@ -345,6 +409,7 @@ developer-1 跑完 → setStatus(done)
 | 6 | `host.ts` onBeforeTool 接 HITL 门 + 看门狗豁免 + 三条响应命令 | host 单测 + E2E：always_ask 角色的工具调用挂起→respond→继续 |
 | 7 | `budget.get` + 预算事件修订接线 | 单测：事件 payload 的 spent 与 limits 是两个不同的数 |
 | 8 | 最小 UI：账本面板（列表 + 表态按钮）+ 审批 banner（批/拒） | ui-smoke 新增 2 幕：落账出现在 DOM；审批 banner 点批准后 agent 继续 |
+| 8.5 | **AutoAdoption**：`ledger_adopt` 第七工具 + 策略存取 + 裁决请求投递 + 两条约束 | 单测：arbiter===to / to 后代 ⇒ 回落人工；arbiter===from ⇒ 允许；非 arbiter 调工具 ⇒ throw；每记录只发一次请求（幂等）；`adoptedBy` 写对 |
 | 9 | 真模型 E2E：`examples/real-orchestration-spike.ts` 扩一问「账本是否落账」 | `bun run example:orchestration` 五问全过 |
 
 ---
@@ -368,6 +433,8 @@ developer-1 跑完 → setStatus(done)
 - [ ] `ledger.query` 支持 agent/子树/动作/adoption 过滤与分页
 - [ ] 每笔记录在目标终态时自动 `settled`，带 usage 增量与摘要
 - [ ] 人可对 consult/delegate 记录表态，状态变化实时推到 UI
+- [ ] AutoAdoption：开关可设；裁决者为被裁决方（或其后代）时回落人工并写明原因；
+      `adoptedBy` 在账本上区分 human/agent；非 arbiter 调 `ledger_adopt` 被拒
 - [ ] `always_ask` 角色的工具调用会挂起并冒泡到人；父有权时父代批不惊动人
 - [ ] `approval.respond` 幂等；超时视为拒绝且原因回灌给模型
 - [ ] `pending.list` 能在 UI 刷新后补拉挂起请求
