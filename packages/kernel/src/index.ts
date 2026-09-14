@@ -52,6 +52,14 @@ export {
 export { BudgetGuard, type BudgetLimits, type BudgetState } from './budget.ts';
 
 export {
+  Ledger,
+  truncateSummary,
+  type LedgerOptions,
+  type RecordCollabSpec,
+  type SettleSpec,
+} from './ledger.ts';
+
+export {
   AgentRegistry,
   type AgentNode,
   type RegisterSpec,

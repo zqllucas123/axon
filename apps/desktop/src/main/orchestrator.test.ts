@@ -11,7 +11,15 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import type { AgentPath, AgentSnapshot, AgentStatus, MessageLike } from '@axon/protocol';
+import type {
+  Adoption,
+  AgentPath,
+  AgentSnapshot,
+  AgentStatus,
+  CollabAction,
+  CollabOrigin,
+  MessageLike,
+} from '@axon/protocol';
 import type { AgentToolResult } from '@axon/kernel';
 import {
   createOrchestrationTools,
@@ -155,6 +163,7 @@ class FakeDriver implements OrchestrationDriver {
       updatedAt: now,
       usage: { ...a.usage },
       lastError: a.lastError,
+      sessionId: a.path,
     };
   }
 
@@ -182,6 +191,31 @@ class FakeDriver implements OrchestrationDriver {
     if (!a) throw new Error(`Agent 不存在: ${path}`);
     a.steerLog.push(text);
   }
+
+  // ── M4 落账与裁决 ──
+  collabLog: Array<{
+    action: CollabAction;
+    to: AgentPath;
+    origin: CollabOrigin;
+    contextScope?: string;
+  }> = [];
+  adoptLog: Array<{ id: string; adoption: Adoption; note?: string }> = [];
+  /** 模拟宿主的资格校验失败。 */
+  adoptRejection?: string;
+
+  recordCollab(spec: {
+    action: CollabAction;
+    to: AgentPath;
+    origin: CollabOrigin;
+    contextScope?: string;
+  }): void {
+    this.collabLog.push(spec);
+  }
+
+  adoptCollab(spec: { id: string; adoption: Adoption; note?: string }): void {
+    if (this.adoptRejection) throw new Error(this.adoptRejection);
+    this.adoptLog.push(spec);
+  }
 }
 
 // ── 辅助 ──────────────────────────────────────────────────────
@@ -207,10 +241,18 @@ async function call(
 }
 
 describe('编排工具 · 集合与目标校验', () => {
-  it('createOrchestrationTools 产出六件套且名字齐全', () => {
+  it('createOrchestrationTools 产出七件套且名字齐全', () => {
     const { all } = toolsOf(new FakeDriver());
     expect(all.map((t) => t.name).sort()).toEqual(
-      ['agent', 'agent_check', 'agent_interrupt', 'agent_message', 'agent_resume', 'agent_wait'].sort(),
+      [
+        'agent',
+        'agent_check',
+        'agent_interrupt',
+        'agent_message',
+        'agent_resume',
+        'agent_wait',
+        'ledger_adopt',
+      ].sort(),
     );
   });
 
@@ -425,5 +467,134 @@ describe('编排工具 · check / message / resume / interrupt', () => {
     const r = await call(byName.get('agent_interrupt')!, { id: c.path });
     expect(d.agents.get(c.path)!.interruptedTimes).toBe(1);
     expect(r.details.status).toBe('interrupted');
+  });
+});
+
+// ── M4 落账 ──────────────────────────────────────────────────
+
+describe('编排工具 · 协作落账（M4）', () => {
+  it('agent 缺省 forkMode ⇒ delegate（干净上下文的下属 = 委派）', async () => {
+    const d = new FakeDriver();
+    const { byName } = toolsOf(d);
+    await call(byName.get('agent')!, { role: 'developer', task: '写方案' });
+    expect(d.collabLog).toHaveLength(1);
+    expect(d.collabLog[0]!.action).toBe('delegate');
+    expect(d.collabLog[0]!.to).toBe(`${d.selfPath}/developer-1`);
+    expect(d.collabLog[0]!.origin).toEqual({ tool: 'agent', toolCallId: 'toolCall-1' });
+  });
+
+  it.each(['none', '', 'NONE', undefined])(
+    'forkMode=%p 归一到 delegate —— 用 parseForkMode 而不是比字符串',
+    async (forkMode) => {
+      const d = new FakeDriver();
+      const { byName } = toolsOf(d);
+      await call(byName.get('agent')!, { role: 'developer', task: 't', forkMode });
+      expect(d.collabLog[0]!.action).toBe('delegate');
+    },
+  );
+
+  it.each(['all', '3'])('forkMode=%p ⇒ fork（带父上下文分出去）', async (forkMode) => {
+    const d = new FakeDriver();
+    const { byName } = toolsOf(d);
+    await call(byName.get('agent')!, { role: 'developer', task: 't', forkMode });
+    expect(d.collabLog[0]!.action).toBe('fork');
+    expect(d.collabLog[0]!.contextScope).toBe(forkMode);
+  });
+
+  it('agent_message ⇒ consult；agent_resume ⇒ handoff', async () => {
+    const d = new FakeDriver();
+    const running = d.makeChild('developer');
+    running.status = 'running';
+    const doneChild = d.makeChild('tester');
+    doneChild.status = 'done';
+
+    const { byName } = toolsOf(d);
+    await call(byName.get('agent_message')!, { id: running.path, text: '注意边界' });
+    await call(byName.get('agent_resume')!, { id: doneChild.path, text: '再跑一轮' });
+
+    expect(d.collabLog.map((c) => c.action)).toEqual(['consult', 'handoff']);
+    expect(d.collabLog[0]!.origin.tool).toBe('agent_message');
+    expect(d.collabLog[1]!.origin.tool).toBe('agent_resume');
+  });
+
+  it('wait / check / interrupt 不落账 —— 它们不是协作动作，落了只会淹没账本', async () => {
+    const d = new FakeDriver();
+    const c = d.makeChild('developer');
+    c.status = 'done';
+    const { byName } = toolsOf(d);
+
+    await call(byName.get('agent_wait')!, { ids: [c.path] });
+    await call(byName.get('agent_check')!, { id: c.path });
+    await call(byName.get('agent_interrupt')!, { id: c.path });
+
+    expect(d.collabLog).toHaveLength(0);
+  });
+
+  it('目标校验失败时不落账（message 投给终态目标）', async () => {
+    const d = new FakeDriver();
+    const c = d.makeChild('developer');
+    c.status = 'done';
+    const { byName } = toolsOf(d);
+    await expect(
+      byName.get('agent_message')!.execute('c', { id: c.path, text: 'x' } as never),
+    ).rejects.toThrow(/终态/);
+    expect(d.collabLog).toHaveLength(0);
+  });
+
+  it('agent_resume 先落账后 fire —— 否则目标可能抢在落账前终态，账上永远挂着未结算', async () => {
+    const d = new FakeDriver();
+    const c = d.makeChild('developer');
+    c.status = 'done';
+    const order: string[] = [];
+    const origRecord = d.recordCollab.bind(d);
+    d.recordCollab = (spec) => {
+      order.push('record');
+      origRecord(spec);
+    };
+    const origRun = d.requestRun.bind(d);
+    d.requestRun = (path, text) => {
+      order.push('run');
+      return origRun(path, text);
+    };
+
+    const { byName } = toolsOf(d);
+    await call(byName.get('agent_resume')!, { id: c.path, text: 'go' });
+    expect(order).toEqual(['record', 'run']);
+  });
+});
+
+describe('编排工具 · ledger_adopt（M4 决策 D2）', () => {
+  it('参数里没有裁决者身份 —— 模型冒充不了别人', () => {
+    const { byName } = toolsOf(new FakeDriver());
+    const props = Object.keys(
+      (byName.get('ledger_adopt')! as { parameters: { properties: object } }).parameters
+        .properties,
+    );
+    expect(props.sort()).toEqual(['adoption', 'note', 'recordId']);
+  });
+
+  it('转交给宿主裁决并带上 note', async () => {
+    const d = new FakeDriver();
+    const { byName } = toolsOf(d);
+    await call(byName.get('ledger_adopt')!, {
+      recordId: 'L00000001-x',
+      adoption: 'adopted',
+      note: '结论可用',
+    });
+    expect(d.adoptLog).toEqual([
+      { id: 'L00000001-x', adoption: 'adopted', note: '结论可用' },
+    ]);
+  });
+
+  it('宿主的资格校验失败会 throw 回灌给模型', async () => {
+    const d = new FakeDriver();
+    d.adoptRejection = '你不是当前裁决者';
+    const { byName } = toolsOf(d);
+    await expect(
+      byName.get('ledger_adopt')!.execute('c', {
+        recordId: 'L1',
+        adoption: 'adopted',
+      } as never),
+    ).rejects.toThrow(/裁决者/);
   });
 });

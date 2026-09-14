@@ -39,6 +39,11 @@ export class BudgetGuard {
     return this.hardUsd <= 0;
   }
 
+  /** 当前阀值。事件与 `budget.get` 都靠它把「已用」与「上限」当成两个数报出去。 */
+  get limits(): { softUsd: number; hardUsd: number } {
+    return { softUsd: this.softUsd, hardUsd: this.hardUsd };
+  }
+
   /** 当前档位。 */
   get current(): BudgetState {
     return this.state;

@@ -259,4 +259,13 @@ export interface AgentSnapshot {
   updatedAt: number;
   usage: UsageTotals;
   lastError?: string;
+  /**
+   * 会话标识。M4 取值等于 path；M5 落盘后会与 path 解耦（重命名/移动不换会话），
+   * 所以 UI 与账本的 mention URI 一律用这个字段而不是 path 拼。
+   */
+  sessionId: string;
+  /** 创建时解析出的分身口径，与账本 contextScope 同源。 */
+  forkMode?: ForkModeSpec;
+  /** 当前在等哪些后代（waits 图的出边）；空表示没在等人。 */
+  waitingOn?: AgentPath[];
 }

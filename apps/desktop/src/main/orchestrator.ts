@@ -18,12 +18,23 @@
  *   agent_message   运行中投递（steer，下一轮生效）；终态 throw 提示改用 resume
  *   agent_resume    终态目标追加任务（fire 语义！结果用 agent_wait 等）
  *   agent_interrupt abort 下游（parked 则出队丢任务）
+ *
+ * M4 追加第七件：
+ *   ledger_adopt    裁决一笔协作产出（仅当前 AdoptionPolicy 的 arbiter 可用）
+ *
+ * M4 落账：落账点选在这一层而不是 host，是因为 `driver.selfPath` 已经把
+ * 「谁发起的协作」绑定好了，from 身份零成本可得。三个只读/控制类工具
+ * （wait / check / interrupt）**不落账** —— 它们不是协作动作，落了只会淹没账本。
  */
 
 import {
   isTerminal,
+  parseForkMode,
+  type Adoption,
   type AgentPath,
   type AgentSnapshot,
+  type CollabAction,
+  type CollabOrigin,
   type MessageLike,
 } from '@axon/protocol';
 import {
@@ -58,6 +69,16 @@ export interface OrchestrationDriver {
   endWait(): void;
   /** 向目标投递指导消息（下一轮生效）；目标在 parked 则排队到下一轮。 */
   steerTo(path: AgentPath, text: string): void;
+
+  /** M4：落一笔协作账。幂等（同 toolCallId 重复调不会出两行）。 */
+  recordCollab(spec: {
+    action: CollabAction;
+    to: AgentPath;
+    origin: CollabOrigin;
+    contextScope?: string;
+  }): void;
+  /** M4：裁决一笔协作。资格校验在宿主；不合格则 throw（错误回灌给模型）。 */
+  adoptCollab(spec: { id: string; adoption: Adoption; note?: string }): void;
 }
 
 // ── 常量与辅助 ────────────────────────────────────────────────
@@ -70,6 +91,7 @@ export const ORCHESTRATION_TOOL_NAMES = [
   'agent_message',
   'agent_resume',
   'agent_interrupt',
+  'ledger_adopt',
 ] as const;
 
 /** agent_wait 默认超时 600s（M3 §4.5）。 */
@@ -155,11 +177,21 @@ function agentTool(driver: OrchestrationDriver): AgentTool<typeof TASK> {
       'agent_resume / agent_interrupt 的目标。创建后立即返回，不等待它跑完——' +
       '要等它出结果请用 agent_wait。',
     parameters: TASK,
-    async execute(_toolCallId, params) {
+    async execute(toolCallId, params) {
       const path = driver.spawnChild({
         role: params.role,
         task: params.task,
         forkMode: params.forkMode,
+      });
+      // delegate vs fork 就看上下文口径：干净上下文的下属 = 委派；
+      // 带着父上下文分出去的 = 分叉（tutti 的 context_scope 正是此维度）。
+      // 注意用 parseForkMode 而不是比字符串："" / "NONE" / undefined 都该归 none。
+      const resolved = parseForkMode(params.forkMode);
+      driver.recordCollab({
+        action: resolved.kind === 'none' ? 'delegate' : 'fork',
+        to: path,
+        origin: { tool: 'agent', toolCallId },
+        contextScope: params.forkMode,
       });
       return result(
         `已创建子 Agent ${path}（角色 ${params.role}），用 agent_wait 等它收尾。`,
@@ -263,7 +295,7 @@ function agentMessageTool(driver: OrchestrationDriver): AgentTool<typeof MESSAGE
       '下一轮首条生效；目标在排队中，则到它下一轮开始时生效。' +
       '目标已终态时不可用——改用 agent_resume 追加任务。',
     parameters: MESSAGE,
-    async execute(_toolCallId, params) {
+    async execute(toolCallId, params) {
       const snap = requireTarget(driver, params.id);
       if (isTerminal(snap.status)) {
         throw new Error(
@@ -271,6 +303,13 @@ function agentMessageTool(driver: OrchestrationDriver): AgentTool<typeof MESSAGE
         );
       }
       driver.steerTo(snap.path, params.text);
+      // consult：steer 的 pi 语义是「下一轮生效，不保证被采纳」，
+      // 恰好需要 adoption 来裁决「这句指导最后算不算数」。
+      driver.recordCollab({
+        action: 'consult',
+        to: snap.path,
+        origin: { tool: 'agent_message', toolCallId },
+      });
       return result(`已投递给 ${snap.path}（下一轮生效）。`, {
         id: snap.path,
         status: snap.status,
@@ -299,13 +338,20 @@ function agentResumeTool(driver: OrchestrationDriver): AgentTool<typeof RESUME> 
       '新任务，让它重新跑起来。立即返回——要等结果请随后调用 agent_wait。' +
       '目标还在运行/排队时不可用。',
     parameters: RESUME,
-    async execute(_toolCallId, params) {
+    async execute(toolCallId, params) {
       const snap = requireTarget(driver, params.id);
       if (!isTerminal(snap.status)) {
         throw new Error(
           `agent ${snap.path} 状态为 ${snap.status}，agent_resume 只对终态目标可用（等结果用 agent_wait）`,
         );
       }
+      // 先落账再 fire：否则目标有可能在落账前就跑完进终态，
+      // settle 钩子找不到这笔 open 记录，账上就永远挂着一笔未结算。
+      driver.recordCollab({
+        action: 'handoff',
+        to: snap.path,
+        origin: { tool: 'agent_resume', toolCallId },
+      });
       // fire：失败会落在目标自己的 failed 状态上，父用 agent_check 追。
       void driver.requestRun(snap.path, params.text).catch(() => undefined);
       return result(`已向 ${snap.path} 追加任务。`, { id: snap.path });
@@ -333,7 +379,47 @@ function agentInterruptTool(driver: OrchestrationDriver): AgentTool<typeof INTER
   };
 }
 
-/** 为一棵树上的某个 Agent 现造全套六工具（per-spawn bind selfPath）。 */
+const ADOPT = Type.Object({
+  recordId: Type.String(),
+  adoption: Type.Union([Type.Literal('adopted'), Type.Literal('rejected')]),
+  note: Type.Optional(Type.String()),
+});
+
+/**
+ * ledger_adopt —— 裁决一笔协作产出（M4 决策 D2：AutoAdoption）。
+ *
+ * 三点写死在这里：
+ *  - 参数里**没有裁决者身份** —— 和另六个一样靠 selfPath 双闭包绑定（M3 不变量），
+ *    模型传不了「我是谁」，也就冒充不了裁决者。
+ *  - 只允许 adopted / rejected：回到 pending 或改 not_applicable 不是裁决，是抹账。
+ *  - 工具按 M3 决策 #1（全员全件套）发给所有角色，资格在 **execute 时**由宿主校验。
+ *    不按 spawn 时的策略发工具，是因为策略可以在 spawn 之后才改——
+ *    那样会得到一个永远改不动的静态授权。
+ */
+function ledgerAdoptTool(driver: OrchestrationDriver): AgentTool<typeof ADOPT> {
+  return {
+    name: 'ledger_adopt',
+    label: '裁决协作产出',
+    description:
+      '对协作账本里的一笔记录表态：adopted（采纳）或 rejected（不采纳），' +
+      '并用 note 写明理由。只有当前被指定为裁决者时可用；' +
+      '你不能裁决自己或自己后代交付的成果。',
+    parameters: ADOPT,
+    async execute(_toolCallId, params) {
+      driver.adoptCollab({
+        id: params.recordId,
+        adoption: params.adoption as Adoption,
+        note: params.note,
+      });
+      return result(`已对 ${params.recordId} 表态：${params.adoption}。`, {
+        id: params.recordId,
+        adoption: params.adoption,
+      });
+    },
+  };
+}
+
+/** 为一棵树上的某个 Agent 现造全套工具（per-spawn bind selfPath）。 */
 export function createOrchestrationTools(driver: OrchestrationDriver) {
   return [
     agentTool(driver),
@@ -342,5 +428,6 @@ export function createOrchestrationTools(driver: OrchestrationDriver) {
     agentMessageTool(driver),
     agentResumeTool(driver),
     agentInterruptTool(driver),
+    ledgerAdoptTool(driver),
   ];
 }

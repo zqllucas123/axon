@@ -19,6 +19,13 @@ import {
 } from '@axon/kernel';
 import { AxonHost } from './host.ts';
 
+/**
+ * 这组 fixture 角色专测**白名单**（能碰什么），所以审批档一律显式写 auto。
+ *
+ * 不写的后果很实：M4 把 HITL 门接线后，`approval` 缺省即
+ * DEFAULT_APPROVAL_MODE = always_ask，这些用例会在第一个工具调用处
+ * 挂起等人批。审批行为另有 host.approval.test.ts 专测。
+ */
 const ROLES: RoleDefinition[] = [
   {
     name: 'boss',
@@ -27,6 +34,7 @@ const ROLES: RoleDefinition[] = [
     instructions: '你是主管。',
     tools: ['peek', 'poke'],
     defaultForkMode: 'none',
+    approval: 'auto',
   },
   {
     name: 'reader',
@@ -35,6 +43,7 @@ const ROLES: RoleDefinition[] = [
     instructions: '你只能看。',
     tools: ['peek'],
     defaultForkMode: 'none',
+    approval: 'auto',
   },
   {
     name: 'heir',
@@ -43,6 +52,7 @@ const ROLES: RoleDefinition[] = [
     instructions: '你继承全部上下文。',
     tools: ['peek'],
     defaultForkMode: 'all',
+    approval: 'auto',
   },
 ];
 

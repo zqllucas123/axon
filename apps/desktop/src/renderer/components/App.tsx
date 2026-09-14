@@ -28,11 +28,17 @@ interface EditorState {
   editing?: string;
 }
 
-/** 预算档位（M3 §4.4）：主进程事件驱动，这里只做呈现。 */
+/**
+ * 预算档位（M3 §4.4）：主进程事件驱动，这里只做呈现。
+ *
+ * M4 修正：以前只有一个 `limitUsd`，而主进程往里面填的是 **spent**，
+ * 于是 banner 上「已用 / 上限」两个数永远相等（MX G9.1）。现在分开两个字段。
+ */
 interface BudgetView {
   state: 'ok' | 'warning' | 'frozen';
   usage?: UsageTotals;
-  limitUsd?: number;
+  spentUsd?: number;
+  hardUsd?: number;
 }
 
 const usd = (n?: number) => (n === undefined ? '?' : n.toFixed(2));
@@ -101,13 +107,13 @@ export function App() {
         );
         void reloadAgents();
       }),
-      window.axon.subscribe('budget.warning', ({ usage, limitUsd }) => {
-        setBudget({ state: 'warning', usage, limitUsd });
-        pushLog(`⚠ 预算警告：已用 $${usd(usage.costUsd)} / 上限 $${usd(limitUsd)}`, 'w');
+      window.axon.subscribe('budget.warning', ({ usage, spentUsd, hardUsd }) => {
+        setBudget({ state: 'warning', usage, spentUsd, hardUsd });
+        pushLog(`⚠ 预算警告：已用 $${usd(spentUsd)} / 上限 $${usd(hardUsd)}`, 'w');
       }),
-      window.axon.subscribe('budget.frozen', ({ usage, limitUsd }) => {
-        setBudget({ state: 'frozen', usage, limitUsd });
-        pushLog(`✗ 预算冻结：已用 $${usd(usage.costUsd)} / 上限 $${usd(limitUsd)}，新任务被拒绝`, 'e');
+      window.axon.subscribe('budget.frozen', ({ usage, spentUsd, hardUsd }) => {
+        setBudget({ state: 'frozen', usage, spentUsd, hardUsd });
+        pushLog(`✗ 预算冻结：已用 $${usd(spentUsd)} / 上限 $${usd(hardUsd)}，新任务被拒绝`, 'e');
       }),
     ];
     pushLog('Axon 已启动。点击左侧角色创建分身。', 'k');
@@ -213,8 +219,8 @@ export function App() {
         {budget.state !== 'ok' && (
           <div className={`budget ${budget.state}`} data-smoke="budget-banner">
             {budget.state === 'frozen'
-              ? `预算已冻结（已用 $${usd(budget.usage?.costUsd)} ／上限 $${usd(budget.limitUsd)}）：新分身与新任务被拒绝，在跑任务不受影响。`
-              : `预算警告（已用 $${usd(budget.usage?.costUsd)} ／上限 $${usd(budget.limitUsd)}）：接近熔断线，注意成本。`}
+              ? `预算已冻结（已用 $${usd(budget.spentUsd)} ／上限 $${usd(budget.hardUsd)}）：新分身与新任务被拒绝，在跑任务不受影响。`
+              : `预算警告（已用 $${usd(budget.spentUsd)} ／上限 $${usd(budget.hardUsd)}）：接近熔断线，注意成本。`}
           </div>
         )}
         <EventLog lines={log} />

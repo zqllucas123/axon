@@ -63,6 +63,8 @@ export interface RegisterSpec {
   /** 省略则挂在 ROOT 下。 */
   parent?: AgentPath;
   engine?: AxonEngine;
+  /** 创建时解析出的分身口径，入快照供 UI 与账本 contextScope 同源。 */
+  forkMode?: AgentSnapshot['forkMode'];
 }
 
 export interface RegistryOptions {
@@ -110,6 +112,8 @@ export class AgentRegistry {
         createdAt: at,
         updatedAt: at,
         usage: { ...ZERO_USAGE },
+        // M4：sessionId 暂等于 path；M5 落盘后两者解耦（见 AgentSnapshot 注释）。
+        sessionId: ROOT_PATH,
       },
     });
   }
@@ -186,6 +190,8 @@ export class AgentRegistry {
       createdAt: at,
       updatedAt: at,
       usage: { ...ZERO_USAGE },
+      sessionId: path,
+      forkMode: spec.forkMode,
     };
 
     this.nodes.set(path, spec.engine ? { snapshot, engine: spec.engine } : { snapshot });
@@ -280,6 +286,20 @@ export class AgentRegistry {
     node.snapshot.status = 'running';
     node.snapshot.updatedAt = this.now();
     return structuredClone(node.snapshot);
+  }
+
+  /**
+   * 同步「在等哪些后代」到快照（M4 / MX G4.6）。
+   *
+   * waits 图的真相在宿主（AxonHost.waits），这里只存一份供 UI 读的映像——
+   * 否则渲染层要为了知道「这个 agent 在等谁」额外开一个查询通道。
+   */
+  setWaitingOn(path: AgentPath, targets: readonly AgentPath[]): void {
+    const node = this.nodes.get(path);
+    if (!node) return;
+    if (targets.length === 0) delete node.snapshot.waitingOn;
+    else node.snapshot.waitingOn = [...targets];
+    node.snapshot.updatedAt = this.now();
   }
 
   /** 累加用量。父链同时累加，这样根节点天然是全局总账。 */

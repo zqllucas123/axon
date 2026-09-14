@@ -23,22 +23,34 @@
  */
 
 import {
+  DEFAULT_ADOPTION_POLICY,
   ROOT_PATH,
   isTerminal,
+  needsAdoption,
   parseForkMode,
+  type Adoption,
+  type AdoptionPolicy,
   type AgentPath,
   type AgentSnapshot,
+  type BudgetSnapshot,
+  type CollabAction,
+  type CollabOrigin,
   type CommandMap,
   type EventMap,
+  type LedgerQuery,
+  type LedgerRecord,
   type MessageLike,
+  type PendingRequest,
   type RoleDefinition,
   type RoleEntry,
   type RoleIssue,
   type SpawnAgentPayload,
+  type UsageTotals,
 } from '@axon/protocol';
 import {
   AgentRegistry,
   BudgetGuard,
+  Ledger,
   createAxonEngine,
   forkMessages,
   fromMessageLike,
@@ -52,6 +64,8 @@ import {
   createOrchestrationTools,
   type OrchestrationDriver,
 } from './orchestrator.ts';
+import { ApprovalBroker } from './approval.ts';
+import { arbiterIneligibleReason, resolveArbiter } from './adoption.ts';
 
 export type EmitFn = <E extends keyof EventMap>(
   event: E,
@@ -78,6 +92,10 @@ export interface HostOptions {
   budget?: BudgetOptions;
   /** idle 看门狗：running 且超时无任何事件 → 中断。0 = 关闭。默认 5 分钟（kalo 同值）。 */
   idleTimeoutMs?: number;
+  /** 审批请求超时（M4）。0 = 不超时。 */
+  approvalTimeoutMs?: number;
+  /** 裁决策略初值（M4 决策 D2）。缺省 = 人工表态。 */
+  adoptionPolicy?: AdoptionPolicy;
 }
 
 /** 默认 idle 看门狗 5 分钟 —— 抄 kalo `IDLE_TIMEOUT_MS = 5min`（02 §2.3）。 */
@@ -110,6 +128,20 @@ export class AxonHost {
   private readonly idleTimers = new Map<AgentPath, ReturnType<typeof setTimeout>>();
   private readonly lastActivity = new Map<AgentPath, number>();
 
+  // ── M4：账本 / 审批 / 裁决 ───────────────────────
+  private readonly ledger = new Ledger();
+  private readonly approvals: ApprovalBroker;
+  private adoptionPolicy: AdoptionPolicy;
+  private adoptionPolicyAt: number;
+  /**
+   * 正在等人批的 agent。看门狗对它们豁免 —— 等审批期间 agent 仍是 running，
+   * 不豁免就会被 idle 看门狗 abort 掉。另一个选项是定期 touch() 保活，
+   * 但那是骗看门狗，语义上不诚实。
+   */
+  private readonly awaitingApproval = new Set<AgentPath>();
+  /** 裁决请求的 recordId → arbiter，供 ledger_adopt 校验「你是不是被问的那个」。 */
+  private readonly arbitrationTargets = new Map<string, AgentPath>();
+
   constructor(options: HostOptions) {
     this.emit = options.emit;
     this.modelSource = options.modelSource;
@@ -117,6 +149,21 @@ export class AxonHost {
     this.registry = new AgentRegistry({ maxConcurrent: options.maxConcurrent ?? 6 });
     this.budget = new BudgetGuard(options.budget ?? { hardUsd: 0 });
     this.idleTimeoutMs = options.idleTimeoutMs ?? DEFAULT_IDLE_TIMEOUT_MS;
+    this.adoptionPolicy = options.adoptionPolicy ?? DEFAULT_ADOPTION_POLICY;
+    this.adoptionPolicyAt = Date.now();
+    this.approvals = new ApprovalBroker({
+      approvalModeOf: (p) => this.approvalModeOf(p),
+      exists: (p) => this.registry.has(p),
+      emit: (event, payload, source) => this.emit(event, payload, source),
+      onWaitStart: (p) => this.awaitingApproval.add(p),
+      onWaitEnd: (p) => {
+        this.awaitingApproval.delete(p);
+        // 批完就要让看门狗重新计时，否则人拖了五分钟再批，
+        // 工具刚开始跑就立刻被判定为卡死。
+        this.touch(p);
+      },
+      timeoutMs: options.approvalTimeoutMs,
+    });
     for (const role of options.roles) {
       this.roles.set(role.name, { role, source: 'builtin', errors: [] });
     }
@@ -126,6 +173,9 @@ export class AxonHost {
   dispose(): void {
     for (const t of this.idleTimers.values()) clearTimeout(t);
     this.idleTimers.clear();
+    this.approvals.dispose();
+    this.awaitingApproval.clear();
+    this.arbitrationTargets.clear();
     this.waits.clear();
     this.waitResolvers.clear();
     this.waitPromises.clear();
@@ -170,6 +220,189 @@ export class AxonHost {
   }
 
   /**
+   * 预算快照（M4 / MX G7.3）。
+   *
+   * frozen 是终态且只通过一次性事件宣布，UI 一刷新就再也不知道自己
+   * 已经被冻住了——所以必须有查询通道。
+   */
+  budgetSnapshot(): BudgetSnapshot {
+    const { softUsd, hardUsd } = this.budget.limits;
+    return {
+      state: this.budget.current,
+      spentUsd: this.budget.spent,
+      softUsd,
+      hardUsd,
+      disabled: this.budget.disabled,
+      usage: this.registry.get(ROOT_PATH)?.snapshot.usage ?? {
+        inputTokens: 0,
+        outputTokens: 0,
+        costUsd: 0,
+      },
+    };
+  }
+
+  // ── M4：协作账本 ───────────────────────────────
+
+  queryLedger(query: LedgerQuery) {
+    return this.ledger.query(query);
+  }
+
+  getLedgerRecord(id: string): LedgerRecord | null {
+    return this.ledger.get(id);
+  }
+
+  /** 人工裁决（`ledger.adopt` 命令的落点）。 */
+  adoptByHuman(id: string, adoption: Adoption, note?: string): LedgerRecord {
+    const record = this.ledger.adopt(id, adoption, { kind: 'human' }, note);
+    if (!record) throw new Error(`账本记录不存在: ${id}`);
+    this.emit('ledger.updated', { record }, record.to);
+    return record;
+  }
+
+  getAdoptionPolicy(): AdoptionPolicy {
+    return this.adoptionPolicy;
+  }
+
+  setAdoptionPolicy(policy: AdoptionPolicy): AdoptionPolicy {
+    this.adoptionPolicy = policy;
+    this.adoptionPolicyAt = Date.now();
+    this.emit('ledger.policyChanged', { policy }, ROOT_PATH);
+    return policy;
+  }
+
+  /** 挂起中的审批/提问（`pending.list`）。 */
+  listPending(): PendingRequest[] {
+    return this.approvals.list();
+  }
+
+  respondApproval(requestId: string, approved: boolean, note?: string): { accepted: true } {
+    return this.approvals.respond(requestId, approved, note);
+  }
+
+  /** 落一笔协作账（编排工具的 driver.recordCollab 主体）。 */
+  private recordCollab(
+    from: AgentPath,
+    spec: { action: CollabAction; to: AgentPath; origin: CollabOrigin; contextScope?: string },
+  ): void {
+    const record = this.ledger.record({
+      action: spec.action,
+      from,
+      to: spec.to,
+      origin: spec.origin,
+      contextScope: spec.contextScope,
+      // 基线：记录时刻目标子树的累计 usage。registry.addUsage 沿父链上滚，
+      // 所以节点自身的 usage 就是它子树的总和。
+      usageBaseline: this.registry.get(spec.to)?.snapshot.usage,
+    });
+    this.emit('ledger.recorded', { record }, spec.to);
+  }
+
+  /**
+   * 目标进终态（或被删）时结算它名下全部 open 记录。
+   *
+   * 不留悬空的 open 记录：否则账本上会积一堆永远未结算的行，
+   * 而 UI 无从分辨「还在跑」与「已经没了」。
+   */
+  private settleCollabFor(to: AgentPath, note?: string): void {
+    const open = this.ledger.openRecordsFor(to);
+    if (open.length === 0) return;
+    const usageNow = this.registry.get(to)?.snapshot.usage;
+    const summary = note ?? this.lastAssistantText(to);
+    for (const r of open) {
+      const settled = this.ledger.settle(r.id, { usageNow, summary });
+      if (!settled) continue;
+      this.emit('ledger.updated', { record: settled }, to);
+      this.maybeRequestArbitration(settled);
+    }
+  }
+
+  private lastAssistantText(path: AgentPath): string | undefined {
+    const messages = this.messagesOf(path);
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const m = messages[i];
+      if (!m || m.role !== 'assistant') continue;
+      const text = (m.content ?? [])
+        .filter((b): b is { type: 'text'; text: string } => b.type === 'text')
+        .map((b) => b.text)
+        .join('\n');
+      if (text) return text;
+    }
+    return undefined;
+  }
+
+  /**
+   * 结算后，若策略把裁决权委派给了 Agent，向它投递一条裁决请求。
+   *
+   * 两个递归必须堵住（M4 §4.5）：
+   *  1. 裁决请求本身不落账（它走 requestRun，不过编排工具）；
+   *  2. 每条记录最多发一次请求（markArbitrationSent 幂等标记）。
+   */
+  private maybeRequestArbitration(record: LedgerRecord): void {
+    if (!needsAdoption(record.action) || record.adoption !== 'pending') return;
+
+    const resolution = resolveArbiter(this.adoptionPolicy, record, {
+      agents: () => this.registry.list(),
+      exists: (p) => this.registry.has(p),
+    });
+    if (resolution.kind === 'human') {
+      // 回落人工时把原因写进账，不静默失败——否则用户以为开了开关
+      // 就不用管了，实际上这些记录在默默堆积。
+      if (resolution.reason) {
+        const updated = this.ledger.adoptNote(record.id, resolution.reason);
+        if (updated) this.emit('ledger.updated', { record: updated }, record.to);
+      }
+      return;
+    }
+
+    if (!this.ledger.markArbitrationSent(record.id)) return;
+    const arbiter = resolution.path;
+    this.arbitrationTargets.set(record.id, arbiter);
+
+    const prompt =
+      `[协作裁决] 记录 ${record.id}：${record.action} ${record.from} → ${record.to}\n` +
+      `交付摘要：${record.summary ?? '（无文本产出）'}\n` +
+      `请用 ledger_adopt 工具给出 adopted 或 rejected，并用一句话说明理由。`;
+
+    // fire：裁决跑不起来（在忙/预算冻结）不能拖城下水，
+    // 记录会保持 pending 等人来点。
+    void this.requestRun(arbiter, prompt).catch(() => undefined);
+  }
+
+  /** `ledger_adopt` 工具的落点：跑资格校验后写账。 */
+  private adoptByAgent(
+    arbiter: AgentPath,
+    spec: { id: string; adoption: Adoption; note?: string },
+  ): void {
+    const record = this.ledger.get(spec.id);
+    if (!record) throw new Error(`账本记录不存在: ${spec.id}`);
+
+    const expected = this.arbitrationTargets.get(spec.id);
+    if (expected !== arbiter) {
+      throw new Error(
+        `你不是记录 ${spec.id} 的裁决者${expected ? `（应为 ${expected}）` : ''}`,
+      );
+    }
+    // 再跑一遍资格校验：派发时合格不代表此刻合格（树形可能变了）。
+    const ineligible = arbiterIneligibleReason(arbiter, record);
+    if (ineligible) throw new Error(ineligible);
+
+    const updated = this.ledger.adopt(
+      spec.id,
+      spec.adoption,
+      { kind: 'agent', path: arbiter, policyAt: this.adoptionPolicyAt },
+      spec.note,
+    );
+    if (updated) this.emit('ledger.updated', { record: updated }, updated.to);
+  }
+
+  /** 某 Agent 生效的审批档。root 无角色 ⇒ undefined（它代表人，不能代批）。 */
+  private approvalModeOf(path: AgentPath) {
+    if (path === ROOT_PATH) return undefined;
+    const role = this.registry.get(path)?.snapshot.role;
+    return role ? this.roles.get(role)?.role.approval : undefined;
+  }
+
+  /**
    * 创建分身。
    *
    * 三个维度在这里一次性合成，且**顺序不能反**：
@@ -203,6 +436,7 @@ export class AxonHost {
       role: role.name,
       displayName: payload.overrides?.displayName ?? role.displayName,
       parent,
+      forkMode: payload.forkMode ?? role.defaultForkMode,
     });
 
     const engine = createAxonEngine({
@@ -214,10 +448,15 @@ export class AxonHost {
       sessionId: snapshot.path,
       // 闸门兜底：即使工具在 tools 全集里，未获角色授权也执行不了。
       // 与其指望上游正确裁剪 tools 数组，不如在执行前再拦一道。
-      onBeforeTool: async (name) =>
-        !allowSet || allowSet.has(name)
-          ? { allow: true }
-          : { allow: false, reason: `角色 ${role.name} 未获授权使用 ${name}` },
+      //
+      // 两道闸互不覆盖（M4）：白名单管「能碰什么」，HITL 管「多大程度放手」。
+      // 顺序也不能反：未获授权的工具不该惊动人去批。
+      onBeforeTool: async (name, args) => {
+        if (allowSet && !allowSet.has(name)) {
+          return { allow: false, reason: `角色 ${role.name} 未获授权使用 ${name}` };
+        }
+        return this.approvals.gate(snapshot.path, name, args);
+      },
     });
 
     this.registry.attachEngine(snapshot.path, engine);
@@ -325,6 +564,10 @@ export class AxonHost {
         this.waitResolvers.get(p)?.();
         this.waitResolvers.delete(p);
       }
+      // M4：目标被删时也要结算，不留悬空的 open 记录。
+      this.settleCollabFor(p, '目标已被删除');
+      this.approvals.cancelFor(p);
+      this.awaitingApproval.delete(p);
       const timer = this.idleTimers.get(p);
       if (timer) {
         clearTimeout(timer);
@@ -357,10 +600,12 @@ export class AxonHost {
     const existing = this.waits.get(parent);
     if (existing) {
       for (const t of pending) existing.add(t);
+      this.syncWaitingOn(parent);
       return this.waitPromises.get(parent) ?? Promise.resolve();
     }
 
     this.waits.set(parent, new Set(pending));
+    this.syncWaitingOn(parent);
     const promise = new Promise<void>((resolve) => {
       this.waitResolvers.set(parent, resolve);
     });
@@ -382,6 +627,7 @@ export class AxonHost {
   endWait(parent: AgentPath): void {
     if (!this.waits.has(parent)) return;
     this.waits.delete(parent);
+    this.syncWaitingOn(parent);
     this.waitResolvers.get(parent)?.();
     this.waitResolvers.delete(parent);
     this.waitPromises.delete(parent);
@@ -425,6 +671,7 @@ export class AxonHost {
       });
       if (!allDone) continue;
       this.waits.delete(parent);
+      this.syncWaitingOn(parent);
       this.waitResolvers.get(parent)?.();
       this.waitResolvers.delete(parent);
       this.waitPromises.delete(parent);
@@ -455,6 +702,14 @@ export class AxonHost {
         .then(() => resolve?.())
         .catch(() => resolve?.());
     }
+  }
+
+  /**
+   * 把 waits 图的当前边镜像到快照（MX G4.6）。
+   * 真相仍在 this.waits；快照只是给 UI 读的副本。
+   */
+  private syncWaitingOn(parent: AgentPath): void {
+    this.registry.setWaitingOn(parent, [...(this.waits.get(parent) ?? [])]);
   }
 
   /** waiting → running，免检（registry.promote），并对外发事件。 */
@@ -523,6 +778,8 @@ export class AxonHost {
       beginWait: (targets) => this.beginWait(path, targets),
       endWait: () => this.endWait(path),
       steerTo: (p, text) => this.steer(p, text),
+      recordCollab: (spec) => this.recordCollab(path, spec),
+      adoptCollab: (spec) => this.adoptByAgent(path, spec),
     };
   }
 
@@ -549,6 +806,12 @@ export class AxonHost {
         this.idleTimers.delete(path);
       }
     }
+    // M4：目标进终态 ⇒ 结算它名下的 open 记录。
+    if (isTerminal(status)) {
+      this.settleCollabFor(path);
+      // 中断后挂起的审批没人会再管它，取消掉免得在收件箱里变幽灵待办。
+      if (status === 'interrupted') this.approvals.cancelFor(path);
+    }
   }
 
   /** 活动记录：看门狗按**空闲**计时，有事件即归零。 */
@@ -568,6 +831,12 @@ export class AxonHost {
       this.idleTimers.delete(path);
       const node = this.registry.get(path);
       if (!node || node.snapshot.status !== 'running') return;
+      // 等人批审批的不算卡死（M4）：它确实没活动，但原因是在等人，
+      // 杀掉它等于惩罚用户没及时点按钮。
+      if (this.awaitingApproval.has(path)) {
+        this.scheduleIdleCheck(path);
+        return;
+      }
       const last = this.lastActivity.get(path) ?? 0;
       if (Date.now() - last < this.idleTimeoutMs) {
         this.scheduleIdleCheck(path); // 有活动，重新计（按空闲而非总时长）
@@ -624,16 +893,19 @@ export class AxonHost {
           // M3 预算熔断：root 是全局总账，记录跃迁并广播事件
           const totalUsd = this.registry.get(ROOT_PATH)?.snapshot.usage.costUsd ?? 0;
           const transition = this.budget.record(totalUsd);
-          if (transition === 'warning') {
+          if (transition !== 'none') {
+            const { softUsd, hardUsd } = this.budget.limits;
+            // spentUsd 与 limits 必须是两个不同来源的数：旧实现把
+            // `limitUsd` 填成了 budget.spent，于是 UI banner 的「已用 / 上限」
+            // 永远相等（MX G9.1）。
             this.emit(
-              'budget.warning',
-              { usage: this.registry.get(ROOT_PATH)!.snapshot.usage, limitUsd: this.budget.spent },
-              ROOT_PATH,
-            );
-          } else if (transition === 'frozen') {
-            this.emit(
-              'budget.frozen',
-              { usage: this.registry.get(ROOT_PATH)!.snapshot.usage, limitUsd: this.budget.spent },
+              transition === 'warning' ? 'budget.warning' : 'budget.frozen',
+              {
+                usage: this.registry.get(ROOT_PATH)!.snapshot.usage,
+                spentUsd: this.budget.spent,
+                softUsd,
+                hardUsd,
+              },
               ROOT_PATH,
             );
           }
@@ -673,6 +945,36 @@ export class AxonHost {
         return { removed: this.remove((payload as { path: AgentPath }).path) } as never;
       case 'role.list':
         return this.listRoles() as never;
+
+      // ── M4 ──
+      case 'approval.respond': {
+        const p = payload as { requestId: string; approved: boolean; note?: string };
+        return this.respondApproval(p.requestId, p.approved, p.note) as never;
+      }
+      case 'question.respond': {
+        // 提问通道与审批共用挂起表（Axon5 人机交互留的入口）。
+        const p = payload as { requestId: string; answer: string };
+        return this.approvals.respond(p.requestId, true, p.answer) as never;
+      }
+      case 'pending.list':
+        return this.listPending() as never;
+      case 'ledger.query':
+        return this.queryLedger(payload as LedgerQuery) as never;
+      case 'ledger.get':
+        return this.getLedgerRecord((payload as { id: string }).id) as never;
+      case 'ledger.adopt': {
+        const p = payload as { id: string; adoption: Adoption; note?: string };
+        return { record: this.adoptByHuman(p.id, p.adoption, p.note) } as never;
+      }
+      case 'ledger.getAdoptionPolicy':
+        return this.getAdoptionPolicy() as never;
+      case 'ledger.setAdoptionPolicy':
+        return {
+          policy: this.setAdoptionPolicy((payload as { policy: AdoptionPolicy }).policy),
+        } as never;
+      case 'budget.get':
+        return this.budgetSnapshot() as never;
+
       default:
         throw new Error(`未实现的命令: ${String(command)}`);
     }
