@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<title>Axon · S7 会话恢复（M5 占位）</title>
+<link rel="stylesheet" href="assets/axon.css" />
+</head>
+<body data-screen="s7">
+<div class="window">
+  <aside class="sidebar" data-shell="sidebar"></aside>
+
+  <main class="main">
+    <header class="topbar">
+      <i data-icon="history"></i>
+      <span class="title">会话恢复</span>
+      <span class="tag">M5 占位</span>
+      <span class="spacer"></span>
+      <div data-shell="status"></div>
+      <button class="act" data-ann-toggle><i data-icon="eye" class="i-16"></i></button>
+      <button class="act"><i data-icon="panelR" class="i-16"></i></button>
+    </header>
+
+    <div class="body">
+      <section class="canvas">
+        <div class="page">
+          <div class="page-head">
+            <h1>会话恢复</h1>
+            <p>本屏协议面全部在 M5 定。M4 只做两件事：给 <code>AgentSnapshot</code> 加稳定 sessionId（G4.1），给账本 schema 带版本外箱。此页是占位形态，用来检验「重启后我能不能认出昨天那棵树」。</p>
+          </div>
+
+          <div class="toolbar">
+            <div class="seg"><button class="is-on">全部 8</button><button>可恢复 5</button><button>孤儿 2</button><button>已归档 1</button></div>
+            <span style="flex:1"></span>
+            <button class="btn sm ghost"><i data-icon="trash" class="i-14"></i>清理孤儿</button>
+          </div>
+
+          <div class="list">
+            <div class="list-row" style="background:var(--bg-sunken)">
+              <span class="sdot run"></span>
+              <div class="grow">
+                <div class="t1">支付回调幂等改造 <span class="tag mono">sess_0J9K…2F</span> <span class="tag run">进行中</span></div>
+                <div class="t2">6 个分身 · 24 条消息 · 12 笔协作 · cwd /works/prjs/demo</div>
+              </div>
+              <span class="when">刚刚</span>
+              <button class="btn sm">继续</button>
+            </div>
+            <div class="list-row">
+              <span class="sdot done"></span>
+              <div class="grow">
+                <div class="t1">renderer 迁 React 19 <span class="tag mono">sess_0J8M…7A</span></div>
+                <div class="t2">3 个分身 · 41 条消息 · 5 笔协作 · 结束于 turn.end</div>
+              </div>
+              <span class="when">昨天</span>
+              <button class="btn sm">恢复</button>
+            </div>
+            <div class="list-row">
+              <span class="sdot err"></span>
+              <div class="grow">
+                <div class="t1">M4 账本 schema 评审 <span class="tag mono">sess_0J8B…1C</span> <span class="tag err">孤儿</span></div>
+                <div class="t2">父会话记录缺失（parentSessionId 指向已删除会话），只能只读打开</div>
+              </div>
+              <span class="when">3 天前</span>
+              <button class="btn sm ghost">只读打开</button>
+            </div>
+            <div class="list-row">
+              <span class="sdot idle"></span>
+              <div class="grow">
+                <div class="t1">预算冻结后的恢复路径 <span class="tag mono">sess_0J7Z…9D</span> <span class="tag">frozen 结束</span></div>
+                <div class="t2">2 个分身 · 在硬线 $10.00 处冻结，恢复前需先调限额（M7）</div>
+              </div>
+              <span class="when">上周</span>
+              <button class="btn sm ghost">查看</button>
+            </div>
+          </div>
+
+          <div class="card" style="margin-top:24px">
+            <div class="card-head"><i data-icon="db" class="i-16"></i><span class="name">M5 需要落盘的最小集（本屏倒推）</span></div>
+            <div class="card-body">
+              <table class="tbl">
+                <tr><td style="width:170px;color:var(--text-muted)">会话元数据</td><td>id / title / cwd / parentSessionId / createdAt / 状态机状态 / schemaVersion</td></tr>
+                <tr><td style="color:var(--text-muted)">分身树</td><td>AgentSnapshot[]（含 M4 新加的 sessionId / forkMode / waitingOn）</td></tr>
+                <tr><td style="color:var(--text-muted)">消息</td><td>MessageLike[]，按 agentPath 分片；thinking / usage 形状取决于 G6.1 / G6.2</td></tr>
+                <tr><td style="color:var(--text-muted)">账本</td><td>LedgerRecord[]，带 ledger/v1 版本外箱</td></tr>
+                <tr><td style="color:var(--text-muted)">挂起请求</td><td>PendingRequest[]（重定义后含链与已决状态），恢复后要么重发要么标过期</td></tr>
+              </table>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <aside class="inspector">
+        <div class="panel">
+          <div class="panel-title"><span>恢复语义待定</span></div>
+          <div class="hint" style="padding:2px 10px 10px">
+            ① 恢复后分身是 idle 还是自动续跑？<br />
+            ② 恢复时并发闸门如何重建（running 一律降为 parked？）<br />
+            ③ 挂起审批跨重启是否仍然有效？<br />
+            以上由 M5 设计评审拍板，MX 不代答。
+          </div>
+        </div>
+      </aside>
+    </div>
+  </main>
+</div>
+<script src="assets/shell.js"></script>
+</body>
+</html>

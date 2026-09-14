@@ -79,8 +79,70 @@
       .dot[data-s="failed"] { background: var(--err); }
       .dot[data-s="waiting"], .dot[data-s="interrupted"] { background: var(--warn); }
 
+      /* ── 协作账本（M4 / UX S4）── */
+      .mini-select {
+        flex: none; width: auto; padding: 1px 4px; font-size: 10px;
+        border-radius: 4px; color: var(--dim);
+      }
+      .ledger {
+        flex: 1; min-height: 96px; overflow: auto; padding: 0 8px 8px;
+        border-top: 1px solid var(--line);
+      }
+      .lrec {
+        padding: 6px 8px; border-radius: 6px; margin-top: 4px;
+        background: #20242c; border-left: 2px solid var(--line);
+      }
+      .lrec[data-adoption="pending"] { border-left-color: var(--warn); }
+      .lrec[data-adoption="adopted"] { border-left-color: var(--ok); }
+      .lrec[data-adoption="rejected"] { border-left-color: var(--err); }
+      .lrec-line { display: flex; align-items: center; gap: 6px; font-size: 11px; }
+      .lrec .act {
+        flex: none; padding: 0 5px; border-radius: 3px; font-size: 10px;
+        background: #2a3140; color: var(--accent);
+      }
+      .lrec .act[data-a="fork"] { color: var(--warn); }
+      .lrec .act[data-a="handoff"] { color: var(--ok); }
+      .lrec .who {
+        flex: 1; min-width: 0; overflow: hidden;
+        text-overflow: ellipsis; white-space: nowrap;
+      }
+      .lrec .st { flex: none; color: var(--dim); font-size: 10px; }
+      .lrec .st.open { color: var(--accent); }
+      .lrec-sum {
+        margin-top: 3px; font-size: 11px; color: var(--dim);
+        display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+        overflow: hidden;
+      }
+      .lrec-foot {
+        margin-top: 4px; display: flex; align-items: center; gap: 6px;
+        font-size: 10px; color: var(--dim);
+      }
+      .lrec-act { margin-left: auto; display: flex; gap: 4px; }
+      .lrec .note { font-style: italic; }
+
       /* ── 主区 ── */
       main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+
+      /* ── 审批收件箱（M4 / UX S5）── */
+      .approval {
+        display: flex; align-items: center; gap: 10px;
+        padding: 8px 14px; font-size: 12px;
+        background: #2e2817; border-bottom: 1px solid #4a3c22; color: var(--warn);
+      }
+      .approval-main {
+        flex: 1; min-width: 0; display: flex; align-items: baseline;
+        gap: 8px; overflow: hidden;
+      }
+      .approval .chain {
+        flex: none; font-family: ui-monospace, monospace;
+        font-size: 11px; color: var(--dim);
+      }
+      .approval .msg {
+        min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+      }
+      .approval .more { flex: none; color: var(--dim); }
+      .approval-act { flex: none; display: flex; gap: 6px; }
+      button.danger { color: var(--err); }
       .budget {
         padding: 7px 14px; font-size: 12px; border-bottom: 1px solid var(--line);
       }

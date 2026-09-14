@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<title>Axon UX 高保真原型</title>
+<link rel="stylesheet" href="assets/axon.css" />
+</head>
+<body>
+<div class="shell">
+  <nav class="shell-nav">
+    <h1>Axon UX 原型</h1>
+    <div class="sub">v0.2 · 团队 / 会话模型<br />对应 <code>docs/ux/02-团队与会话模型.md</code></div>
+
+    <a href="s0-new-session.html" data-t="S0 新建会话" class="is-on">S0 新建会话<span class="k">入口屏 · 内置引擎 / 指定团队 / 临时编队</span></a>
+    <a href="s2-solo.html" data-t="S2-solo 单兵会话">S2-solo 单兵会话<span class="k">未组队 · 中途「叫人」升级</span></a>
+    <a href="s2-session.html" data-t="S2 团队会话">S2 团队会话<span class="k">流式 / thinking / 工具卡 / 审批 / 落账</span></a>
+    <a href="s1-workbench.html" data-t="S1 会话总览">S1 会话总览<span class="k">活跃会话 + 分身 + 并发闸门</span></a>
+    <a href="s3-teams.html" data-t="S3 团队管理">S3 团队管理<span class="k">团队 / Agent / Agent 类型</span></a>
+    <a href="s4-ledger.html" data-t="S4 协作账本">S4 协作账本<span class="k">M4 新增 · 四动词 + adoption</span></a>
+    <a href="s5-inbox.html" data-t="S5 审批与提问">S5 审批与提问<span class="k">M4 新增 · 父链穿透</span></a>
+    <a href="s6-budget.html" data-t="S6 预算与用量">S6 预算与用量<span class="k">档位 / 按分身 / 按动作</span></a>
+    <a href="s7-sessions.html" data-t="S7 会话恢复">S7 会话恢复<span class="k">M5 占位</span></a>
+    <a href="s9-design-language.html" data-t="设计语言">设计语言<span class="k">令牌 / 图标 / 组件 / 三条硬规矩</span></a>
+
+    <div class="shell-foot">
+      ⌘/ 或右上眼睛图标：切换数据来源标注<br />
+      <span style="color:#45567a">蓝</span> = 协议已支撑，<span style="color:#8c4034">红</span> = MX 缺口（G1~G10）
+    </div>
+  </nav>
+
+  <section class="shell-stage">
+    <div class="shell-bar">
+      <span id="cur">S0 新建会话</span>
+      <span class="spacer" style="flex:1"></span>
+      <label style="display:flex;gap:6px;align-items:center"><input type="checkbox" id="annBox" />显示数据来源标注</label>
+      <a class="btn sm" id="openNew" href="s0-new-session.html" target="_blank">新窗口打开 ↗</a>
+    </div>
+    <iframe class="shell-frame" id="frame" src="s0-new-session.html"></iframe>
+  </section>
+</div>
+
+<script>
+  const frame = document.getElementById('frame');
+  const cur = document.getElementById('cur');
+  const annBox = document.getElementById('annBox');
+  const openNew = document.getElementById('openNew');
+  const links = [...document.querySelectorAll('.shell-nav a')];
+
+  const load = (href, title) => {
+    frame.src = href + (annBox.checked ? '?ann=1' : '');
+    cur.textContent = title;
+    openNew.href = href;
+  };
+
+  links.forEach((a) =>
+    a.addEventListener('click', (e) => {
+      e.preventDefault();
+      links.forEach((x) => x.classList.remove('is-on'));
+      a.classList.add('is-on');
+      load(a.getAttribute('href'), a.dataset.t);
+    })
+  );
+
+  annBox.addEventListener('change', () => {
+    const on = links.find((x) => x.classList.contains('is-on'));
+    load(on.getAttribute('href'), on.dataset.t);
+  });
+</script>
+</body>
+</html>

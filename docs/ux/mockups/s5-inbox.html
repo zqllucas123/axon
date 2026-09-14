@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<title>Axon · S5 审批与提问收件箱</title>
+<link rel="stylesheet" href="assets/axon.css" />
+</head>
+<body data-screen="s5">
+<div class="window">
+  <aside class="sidebar" data-shell="sidebar"></aside>
+
+  <main class="main">
+    <header class="topbar">
+      <i data-icon="inbox"></i>
+      <span class="title">审批与提问</span>
+      <span class="tag">M4 新增</span>
+      <span class="spacer"></span>
+      <div data-shell="status"></div>
+      <button class="act" data-ann-toggle><i data-icon="eye" class="i-16"></i></button>
+      <button class="act is-on"><i data-icon="panelR" class="i-16"></i></button>
+    </header>
+
+    <div class="body">
+      <section class="canvas">
+        <div class="page">
+          <div class="page-head">
+            <h1>收件箱</h1>
+            <p>子分身的审批请求沿父链向上穿透；父级无权代批时冒泡到你。刷新/重连后由 pending.list 补拉，请求不会丢。<span class="ann gap">G1.1 / G1.3 / G2.4</span></p>
+          </div>
+
+          <div class="toolbar">
+            <div class="seg"><button class="is-on">待处理 2</button><button>今天已处理 7</button><button>全部</button></div>
+            <span style="flex:1"></span>
+            <button class="btn sm ghost">全部拒绝</button>
+          </div>
+
+          <!-- 审批请求 -->
+          <div class="card attn">
+            <div class="card-head">
+              <i data-icon="shield" class="i-16"></i>
+              <span class="name">审批 · bash</span>
+              <span class="path">bunx prisma migrate dev --name idem_unique</span>
+              <span class="spacer"></span>
+              <span class="tag run">等待 00:42 / 超时 05:00</span>
+              <span class="ann gap">G5.1 超时 + 已决状态</span>
+            </div>
+            <div class="card-body">
+              <p style="margin:0 0 10px">发起：<b>后端实现 #2</b>（角色审批档 <code>write-confirm</code>）。命令会修改数据库结构：为回调表新增唯一索引 <code>(provider, provider_txn_id)</code>。</p>
+              <div class="chain">
+                <span class="node">后端实现 #2</span><span class="arr">→</span>
+                <span class="node">架构师 #1 <span style="color:var(--text-dim)">read-only，无权代批</span></span><span class="arr">→</span>
+                <span class="node">Axon5 · 主控 <span style="color:var(--text-dim)">full-auto，但破坏性命令不自动放行</span></span><span class="arr">→</span>
+                <span class="node you">你</span>
+              </div>
+              <details class="fold" style="margin-top:12px">
+                <summary><i data-icon="terminal" class="i-16"></i><span>完整命令与工作目录</span><span class="spacer"></span><i data-icon="chevD" class="i-14"></i></summary>
+                <div class="fold-body mono">cwd: /Users/lucaszhou/works/prjs/demo/apps/api
+cmd: bunx prisma migrate dev --name idem_unique
+env: DATABASE_URL=postgres://…(已脱敏)</div>
+              </details>
+            </div>
+            <div class="card-foot">
+              <label style="font-size:var(--fs-12);color:var(--text-muted)">
+                <input type="checkbox" /> 本会话内同类命令自动放行
+              </label>
+              <span class="spacer"></span>
+              <button class="btn sm danger"><i data-icon="x" class="i-14"></i>拒绝</button>
+              <button class="btn sm"><i data-icon="check" class="i-14"></i>批准一次</button>
+              <button class="btn sm primary">批准并继续</button>
+              <span class="ann gap">G1.1 幂等：重复 respond 必须无害</span>
+            </div>
+          </div>
+
+          <!-- 提问 -->
+          <div class="card">
+            <div class="card-head">
+              <i data-icon="help" class="i-16"></i>
+              <span class="name">提问 · Axon5 · 主控</span>
+              <span class="spacer"></span>
+              <span class="tag wait">等待 03:10</span>
+              <span class="ann gap">G1.2 question.respond</span>
+            </div>
+            <div class="card-body">
+              <p style="margin:0 0 12px">重复回调的 HTTP 返回码，你要哪个？下游对账脚本会按这个分支写。</p>
+              <div style="display:flex;gap:8px;flex-wrap:wrap">
+                <button class="btn sm">200 + duplicated:true（推荐）</button>
+                <button class="btn sm">409 Conflict</button>
+                <button class="btn sm ghost">我自己写</button>
+              </div>
+              <div class="hint">选项式提问 = 一次点击回一条 question.respond；自由文本走同一命令的 text 字段。</div>
+            </div>
+          </div>
+
+          <!-- 已处理 -->
+          <div class="side-section" style="padding-left:0">今天已处理</div>
+          <div class="list">
+            <div class="list-row">
+              <i data-icon="check" class="i-16"></i>
+              <div class="grow">
+                <div class="t1">批准 · write_file<span class="tag mono">后端实现 #2</span></div>
+                <div class="t2">apps/api/src/payment/callback.ts · 你在 09:52 批准</div>
+              </div>
+              <span class="when">09:52</span>
+            </div>
+            <div class="list-row">
+              <i data-icon="x" class="i-16"></i>
+              <div class="grow">
+                <div class="t1">拒绝 · bash<span class="tag mono">数据迁移 #5</span></div>
+                <div class="t2">rm -rf prisma/migrations · 拒绝理由：不许清历史迁移</div>
+              </div>
+              <span class="when">09:31</span>
+            </div>
+            <div class="list-row">
+              <i data-icon="check" class="i-16"></i>
+              <div class="grow">
+                <div class="t1">代批 · read_file<span class="tag mono">测试工程师 #3</span></div>
+                <div class="t2">由 Axon5 · 主控 在链上代批（full-auto 且为只读操作）</div>
+              </div>
+              <span class="when">09:20</span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <aside class="inspector">
+        <div class="panel">
+          <div class="panel-title"><span>穿透规则</span></div>
+          <div class="prow sub"><span>read-only</span><span class="val">只读放行，写必问</span></div>
+          <div class="prow sub"><span>write-confirm</span><span class="val">写盘 / 破坏性必问</span></div>
+          <div class="prow sub"><span>full-auto</span><span class="val">可代批后代的同档请求</span></div>
+          <div class="hint" style="padding:2px 10px 8px">父级只能代批「不高于自身档位」的请求；任何一级无权代批即继续向上，最终到人。</div>
+        </div>
+        <div class="panel">
+          <div class="panel-title"><span>阻塞影响</span></div>
+          <div class="prow sub"><span class="sdot err"></span><span>后端实现 #2</span><span class="val">阻塞 00:42</span></div>
+          <div class="prow sub"><span class="sdot wait"></span><span>测试工程师 #3</span><span class="val">间接等待</span></div>
+          <div class="hint" style="padding:2px 10px 8px">审批阻塞不占并发闸门（gate 只数 running），被阻塞的分身记为 suspended。</div>
+        </div>
+      </aside>
+    </div>
+  </main>
+</div>
+<script src="assets/shell.js"></script>
+</body>
+</html>

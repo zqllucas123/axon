@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<title>Axon · S2-solo 单兵会话</title>
+<link rel="stylesheet" href="assets/axon.css" />
+</head>
+<body data-screen="s2" data-mode="solo">
+<div class="window">
+  <aside class="sidebar" data-shell="sidebar"></aside>
+
+  <main class="main">
+    <header class="topbar">
+      <i data-icon="folder"></i>
+      <span class="title">查一下 bun 的 workspace 协议</span>
+      <span class="spacer"></span>
+      <div data-shell="status" data-opts='{"pending":0}'></div>
+      <button class="act" data-ann-toggle title="显示数据来源标注（⌘/）"><i data-icon="eye" class="i-16"></i></button>
+      <button class="act"><i data-icon="panelR" class="i-16"></i></button>
+    </header>
+
+    <!-- 未组队：会话条明示当前是内置引擎，随时可升级 -->
+    <div class="session-bar">
+      <i data-icon="spark" class="i-14"></i>
+      <span>未组队 · 由 <b style="color:var(--text)">Axon 内置引擎</b> 直接执行 —— 不落协作账本，无审批穿透链</span>
+      <span class="spacer"></span>
+      <button class="btn sm"><i data-icon="users" class="i-14"></i>叫人（升级为团队会话）</button>
+      <span class="ann gap">G10.5 session.escalate</span>
+    </div>
+
+    <div class="body">
+      <div class="col">
+        <section class="canvas">
+          <div class="stream">
+
+            <div class="bubble-row">
+              <div class="bubble">bun 的 workspace 协议怎么写？我们 monorepo 里 <code>packages/*</code> 要互相引用。</div>
+            </div>
+            <div class="bubble-meta"><span>16:02</span><i data-icon="copy" class="i-14"></i></div>
+
+            <div class="assistant">
+              <p>在根 <code>package.json</code> 写 <code>"workspaces": ["packages/*", "apps/*"]</code>，包之间用 <code>"@axon/kernel": "workspace:*"</code> 引用，bun install 会做符号链接。</p>
+            </div>
+
+            <div class="card">
+              <div class="card-head">
+                <i data-icon="file" class="i-16"></i><span class="name">read_file</span>
+                <span class="path">package.json</span>
+                <span class="spacer"></span><span class="tag ok">ok · 42 行</span>
+              </div>
+            </div>
+
+            <div class="assistant">
+              <p>你们根 <code>package.json</code> 已经是这个写法了，<code>packages/protocol</code> 也被 <code>@axon/kernel</code> 以 <code>workspace:*</code> 引着，没问题。</p>
+            </div>
+            <div class="msg-actions">
+              <button class="act"><i data-icon="copy" class="i-16"></i></button>
+              <span class="cost">1,120 in · 208 out · $0.009</span>
+            </div>
+
+            <!-- 用户发现任务变大了 -->
+            <div class="bubble-row">
+              <div class="bubble">那顺手把三个包的循环依赖理一遍，再补上缺的导出测试。</div>
+            </div>
+            <div class="bubble-meta"><span>16:09</span></div>
+
+            <!-- 升级提议：引擎自己判断做不动了 -->
+            <div class="card attn">
+              <div class="card-head">
+                <i data-icon="users" class="i-16"></i>
+                <span class="name">这活儿建议组队</span>
+                <span class="spacer"></span>
+                <span class="tag run">来自内置引擎的建议</span>
+                <span class="ann gap">G10.5 升级提议如何表达</span>
+              </div>
+              <div class="card-body">
+                <p style="margin:0 0 10px">依赖梳理 + 补测试是两条能并行的线，且补测试会写盘。建议升级为团队会话：</p>
+                <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:10px">
+                  <span class="tag"><span class="ava lead" style="width:18px;height:18px;margin-right:4px">主</span>主控 拆解与收口</span>
+                  <span class="tag"><span class="ava" style="width:18px;height:18px;margin-right:4px">架</span>架构师 梳理依赖图</span>
+                  <span class="tag"><span class="ava" style="width:18px;height:18px;margin-right:4px">测</span>测试工程师 补导出测试</span>
+                </div>
+                <div class="hint" style="margin:0">
+                  升级不丢上下文：当前 6 条消息作为 lead 的初始上下文（fork: all），成员按各自 ForkMode 决定看到多少。升级后开始落协作账本。
+                </div>
+              </div>
+              <div class="card-foot">
+                <button class="btn sm ghost">继续单兵</button>
+                <span class="spacer"></span>
+                <button class="btn sm">换个团队…</button>
+                <button class="btn sm primary"><i data-icon="users" class="i-14"></i>用「测试双人」升级</button>
+              </div>
+            </div>
+
+          </div>
+        </section>
+
+        <div class="composer-wrap">
+          <div class="composer">
+            <div class="ph">继续说…</div>
+            <div class="row">
+              <button class="act"><i data-icon="plus" class="i-16"></i></button>
+              <button class="mode"><i data-icon="users" class="i-14"></i>叫人</button>
+              <span class="spacer"></span>
+              <button class="mode">内置引擎 · claude-sonnet</button>
+              <button class="send"><i data-icon="arrowUp" class="i-16"></i></button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <aside class="inspector">
+        <div class="panel">
+          <div class="panel-title"><span>会话信息</span></div>
+          <div class="prow"><i data-icon="spark" class="i-16"></i><span>执行方式</span><span class="val">内置引擎</span></div>
+          <div class="prow"><i data-icon="folder" class="i-16"></i><span>工作目录</span><span class="val">/prjs/axon</span></div>
+          <div class="prow"><i data-icon="shield" class="i-16"></i><span>审批档</span><span class="val">write-confirm</span></div>
+          <div class="prow"><i data-icon="wallet" class="i-16"></i><span>本会话花费</span><span class="val">$0.02</span></div>
+          <div class="hint" style="padding:2px 10px 8px">单兵会话没有分身树、没有协作账本、没有穿透链——S4 / S5 对它是空的。这是刻意的：小任务不该付编排的心智税。</div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-title"><span>什么时候该叫人</span></div>
+          <div class="prow sub"><span>要并行</span><span class="val">两条线互不阻塞</span></div>
+          <div class="prow sub"><span>要评审</span><span class="val">需要第二意见</span></div>
+          <div class="prow sub"><span>要隔离</span><span class="val">写盘范围需收窄</span></div>
+          <div class="prow sub"><span>上下文超长</span><span class="val">分叉减负</span></div>
+        </div>
+      </aside>
+    </div>
+  </main>
+</div>
+<script src="assets/shell.js"></script>
+</body>
+</html>

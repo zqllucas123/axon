@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<title>Axon · S2 分身会话</title>
+<link rel="stylesheet" href="assets/axon.css" />
+</head>
+<body data-screen="s2">
+<div class="window">
+  <aside class="sidebar" data-shell="sidebar"></aside>
+
+  <main class="main">
+    <header class="topbar">
+      <i data-icon="folder"></i>
+      <span class="title">支付回调幂等改造</span>
+      <span class="tag"><span class="ava" style="width:16px;height:16px;border:0;background:transparent">后</span>后端实现 #2</span>
+      <span class="tag mono">/0/1/2</span>
+      <button class="act">
+        <i data-icon="dots" class="i-16"></i>
+      </button>
+      <span class="spacer"></span>
+      <div data-shell="status"></div>
+      <button class="act" data-ann-toggle title="显示数据来源标注（⌘/）"><i data-icon="eye" class="i-16"></i></button>
+      <button class="act is-on"><i data-icon="panelR" class="i-16"></i></button>
+    </header>
+
+    <div class="session-bar">
+      <i data-icon="users" class="i-14"></i>
+      <span>会话「支付回调幂等改造」· 团队 <b style="color:var(--text)">全栈小队</b> · 4 成员已实例化 · 当前查看成员 <b style="color:var(--text)">后端实现 #2</b></span>
+      <span class="spacer"></span>
+      <button class="btn sm ghost"><i data-icon="plus" class="i-14"></i>临时加人</button>
+      <span class="ann gap">G10.3 session.get 带 team 引用</span>
+    </div>
+
+    <div class="body">
+      <div class="col">
+      <section class="canvas">
+        <div class="stream">
+
+          <div class="activity">
+            <i data-icon="history" class="i-16"></i>
+            <span>已恢复 24 条历史消息</span>
+            <span class="dur">· 由 agent.messages 回放</span>
+            <span class="ann">G3.1 命令已实现 / 渲染层未用</span>
+          </div>
+
+          <!-- 用户消息 -->
+          <div class="bubble-row">
+            <div class="bubble">把 <code>apps/api</code> 的支付回调改成幂等，回调表加唯一键，重复回调直接短路返回。</div>
+          </div>
+          <div class="bubble-meta"><span>15:23</span><i data-icon="copy" class="i-14"></i></div>
+
+          <!-- thinking 折叠 -->
+          <details class="fold">
+            <summary>
+              <i data-icon="spark" class="i-16"></i>
+              <span>思考 12 秒</span>
+              <span class="spacer"></span>
+              <span class="ann gap">G6.1 thinking 块形状未定</span>
+              <i data-icon="chevD" class="i-14"></i>
+            </summary>
+            <div class="fold-body">
+              幂等键的选择有两种：网关流水号（provider_txn_id）或业务单号 + 状态。前者对补单友好，后者在多通道下会撞键。先读 <code>callback.ts</code> 看现有落库路径，再决定加唯一索引的列组合。
+            </div>
+          </details>
+
+          <!-- 助手正文（流式中） -->
+          <div class="assistant">
+            <p>先确认现有回调落库路径，再决定唯一键列组合。我会分三步走：</p>
+            <ul>
+              <li>读 <code>apps/api/src/payment/callback.ts</code> 与回调表 schema；</li>
+              <li>加 <code>(provider, provider_txn_id)</code> 唯一索引 + 冲突短路；</li>
+              <li>把重复回调的返回码统一成 200 + <code>duplicated</code>。</li>
+            </ul>
+          </div>
+
+          <!-- 工具卡：已完成 -->
+          <div class="card">
+            <div class="card-head">
+              <i data-icon="file" class="i-16"></i>
+              <span class="name">read_file</span>
+              <span class="path">apps/api/src/payment/callback.ts</span>
+              <span class="spacer"></span>
+              <span class="tag ok">ok · 128 行</span>
+              <span class="ann">agent.tool.start / end</span>
+              <i data-icon="chevD" class="i-14"></i>
+            </div>
+          </div>
+
+          <!-- 工具卡：执行中 + 分块输出 -->
+          <div class="card">
+            <div class="card-head">
+              <i data-icon="terminal" class="i-16"></i>
+              <span class="name">bash</span>
+              <span class="path">bun test apps/api/test/callback.test.ts</span>
+              <span class="spacer"></span>
+              <span class="tag run">running · 6s</span>
+              <span class="ann gap">G2.3 tool.update 死声明</span>
+            </div>
+            <div class="card-body mono">$ bun test apps/api/test/callback.test.ts
+✓ 首次回调写入流水
+✓ 重复回调返回 duplicated
+› 并发回调只落一条 …</div>
+            <div class="card-foot">
+              <div class="bar" style="flex:1"><span style="width:62%"></span></div>
+              <button class="btn sm ghost"><i data-icon="pause" class="i-14"></i>中断</button>
+            </div>
+          </div>
+
+          <!-- 审批请求（父链穿透） -->
+          <div class="card attn">
+            <div class="card-head">
+              <i data-icon="shield" class="i-16"></i>
+              <span class="name">需要你批准</span>
+              <span class="path">bash · bunx prisma migrate dev</span>
+              <span class="spacer"></span>
+              <span class="tag run">等待 00:42</span>
+              <span class="ann gap">G2.4 approval.request 未发射</span>
+            </div>
+            <div class="card-body">
+              该命令会改数据库结构（新增唯一索引）。当前角色审批档 <b>write-confirm</b>，请求已沿父链向上穿透到你：
+              <div class="chain" style="margin-top:10px">
+                <span class="node">后端实现 #2</span><span class="arr">→</span>
+                <span class="node">架构师 #1<span style="color:var(--text-dim)"> 无权代批</span></span><span class="arr">→</span>
+                <span class="node">Axon5 · 主控</span><span class="arr">→</span>
+                <span class="node you">你</span>
+                <span class="ann gap">G5.1 PendingRequest 补链</span>
+              </div>
+            </div>
+            <div class="card-foot">
+              <button class="btn sm">查看完整命令</button>
+              <span class="spacer"></span>
+              <button class="btn sm danger"><i data-icon="x" class="i-14"></i>拒绝</button>
+              <button class="btn sm primary"><i data-icon="check" class="i-14"></i>批准一次</button>
+              <span class="ann gap">G1.1 approval.respond</span>
+            </div>
+          </div>
+
+          <!-- 协作动作落账 -->
+          <div class="card">
+            <div class="card-head">
+              <i data-icon="branch" class="i-16"></i>
+              <span class="name">delegate → 测试工程师 #3</span>
+              <span class="spacer"></span>
+              <span class="tag info">context: none</span>
+              <span class="tag wait">adoption 待表态</span>
+              <span class="ann gap">G8.1 ledger.recorded</span>
+            </div>
+            <div class="card-body">
+              「补一组并发回调的回归用例，覆盖同一 <code>provider_txn_id</code> 的 5 并发。」
+              <div style="margin-top:8px">
+                <span class="tag mono"><i data-icon="link" class="i-14"></i>mention://agent-session/0-1-3</span>
+              </div>
+            </div>
+            <div class="card-foot">
+              <button class="btn sm ghost"><i data-icon="reply" class="i-14"></i>跳到该会话</button>
+              <span class="spacer"></span>
+              <button class="btn sm">驳回</button>
+              <button class="btn sm">采纳</button>
+              <span class="ann gap">G7.2 ledger.adopt</span>
+            </div>
+          </div>
+
+          <!-- 错误卡 -->
+          <div class="card err">
+            <div class="card-head">
+              <i data-icon="alert" class="i-16"></i>
+              <span class="name">模型调用失败</span>
+              <span class="spacer"></span>
+              <span class="tag err">HTTP 400</span>
+            </div>
+            <div class="card-body">
+              upstream_status: HTTP 400；cause: tools.custom.input_schema: input_schema does not support oneOf at the top level（request id: 20260913T1707-5f2a）。已自动重试 1 次。
+            </div>
+            <div class="card-foot">
+              <span class="spacer"></span>
+              <button class="btn sm">重试</button>
+              <button class="btn sm ghost">复制诊断</button>
+            </div>
+          </div>
+
+          <div class="assistant">
+            <p>唯一索引已加在 <code>(provider, provider_txn_id)</code>，重复回调走 <code>ON CONFLICT DO NOTHING</code> 后直接返回 <code>{ ok: true, duplicated: true }</code>。并发用例交给测试工程师 #3 了，等它的结果回来再动 <code>settlement</code> 那条链路。</p>
+          </div>
+          <div class="msg-actions">
+            <button class="act"><i data-icon="copy" class="i-16"></i></button>
+            <button class="act"><i data-icon="reply" class="i-16"></i></button>
+            <span class="cost">1,842 in · 613 out · $0.031</span>
+            <span class="ann gap">G6.2 消息级 usage</span>
+          </div>
+
+          <div class="activity">
+            <i data-icon="clock" class="i-16"></i><span>本轮用时 55 秒</span>
+            <span class="dur">· 3 次工具调用</span>
+            <span class="ann">agent.turn.end</span>
+          </div>
+
+        </div>
+      </section>
+
+        <div class="composer-wrap">
+          <div class="composer">
+            <div class="ph">对「后端实现 #2」说点什么…</div>
+            <div class="row">
+              <button class="act"><i data-icon="plus" class="i-16"></i></button>
+              <button class="mode"><i data-icon="hand" class="i-14"></i>审批：write-confirm</button>
+              <span class="spacer"></span>
+              <button class="mode">类型 后端实现 · claude-sonnet<span class="ann gap">G4.3 生效 model</span></button>
+              <button class="send"><i data-icon="arrowUp" class="i-16"></i></button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 右侧检视面板 -->
+      <aside class="inspector">
+        <div class="panel">
+          <div class="panel-title">
+            <span>成员信息</span><span class="spacer"></span>
+            <button class="act"><i data-icon="plus" class="i-14"></i></button>
+          </div>
+          <div class="prow"><i data-icon="users" class="i-16"></i><span>类型</span><span class="val">后端实现</span></div>
+          <div class="prow"><i data-icon="layers" class="i-16"></i><span>所属团队</span><span class="val">全栈小队</span></div>
+          <div class="prow"><i data-icon="spark" class="i-16"></i><span>模型</span><span class="val">claude-sonnet<span class="ann gap">G4.3</span></span></div>
+          <div class="prow"><i data-icon="layers" class="i-16"></i><span>上下文</span><span class="val">fork: none<span class="ann gap">G4.4</span></span></div>
+          <div class="prow"><i data-icon="shield" class="i-16"></i><span>审批档</span><span class="val">write-confirm</span></div>
+          <div class="prow"><i data-icon="list" class="i-16"></i><span>工具</span><span class="val">6 / 11<span class="ann gap">G4.5</span></span><i data-icon="chevD" class="i-14 chev"></i></div>
+          <div class="prow"><i data-icon="clock" class="i-16"></i><span>在等谁</span><span class="val">测试 #3<span class="ann gap">G4.6</span></span></div>
+          <div class="prow"><i data-icon="wallet" class="i-16"></i><span>本树用量</span><span class="val">$0.31</span></div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-title"><span>协作动作</span><span class="spacer"></span><span class="ann">六编排工具 = 唯一入口</span></div>
+          <div class="prow sub"><i data-icon="branch" class="i-16"></i><span>consult</span><span class="val">问一句，不转移</span></div>
+          <div class="prow sub"><i data-icon="layers" class="i-16"></i><span>fork</span><span class="val">带上下文分叉</span></div>
+          <div class="prow sub"><i data-icon="reply" class="i-16"></i><span>delegate</span><span class="val">派活，等回执</span></div>
+          <div class="prow sub"><i data-icon="commit" class="i-16"></i><span>handoff</span><span class="val">整段交接</span></div>
+          <div class="hint" style="padding:4px 10px 8px">人手动发起协作是否开放，待 M4 评审拍板（MX §4 候选意图）。</div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-title"><span>近期协作</span><span class="spacer"></span><a class="act" href="s4-ledger.html"><i data-icon="chevR" class="i-14"></i></a></div>
+          <div class="prow sub"><span class="sdot wait"></span><span>delegate → 测试 #3</span><span class="val">02:11</span></div>
+          <div class="prow sub"><span class="sdot done"></span><span>consult ← 架构师 #1</span><span class="val">09:40</span></div>
+          <div class="prow sub"><span class="sdot done"></span><span>handoff ← Axon5</span><span class="val">昨天</span></div>
+        </div>
+      </aside>
+    </div>
+  </main>
+</div>
+<script src="assets/shell.js"></script>
+</body>
+</html>

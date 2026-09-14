@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<title>Axon · S3 团队管理</title>
+<link rel="stylesheet" href="assets/axon.css" />
+</head>
+<body data-screen="s3">
+<div class="window">
+  <aside class="sidebar" data-shell="sidebar"></aside>
+
+  <main class="main">
+    <header class="topbar">
+      <i data-icon="users"></i>
+      <span class="title">团队管理</span>
+      <span class="spacer"></span>
+      <div data-shell="status"></div>
+      <button class="act" data-ann-toggle><i data-icon="eye" class="i-16"></i></button>
+      <button class="act is-on"><i data-icon="panelR" class="i-16"></i></button>
+    </header>
+
+    <div class="body">
+      <section class="canvas">
+        <div class="page page-wide">
+          <div class="page-head">
+            <h1>团队</h1>
+            <p>团队 = 一组 Agent 的编队。Agent = 一个带类型的成员（类型决定提示 + 工具白名单 + 审批档 + 上下文档）。会话开工时，团队成员被实例化成分身树。</p>
+          </div>
+
+          <div class="toolbar">
+            <div class="seg"><button class="is-on">团队 3</button><button>Agent 7</button><button>Agent 类型 5</button></div>
+            <span style="flex:1"></span>
+            <button class="btn sm ghost"><i data-icon="folder" class="i-14"></i>打开配置目录</button>
+            <button class="btn sm primary"><i data-icon="plus" class="i-14"></i>新建团队</button>
+          </div>
+
+          <!-- 团队卡列表 -->
+          <div class="grid3" style="margin-bottom:26px">
+            <div class="team-card is-on">
+              <div class="tc-head">
+                <span class="ava-stack"><span class="ava lead">主</span><span class="ava">架</span><span class="ava">后</span><span class="ava">测</span></span>
+                <span class="spacer" style="flex:1"></span>
+                <span class="tag">使用中</span>
+              </div>
+              <div class="tc-name">全栈小队</div>
+              <div class="tc-desc">跨层改动的默认编队：主控拆解 → 架构师定方案 → 后端实现 → 测试补回归。</div>
+              <div class="tc-foot"><span class="tag">4 成员</span><span class="tag">并发 3</span><span class="tag">$1.50</span></div>
+            </div>
+            <div class="team-card">
+              <div class="tc-head">
+                <span class="ava-stack"><span class="ava lead">主</span><span class="ava">后</span><span class="ava">测</span></span>
+                <span class="spacer" style="flex:1"></span>
+              </div>
+              <div class="tc-name">测试双人</div>
+              <div class="tc-desc">实现 + 测试成对推进，不动架构决策。</div>
+              <div class="tc-foot"><span class="tag">3 成员</span><span class="tag">并发 2</span><span class="tag">$0.80</span></div>
+            </div>
+            <div class="team-card">
+              <div class="tc-head">
+                <span class="ava-stack"><span class="ava lead">主</span><span class="ava">架</span><span class="ava">文</span></span>
+                <span class="spacer" style="flex:1"></span>
+                <span class="tag ok">read-only</span>
+              </div>
+              <div class="tc-name">评审小队</div>
+              <div class="tc-desc">只读团队：读码、评审、出文档，全员禁止写盘。</div>
+              <div class="tc-foot"><span class="tag">3 成员</span><span class="tag">并发 2</span><span class="tag">$0.40</span></div>
+            </div>
+          </div>
+
+          <!-- 团队详情：成员 + 策略 -->
+          <div class="card">
+            <div class="card-head">
+              <i data-icon="users" class="i-16"></i><span class="name">全栈小队</span>
+              <span class="path">~/.axon/teams/fullstack.json</span>
+              <span class="spacer"></span>
+              <button class="btn sm ghost"><i data-icon="copy" class="i-14"></i>复制为新团队</button>
+              <button class="btn sm primary"><i data-icon="plus" class="i-14"></i>新建 Agent（分身）</button>
+              <span class="ann gap">G10.2 team.save</span>
+            </div>
+
+            <div class="card-body" style="padding:0">
+              <div class="list" style="border:0;border-radius:0;border-top:1px solid var(--line)">
+                <div class="list-row">
+                  <span class="ava lead">主</span>
+                  <div class="grow">
+                    <div class="t1">Axon5 · 主控 <span class="tag">lead</span> <span class="tag info">fork: all</span></div>
+                    <div class="t2">类型 Axon5 · 负责拆解与收口，是会话的根节点；唯一默认带全上下文的类型。</div>
+                  </div>
+                  <span class="tag">11 工具</span><span class="tag">full-auto</span>
+                  <button class="btn sm ghost">编辑</button>
+                </div>
+                <div class="list-row">
+                  <span class="ava">架</span>
+                  <div class="grow">
+                    <div class="t1">架构师 #A <span class="tag">类型 架构师</span></div>
+                    <div class="t2">定方案、不写码；可 consult / delegate，禁止写盘。</div>
+                  </div>
+                  <span class="tag">8 工具</span><span class="tag">read-only</span>
+                  <button class="btn sm ghost">编辑</button>
+                </div>
+                <div class="list-row">
+                  <span class="ava">后</span>
+                  <div class="grow">
+                    <div class="t1">后端实现 #B <span class="tag">类型 后端实现</span> <span class="tag">覆写：模型 sonnet</span></div>
+                    <div class="t2">写码 + 跑测试；破坏性命令需人批。Agent 级覆写只能<b>减能</b>，不能突破类型白名单。</div>
+                  </div>
+                  <span class="tag">6 工具</span><span class="tag">write-confirm</span>
+                  <button class="btn sm ghost">编辑</button>
+                </div>
+                <div class="list-row">
+                  <span class="ava">测</span>
+                  <div class="grow">
+                    <div class="t1">测试工程师 #C <span class="tag">类型 测试工程师</span></div>
+                    <div class="t2">只跑测试与读代码，不改实现文件。</div>
+                  </div>
+                  <span class="tag">5 工具</span><span class="tag">write-confirm</span>
+                  <button class="btn sm ghost">编辑</button>
+                </div>
+                <div class="list-row" style="color:var(--text-dim)">
+                  <span class="ava" style="border-style:dashed"><i data-icon="plus" class="i-14"></i></span>
+                  <div class="grow"><div class="t1" style="color:var(--text-muted)">新建 Agent —— 选一个类型，起个名，加进本队</div></div>
+                </div>
+              </div>
+            </div>
+
+            <div class="card-body" style="padding-top:14px">
+              <div class="form-row">
+                <div class="lbl">编队形状</div>
+                <div>
+                  <div class="seg"><button class="is-on">星形（lead 直连所有人）</button><button>链形（逐级转交）</button><button>自定义父子</button></div>
+                  <div class="hint">形状决定实例化后的分身树父子关系，也就决定了权限交集链（父 ∩ 子）与审批穿透路径。</div>
+                </div>
+              </div>
+              <div class="form-row">
+                <div class="lbl">并发闸门</div>
+                <div>
+                  <div class="field">同时最多 3 个成员 running，其余 parked 排队<span class="ann">gate 只数 running</span></div>
+                </div>
+              </div>
+              <div class="form-row">
+                <div class="lbl">团队预算</div>
+                <div>
+                  <div class="field">软线 $1.00 · 硬线 $1.50（本队会话内累计）<span class="ann gap">G10.4 team 级预算</span></div>
+                  <div class="hint">团队预算是会话预算的默认值；会话可下调不可上调。</div>
+                </div>
+              </div>
+              <div class="form-row">
+                <div class="lbl">上下文默认</div>
+                <div>
+                  <div class="seg"><button class="is-on">none</button><button>summary</button><button>all</button></div>
+                  <div class="hint">成员默认 fork: none；lead（Axon5 类型）是显式逃生门，默认 all。</div>
+                </div>
+              </div>
+            </div>
+
+            <div class="card-foot">
+              <button class="btn sm danger"><i data-icon="trash" class="i-14"></i>删除团队</button>
+              <span class="spacer"></span>
+              <button class="btn sm">另存为模板</button>
+              <button class="btn sm primary">保存</button>
+            </div>
+          </div>
+
+          <!-- Agent 类型库 -->
+          <div class="side-section" style="padding-left:0;margin-top:26px">
+            Agent 类型库（原「角色」，内核协议未改名）<span class="ann">role.list / role.save 复用</span>
+            <span class="spacer" style="flex:1"></span>
+            <button class="btn sm ghost"><i data-icon="plus" class="i-14"></i>新建类型</button>
+          </div>
+          <div class="list">
+            <div class="list-row">
+              <span class="sdot done"></span>
+              <div class="grow"><div class="t1">Axon5 <span class="tag">内置</span> <span class="tag info">fork: all</span></div>
+                <div class="t2">唯一默认带全上下文的类型；六编排工具全开，只当 lead 用。</div></div>
+              <span class="tag">11 工具</span><span class="tag">full-auto</span><span class="when">被 3 个团队引用</span>
+            </div>
+            <div class="list-row">
+              <span class="sdot done"></span>
+              <div class="grow"><div class="t1">架构师 <span class="tag">内置</span></div><div class="t2">只读 + consult/delegate；不许写盘。</div></div>
+              <span class="tag">8 工具</span><span class="tag">read-only</span><span class="when">2 个团队</span>
+            </div>
+            <div class="list-row">
+              <span class="sdot done"></span>
+              <div class="grow"><div class="t1">后端实现 <span class="tag">用户</span> <span class="tag">已覆盖内置</span></div><div class="t2">写码 + 跑测试；破坏性命令需人批。</div></div>
+              <span class="tag">6 工具</span><span class="tag">write-confirm</span><span class="when">2 个团队</span>
+            </div>
+            <div class="list-row">
+              <span class="sdot done"></span>
+              <div class="grow"><div class="t1">测试工程师 <span class="tag">用户</span></div><div class="t2">只跑测试与读代码，不改实现文件。</div></div>
+              <span class="tag">5 工具</span><span class="tag">write-confirm</span><span class="when">2 个团队</span>
+            </div>
+            <div class="list-row">
+              <span class="sdot err"></span>
+              <div class="grow"><div class="t1">数据迁移 <span class="tag">用户</span> <span class="tag err">配置错</span></div>
+                <div class="t2">~/.axon/roles/migrator.json：approval 取值 "auto" 不在枚举内（read-only / write-confirm / full-auto）。引用它的团队无法开会话。</div></div>
+              <span class="tag">6 工具</span><span class="tag err">invalid</span><span class="when">0 个团队</span>
+            </div>
+          </div>
+
+        </div>
+      </section>
+
+      <aside class="inspector">
+        <div class="panel">
+          <div class="panel-title"><span>三层关系</span></div>
+          <div class="prow sub"><span class="tag">类型</span><span>Agent 类型</span><span class="val">能力模板</span></div>
+          <div class="prow sub"><span class="tag">成员</span><span>Agent</span><span class="val">类型 + 覆写 + 名字</span></div>
+          <div class="prow sub"><span class="tag">编队</span><span>Team</span><span class="val">Agent 组合 + 策略</span></div>
+          <div class="prow sub"><span class="tag">实例</span><span>分身</span><span class="val">会话里跑起来的成员</span></div>
+          <div class="hint" style="padding:2px 10px 8px">合成顺序不变：类型 → 权限（父 ∩ 子）→ 上下文（ForkMode）。团队只是在最外面加了一层「谁和谁一起上、树长什么形状」。</div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-title"><span>本队正在跑</span></div>
+          <div class="prow sub"><span class="sdot run"></span><span>支付回调幂等改造</span><span class="val">4 分身</span></div>
+          <div class="prow sub"><span class="sdot done"></span><span>M4 账本 schema 评审</span><span class="val">昨天</span></div>
+          <div class="hint" style="padding:2px 10px 8px">改团队不影响已开会话（合成发生在 session.create 时）。</div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-title"><span>待拍板</span></div>
+          <div class="hint" style="padding:2px 10px 10px">
+            ① Agent 是团队私有还是全局共享（跨团队复用同一个 Agent）？<br />
+            ② 团队能否嵌套团队（子队作为一个成员）？<br />
+            ③ 「临时编队」结束后默认丢弃还是提示存为团队？
+          </div>
+        </div>
+      </aside>
+    </div>
+  </main>
+</div>
+<script src="assets/shell.js"></script>
+</body>
+</html>

@@ -24,9 +24,12 @@ import {
   type ResponseEnvelope,
 } from '@axon/protocol';
 import {
+  Type,
   createFauxSource,
   createOpenAICompatSource,
   fauxAssistantMessage,
+  fauxToolCall,
+  lastUserText,
   scriptedSource,
   withTurnCost,
   type ModelSource,
@@ -53,6 +56,20 @@ const here = dirname(fileURLToPath(import.meta.url));
  * 防止把真用户的角色目录写脏。
  */
 const ROLES_DIR = process.env.AXON_ROLES_DIR || join(homedir(), '.axon', 'roles');
+
+/** 冒烟模式：只由 ui-smoke 打开，生产路径完全不受影响。 */
+const SMOKE = !!process.env.AXON_SMOKE_SCRIPT;
+
+/**
+ * 实际生效的内置角色集合。
+ *
+ * 冒烟下给每个角色的白名单补上 `smoke_echo`——**必须在这里统一改**：
+ * RoleBridge 也拿 builtinRoles 去 updateRoles，两处不同源的话
+ * 热重载一跑就把补丁冲掉了（第一版就是这么踩的）。
+ */
+const EFFECTIVE_ROLES = SMOKE
+  ? ALL_ROLES.map((r) => (r.tools ? { ...r, tools: [...r.tools, 'smoke_echo'] } : r))
+  : ALL_ROLES;
 
 let win: BrowserWindow | null = null;
 let host: AxonHost | null = null;
@@ -92,6 +109,50 @@ async function createModelSource(): Promise<{ source: ModelSource; label: string
   return { config, source: faux, label: `faux（${choice.reason}；配置文件 ${CONFIG_PATH}）` };
 }
 
+/**
+ * 冒烟专用的无害叶子工具。
+ *
+ * 存在理由只有一个：M4 的审批门只拦叶子工具（决策 D5），
+ * 而生产路径的 tools universe 现在只有六件套编排工具，
+ * 不注入一个叶子工具就没有任何东西能驱动审批 banner。
+ */
+function smokeEchoTool() {
+  return {
+    name: 'smoke_echo',
+    description: '冒烟用：原样返回传入的文本。',
+    parameters: Type.Object({ text: Type.String() }),
+    execute: async (_id: string, args: { text?: string }) => ({
+      content: [{ type: 'text' as const, text: `echo: ${args?.text ?? ''}` }],
+    }),
+  };
+}
+
+/**
+ * 冒烟脚本的回复路由。
+ *
+ * 魔术前缀驱动工具调用，好过让 ui-smoke 去戳主进程内部：
+ * 冒烟只能从「人能做的事」（发一句 prompt）入手，否则验的就不是真链路。
+ * 工具调用只在第一轮发（callIndex 卫兵）：工具返回后引擎会拿同一句
+ * user 文本再要一轮，不卡会无限递归。
+ */
+function smokeReply(text: string): unknown {
+  const seen = smokeCalls.get(text) ?? 0;
+  smokeCalls.set(text, seen + 1);
+  if (seen === 0 && text.startsWith('协作')) {
+    return fauxAssistantMessage(
+      [fauxToolCall('agent', { role: 'blank', task: '冒烟子任务' })],
+      { stopReason: 'toolUse' },
+    );
+  }
+  if (seen === 0 && text.startsWith('动手')) {
+    return fauxAssistantMessage([fauxToolCall('smoke_echo', { text })], {
+      stopReason: 'toolUse',
+    });
+  }
+  return fauxAssistantMessage(`${text}（脚本答复）`);
+}
+const smokeCalls = new Map<string, number>();
+
 async function createHost(): Promise<AxonHost> {
   const { source, label, config } = await createModelSource();
   console.log(`[desktop] model source: ${label}`);
@@ -101,18 +162,19 @@ async function createHost(): Promise<AxonHost> {
   // 「每条消费一个」（pi-ai providers/faux.js:337 shift），普通模式几轮就空；
   // scriptedSource 按文本路由永不耗尽，冒烟可以连发多轮。
   let modelSource: ModelSource = source;
-  if (process.env.AXON_SMOKE_SCRIPT) {
-    modelSource = scriptedSource(
-      source,
-      {},
-      (text) => fauxAssistantMessage(`${text}（脚本答复）`),
-    );
+  if (SMOKE) {
+    modelSource = scriptedSource(source, {}, (text) => smokeReply(text));
   }
   // AXON_SMOKE_BUDGET_COST / _HARD：每轮注入固定成本 + 硬线阈值，
   // 供 ui-smoke 驱动预算熔断的 warning→frozen 两段 UI。
+  //
+  // 只给含「烧钱」的 prompt 计费：预算冻结是**终态**（一冻就拒所有新任务），
+  // 若每轮都计费，M4 的账本/审批幕会把额度烧光，幕次之间隐形耦合。
   if (process.env.AXON_SMOKE_BUDGET_COST) {
     const cost = Number(process.env.AXON_SMOKE_BUDGET_COST);
-    modelSource = withTurnCost(modelSource, () => cost);
+    modelSource = withTurnCost(modelSource, (ctx) =>
+      lastUserText(ctx as never).includes('烧钱') ? cost : 0,
+    );
   }
   // 预算硬线：冒烟 env 优先，否则读配置。接了真模型之后这行不再是演习——
   // faux 时代 cost 恒为 0（faux.js:147 硬编码），没人会真的花钱。
@@ -122,10 +184,15 @@ async function createHost(): Promise<AxonHost> {
       ? { hardUsd: config.budgetUsd }
       : undefined;
 
+  // 叶子工具：生产路径下为空（M4 不交付叶子工具）；冒烟下注入一个无害的
+  // echo 工具，否则 HITL 门根本无从触发——编排工具按决策 D5 是豁免的。
+  // 工具进了 universe 还不够：还得进角色白名单，否则会被白名单先拦
+  // （白名单优先于 HITL：未获授权的工具不该拿去烦人）。
   return new AxonHost({
     modelSource,
-    roles: ALL_ROLES,
+    roles: EFFECTIVE_ROLES,
     budget,
+    ...(SMOKE ? { tools: [smokeEchoTool()] } : {}),
     emit: (event, payload, sourcePath) => {
       // 窗口可能已关闭（用户退出时仍有在途事件），静默丢弃。
       if (!win || win.isDestroyed()) return;
@@ -167,7 +234,7 @@ function createWindow(): void {
 
 app.whenReady().then(async () => {
   host = await createHost();
-  roleBridge = new RoleBridge({ dir: ROLES_DIR, builtinRoles: ALL_ROLES, host });
+  roleBridge = new RoleBridge({ dir: ROLES_DIR, builtinRoles: EFFECTIVE_ROLES, host });
   await roleBridge.init();
   const state = host.listRoles();
   console.log(

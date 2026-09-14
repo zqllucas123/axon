@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<title>Axon · S4 协作账本</title>
+<link rel="stylesheet" href="assets/axon.css" />
+</head>
+<body data-screen="s4">
+<div class="window">
+  <aside class="sidebar" data-shell="sidebar"></aside>
+
+  <main class="main">
+    <header class="topbar">
+      <i data-icon="book"></i>
+      <span class="title">协作账本</span>
+      <span class="tag">M4 新增</span>
+      <span class="spacer"></span>
+      <div data-shell="status"></div>
+      <button class="act" data-ann-toggle><i data-icon="eye" class="i-16"></i></button>
+      <button class="act is-on"><i data-icon="panelR" class="i-16"></i></button>
+    </header>
+
+    <div class="body">
+      <section class="canvas">
+        <div class="page page-wide">
+          <div class="page-head">
+            <h1>协作账本</h1>
+            <p>协作只有四个动词：consult / fork / delegate / handoff。每次动作即一条账目，不做自由消息总线。<span class="ann gap">G7.1 ledger.query · G8.1 ledger.recorded</span></p>
+          </div>
+
+          <div class="toolbar">
+            <div class="seg"><button class="is-on">全部 12</button><button>consult 4</button><button>fork 1</button><button>delegate 5</button><button>handoff 2</button></div>
+            <div class="seg"><button class="is-on">全部表态</button><button>待表态 3</button><button>已采纳 6</button><button>已驳回 1</button></div>
+            <span style="flex:1"></span>
+            <button class="btn sm ghost"><i data-icon="filter" class="i-14"></i>限定子树 /0/1</button>
+          </div>
+
+          <div class="list">
+            <div class="list-row" style="background:var(--bg-sunken)">
+              <i data-icon="reply" class="i-16"></i>
+              <div class="grow">
+                <div class="t1">delegate<span class="tag mono">后端实现 #2 → 测试工程师 #3</span><span class="tag wait">待表态</span></div>
+                <div class="t2">补一组并发回调的回归用例，覆盖同一 provider_txn_id 的 5 并发 · context: none · mention://agent-session/0-1-3</div>
+              </div>
+              <span class="tag">+$0.06</span>
+              <span class="when">02:11 前</span>
+              <button class="btn sm">采纳</button>
+              <button class="btn sm ghost">驳回</button>
+              <span class="ann gap">G7.2 ledger.adopt</span>
+            </div>
+
+            <div class="list-row">
+              <i data-icon="branch" class="i-16"></i>
+              <div class="grow">
+                <div class="t1">consult<span class="tag mono">后端实现 #2 → 架构师 #1</span><span class="tag ok">已采纳</span></div>
+                <div class="t2">唯一键取 (provider, provider_txn_id) 还是业务单号？→ 采纳「网关流水号」方案 · context: none</div>
+              </div>
+              <span class="tag">+$0.02</span>
+              <span class="when">09:40</span>
+              <i data-icon="chevR" class="i-14"></i>
+            </div>
+
+            <div class="list-row">
+              <i data-icon="commit" class="i-16"></i>
+              <div class="grow">
+                <div class="t1">handoff<span class="tag mono">Axon5 · 主控 → 后端实现 #2</span><span class="tag ok">已采纳</span></div>
+                <div class="t2">「支付回调幂等改造」整段交接，含验收口径 · context: summary</div>
+              </div>
+              <span class="tag">+$0.11</span>
+              <span class="when">昨天 18:02</span>
+              <i data-icon="chevR" class="i-14"></i>
+            </div>
+
+            <div class="list-row">
+              <i data-icon="layers" class="i-16"></i>
+              <div class="grow">
+                <div class="t1">fork<span class="tag mono">架构师 #1 → 架构师 #6</span><span class="tag">不适用</span></div>
+                <div class="t2">分叉一条「不加唯一索引、用分布式锁」的对照方案 · context: all（显式逃生门）</div>
+              </div>
+              <span class="tag">+$0.19</span>
+              <span class="when">昨天 17:30</span>
+              <i data-icon="chevR" class="i-14"></i>
+            </div>
+
+            <div class="list-row">
+              <i data-icon="reply" class="i-16"></i>
+              <div class="grow">
+                <div class="t1">delegate<span class="tag mono">Axon5 · 主控 → 文档 #4</span><span class="tag err">已驳回</span></div>
+                <div class="t2">写迁移说明 → 驳回理由：方案未定稿，先不产出文档 · context: none</div>
+              </div>
+              <span class="tag">+$0.01</span>
+              <span class="when">昨天 17:12</span>
+              <i data-icon="chevR" class="i-14"></i>
+            </div>
+
+            <div class="list-row">
+              <i data-icon="branch" class="i-16"></i>
+              <div class="grow">
+                <div class="t1">consult<span class="tag mono">测试工程师 #3 → 后端实现 #2</span><span class="tag wait">待表态</span></div>
+                <div class="t2">重复回调返回 200 还是 409？回执影响用例断言 · context: none</div>
+              </div>
+              <span class="tag">+$0.01</span>
+              <span class="when">昨天 16:55</span>
+              <i data-icon="chevR" class="i-14"></i>
+            </div>
+          </div>
+
+          <!-- 单笔详情 -->
+          <div class="card" style="margin-top:24px">
+            <div class="card-head">
+              <i data-icon="db" class="i-16"></i><span class="name">账目详情</span>
+              <span class="path">ldg_01J9K2…8QF</span>
+              <span class="spacer"></span>
+              <span class="tag wait">adoption: pending</span>
+              <span class="ann">LedgerRecord（§6.1 形状）</span>
+            </div>
+            <div class="card-body" style="padding-bottom:6px">
+              <table class="tbl">
+                <tr><td style="width:120px;color:var(--text-muted)">action</td><td class="num">delegate</td></tr>
+                <tr><td style="color:var(--text-muted)">from / to</td><td class="num">/0/1/2 → /0/1/3</td></tr>
+                <tr><td style="color:var(--text-muted)">context_scope</td><td class="num">forkMode: none</td></tr>
+                <tr><td style="color:var(--text-muted)">mention</td><td class="num">mention://agent-session/0-1-3 <span class="ann gap">G4.1 稳定 sessionId</span></td></tr>
+                <tr><td style="color:var(--text-muted)">usage 增量</td><td class="num">3,104 in · 812 out · $0.06 <span class="ann gap">G5.2 usage 分片形状</span></td></tr>
+                <tr><td style="color:var(--text-muted)">version</td><td class="num">ledger/v1 <span class="ann">为 M5 落盘预留</span></td></tr>
+              </table>
+            </div>
+            <div class="card-foot">
+              <button class="btn sm ghost"><i data-icon="link" class="i-14"></i>跳到被提及会话<span class="ann">I15 复用 agent.get + agent.messages</span></button>
+              <span class="spacer"></span>
+              <button class="btn sm">驳回</button>
+              <button class="btn sm primary">采纳</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <aside class="inspector">
+        <div class="panel">
+          <div class="panel-title"><span>本会话汇总</span></div>
+          <div class="prow sub"><span>协作笔数</span><span class="val">12</span></div>
+          <div class="prow sub"><span>待表态</span><span class="val">3</span></div>
+          <div class="prow sub"><span>协作花费</span><span class="val">$0.66 / 总 $1.13</span></div>
+          <div class="prow sub"><span>最活跃对</span><span class="val">#2 ↔ #3</span></div>
+        </div>
+        <div class="panel">
+          <div class="panel-title"><span>四个动词</span></div>
+          <div class="prow sub"><span class="tag info">consult</span><span class="val">问一句，不转移责任</span></div>
+          <div class="prow sub"><span class="tag info">fork</span><span class="val">带上下文开对照线</span></div>
+          <div class="prow sub"><span class="tag info">delegate</span><span class="val">派活，等回执表态</span></div>
+          <div class="prow sub"><span class="tag info">handoff</span><span class="val">整段交接，责任转移</span></div>
+          <div class="hint" style="padding:2px 10px 8px">consult / delegate 默认等人表态；fork / handoff 落 not_applicable。不设特权 planning / review 角色。</div>
+        </div>
+        <div class="panel">
+          <div class="panel-title"><span>M4 待拍板</span></div>
+          <div class="hint" style="padding:2px 10px 10px">
+            ① 人能否手动发起协作（actor = user 还是父 agent）；<br />
+            ② <code>agent.message.received</code> 并入账本口径还是独立轻消息（G2.1，必须二选一）。
+          </div>
+        </div>
+      </aside>
+    </div>
+  </main>
+</div>
+<script src="assets/shell.js"></script>
+</body>
+</html>

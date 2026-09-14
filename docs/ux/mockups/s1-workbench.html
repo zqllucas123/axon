@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<title>Axon · S1 工作台</title>
+<link rel="stylesheet" href="assets/axon.css" />
+</head>
+<body data-screen="s1">
+<div class="window">
+  <aside class="sidebar" data-shell="sidebar"></aside>
+
+  <main class="main">
+    <header class="topbar">
+      <i data-icon="layers"></i>
+      <span class="title">会话总览</span>
+      <span class="spacer"></span>
+      <div data-shell="status"></div>
+      <button class="act" data-ann-toggle title="显示数据来源标注（⌘/）"><i data-icon="eye" class="i-16"></i></button>
+      <button class="act"><i data-icon="panelR" class="i-16"></i></button>
+    </header>
+
+    <div class="body">
+      <section class="canvas">
+        <div class="page page-wide">
+
+          <!-- 活跃会话 -->
+          <div class="toolbar" style="margin-top:14px">
+            <span style="font-size:var(--fs-13);color:var(--text-muted)">活跃会话 3</span>
+            <div class="seg"><button class="is-on">全部</button><button>团队 2</button><button>单兵 1</button></div>
+            <span class="spacer" style="flex:1"></span>
+            <a class="btn sm primary" href="s0-new-session.html"><i data-icon="plus" class="i-14"></i>新建会话</a>
+          </div>
+
+          <div class="list" style="margin-bottom:26px">
+            <a class="list-row" href="s2-session.html" style="background:var(--bg-sunken)">
+              <span class="ava-stack"><span class="ava lead">主</span><span class="ava">架</span><span class="ava">后</span><span class="ava">测</span></span>
+              <div class="grow">
+                <div class="t1">支付回调幂等改造 <span class="tag">全栈小队</span> <span class="tag">+2 临时</span> <span class="tag err">1 待批</span></div>
+                <div class="t2">6 分身 · 3 running / 1 parked / 1 error · 12 笔协作 · /works/prjs/demo</div>
+              </div>
+              <span class="when">$1.13</span>
+              <i data-icon="chevR" class="i-14"></i>
+            </a>
+            <a class="list-row" href="s2-solo.html">
+              <span class="ava"><i data-icon="spark" class="i-14"></i></span>
+              <div class="grow">
+                <div class="t1">查一下 bun 的 workspace 协议 <span class="tag">单兵 · 内置引擎</span></div>
+                <div class="t2">无分身树 · 引擎建议升级为团队会话 · /prjs/axon</div>
+              </div>
+              <span class="when">$0.02</span>
+              <i data-icon="chevR" class="i-14"></i>
+            </a>
+            <a class="list-row" href="s2-session.html">
+              <span class="ava-stack"><span class="ava lead">主</span><span class="ava">后</span><span class="ava">测</span></span>
+              <div class="grow">
+                <div class="t1">把 orchestrator 的六工具补测 <span class="tag">测试双人</span></div>
+                <div class="t2">3 分身 · 全部 idle · 5 笔协作</div>
+              </div>
+              <span class="when">$0.34</span>
+              <i data-icon="chevR" class="i-14"></i>
+            </a>
+          </div>
+
+          <!-- 当前会话的分身 -->
+          <div class="toolbar" style="margin-top:6px">
+            <span style="font-size:var(--fs-13);color:var(--text-muted)">「支付回调幂等改造」的分身 6 个</span>
+            <div class="seg">
+              <button class="is-on">全部</button><button>运行中 3</button><button>等待 1</button><button>异常 1</button>
+            </div>
+            <span class="spacer" style="flex:1"></span>
+            <button class="btn sm ghost"><i data-icon="plus" class="i-14"></i>临时加人</button>
+          </div>
+
+          <div class="list">
+            <div class="list-row">
+              <span class="sdot run"></span>
+              <div class="grow">
+                <div class="t1">Axon5 · 主控 <span class="tag mono">/0</span> <span class="tag run">running</span></div>
+                <div class="t2">正在：拆解「支付回调幂等改造」为三条子线 <span class="ann gap">G4.2 当前任务文本</span></div>
+              </div>
+              <span class="tag">fork: all</span>
+              <span class="tag">11 工具</span>
+              <span class="when">$0.42</span>
+              <i data-icon="chevR" class="i-14"></i>
+            </div>
+
+            <div class="list-row">
+              <span class="sdot run"></span>
+              <div class="grow">
+                <div class="t1">架构师 #1 <span class="tag mono">/0/1</span> <span class="tag run">running</span></div>
+                <div class="t2">正在：确认回调表唯一键列组合</div>
+              </div>
+              <span class="tag">fork: none</span>
+              <span class="tag">8 工具</span>
+              <span class="when">$0.26</span>
+              <i data-icon="chevR" class="i-14"></i>
+            </div>
+
+            <div class="list-row" style="background:var(--bg-sunken)">
+              <span class="sdot run"></span>
+              <div class="grow">
+                <div class="t1">后端实现 #2 <span class="tag mono">/0/1/2</span> <span class="tag err">待批准</span></div>
+                <div class="t2">bash · bunx prisma migrate dev —— 等你批准 00:42 <span class="ann gap">G5.1 穿透链</span></div>
+              </div>
+              <span class="tag">fork: none</span>
+              <span class="tag">6 工具</span>
+              <span class="when">$0.31</span>
+              <i data-icon="chevR" class="i-14"></i>
+            </div>
+
+            <div class="list-row">
+              <span class="sdot wait"></span>
+              <div class="grow">
+                <div class="t1">测试工程师 #3 <span class="tag mono">/0/1/3</span> <span class="tag wait">parked · 队列第 1</span></div>
+                <div class="t2">待办：并发回调回归用例（来自 #2 的 delegate） <span class="ann gap">G4.6 waitingOn / parked 位次</span></div>
+              </div>
+              <span class="tag">fork: none</span>
+              <span class="tag">5 工具</span>
+              <span class="when">—</span>
+              <i data-icon="chevR" class="i-14"></i>
+            </div>
+
+            <div class="list-row">
+              <span class="sdot idle"></span>
+              <div class="grow">
+                <div class="t1">文档 #4 <span class="tag mono">/0/4</span> <span class="tag">idle</span> <span class="tag">临时加入</span></div>
+                <div class="t2">上次：更新 docs/ux/00 的缺口清单。不属于全栈小队编队，本会话临时拉进来。</div>
+              </div>
+              <span class="tag">fork: none</span>
+              <span class="tag">3 工具</span>
+              <span class="when">$0.05</span>
+              <i data-icon="chevR" class="i-14"></i>
+            </div>
+
+            <div class="list-row">
+              <span class="sdot err"></span>
+              <div class="grow">
+                <div class="t1">数据迁移 #5 <span class="tag mono">/0/5</span> <span class="tag err">error</span> <span class="tag">临时加入</span></div>
+                <div class="t2">lastError：模型调用 HTTP 400（input_schema 不支持 oneOf） <span class="ann">AgentSnapshot.lastError</span></div>
+              </div>
+              <span class="tag">fork: none</span>
+              <span class="tag">6 工具</span>
+              <span class="when">$0.09</span>
+              <i data-icon="chevR" class="i-14"></i>
+            </div>
+          </div>
+
+          <div class="grid3" style="margin-top:22px">
+            <div class="stat">
+              <div class="k">本次会话花费 <span class="ann gap">G9.1 limitUsd 语义错</span></div>
+              <div class="v">$1.13</div>
+              <div class="s">软线 $1.00 · 硬线 $1.50</div>
+            </div>
+            <div class="stat">
+              <div class="k">待你处理</div>
+              <div class="v">2</div>
+              <div class="s">1 条审批 · 1 条提问</div>
+            </div>
+            <div class="stat">
+              <div class="k">协作落账</div>
+              <div class="v">12</div>
+              <div class="s">3 条待表态 adoption</div>
+            </div>
+          </div>
+
+        </div>
+      </section>
+
+      <aside class="inspector">
+        <div class="panel">
+          <div class="panel-title"><span>团队</span><span class="spacer"></span>
+            <a class="act" href="s3-teams.html"><i data-icon="chevR" class="i-14"></i></a>
+          </div>
+          <div class="prow"><span class="ava lead" style="width:20px;height:20px">全</span><span>全栈小队</span><span class="val">4 成员 · 使用中</span></div>
+          <div class="prow"><span class="ava" style="width:20px;height:20px">测</span><span>测试双人</span><span class="val">3 成员</span></div>
+          <div class="prow"><span class="ava" style="width:20px;height:20px">评</span><span>评审小队</span><span class="val">3 成员 · 只读</span></div>
+          <div class="hint" style="padding:2px 10px 8px">
+            1 个 Agent 类型有配置错（数据迁移），引用它的团队无法开会话。
+            <a href="s3-teams.html" style="color:var(--sem-info)">去团队管理 →</a>
+          </div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-title"><span>并发闸门</span></div>
+          <div class="prow sub"><span>running</span><span class="val">3 / 4</span></div>
+          <div class="prow sub"><span>parked（排队）</span><span class="val">1</span></div>
+          <div class="prow sub"><span>suspended（父等后代）</span><span class="val">1</span></div>
+          <div class="hint" style="padding:2px 10px 8px">wait 仅限后代 ⇒ 死锁结构性不可能；<code>orchestration.deadlock</code> 待 M4 决定删/留（G2.5）。</div>
+        </div>
+      </aside>
+    </div>
+  </main>
+</div>
+<script src="assets/shell.js"></script>
+</body>
+</html>

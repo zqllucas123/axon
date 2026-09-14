@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<title>Axon · 设计语言</title>
+<link rel="stylesheet" href="assets/axon.css" />
+</head>
+<body data-screen="s9" class="show-ann">
+<div style="max-width:1000px;margin:0 auto;padding:34px 34px 60px">
+
+  <div class="page-head">
+    <h1>Axon 视觉设计语言 v0.1</h1>
+    <p>参照 Codex 桌面端：暖灰底、极低对比描边、零阴影、1.6px 线性图标、近黑主按钮。目标是「安静的工具」——界面本身不抢注意力，状态靠位置与极小色块表达。</p>
+  </div>
+
+  <div class="spec-sec">
+    <h2>1. 表面与描边</h2>
+    <p class="lead">三层暖灰：侧栏最暗、画布居中、卡片最亮。分层只用 1px 描边，全局不用投影——阴影会让密集信息界面显脏。</p>
+    <div class="swatches">
+      <div class="sw"><div class="chipbox" style="background:#f2f1ee"></div><div class="meta"><b>--bg-sidebar</b>#f2f1ee</div></div>
+      <div class="sw"><div class="chipbox" style="background:#fcfcfb"></div><div class="meta"><b>--bg-canvas</b>#fcfcfb</div></div>
+      <div class="sw"><div class="chipbox" style="background:#ffffff"></div><div class="meta"><b>--bg-elev</b>#ffffff</div></div>
+      <div class="sw"><div class="chipbox" style="background:#f6f5f2"></div><div class="meta"><b>--bg-sunken</b>#f6f5f2</div></div>
+      <div class="sw"><div class="chipbox" style="background:#e7e5e0"></div><div class="meta"><b>--line</b>#e7e5e0</div></div>
+      <div class="sw"><div class="chipbox" style="background:#d8d5ce"></div><div class="meta"><b>--line-strong</b>#d8d5ce</div></div>
+      <div class="sw"><div class="chipbox" style="background:#e6e4df"></div><div class="meta"><b>--bg-active</b>#e6e4df</div></div>
+      <div class="sw"><div class="chipbox" style="background:#2b2a27"></div><div class="meta"><b>--accent</b>#2b2a27</div></div>
+    </div>
+  </div>
+
+  <div class="spec-sec">
+    <h2>2. 语义色（一律降饱和）</h2>
+    <p class="lead">状态色只用于 7px 圆点、22px 标签、5px 进度条，永不铺大面积。运行中 = 土黄而非蓝，避免与「链接/可点」混淆。</p>
+    <div class="swatches">
+      <div class="sw"><div class="chipbox" style="background:#a8791a"></div><div class="meta"><b>--sem-run 运行中</b>#a8791a</div></div>
+      <div class="sw"><div class="chipbox" style="background:#4a7a52"></div><div class="meta"><b>--sem-ok 完成/采纳</b>#4a7a52</div></div>
+      <div class="sw"><div class="chipbox" style="background:#6f6e84"></div><div class="meta"><b>--sem-wait 等待/排队</b>#6f6e84</div></div>
+      <div class="sw"><div class="chipbox" style="background:#b0473b"></div><div class="meta"><b>--sem-err 错误/待批</b>#b0473b</div></div>
+    </div>
+    <div style="display:flex;gap:8px;margin-top:14px;flex-wrap:wrap;align-items:center">
+      <span class="sdot run"></span><span class="tag run">running</span>
+      <span class="sdot wait"></span><span class="tag wait">parked</span>
+      <span class="sdot done"></span><span class="tag ok">已采纳</span>
+      <span class="sdot err"></span><span class="tag err">待批准</span>
+      <span class="tag info">context: none</span>
+      <span class="tag mono">/0/1/2</span>
+    </div>
+  </div>
+
+  <div class="spec-sec">
+    <h2>3. 字阶与半径</h2>
+    <p class="lead">正文 14px / 会话 15px / 标题 17–22px / 元信息 11–13px。半径梯度：标签 6 → 按钮 8 → 卡片 12 → 面板 16 → 气泡 20。</p>
+    <div class="grid3">
+      <div class="stat"><div class="k">会话正文</div><div class="v" style="font-size:15px;font-weight:400">15px / 1.75</div><div class="s">长文阅读优先</div></div>
+      <div class="stat"><div class="k">界面正文</div><div class="v" style="font-size:14px;font-weight:400">14px / 1.2</div><div class="s">列表、导航、表单</div></div>
+      <div class="stat"><div class="k">元信息</div><div class="v" style="font-size:12px;font-weight:400">12px / 11px</div><div class="s">时间、成本、路径</div></div>
+    </div>
+  </div>
+
+  <div class="spec-sec">
+    <h2>4. 图标</h2>
+    <p class="lead">统一 24 视窗、1.6px 描边、圆头圆角、currentColor；尺寸只有 14 / 16 / 18 / 20 四档。不用填充图标，不用双色。</p>
+    <div style="display:flex;flex-wrap:wrap;gap:16px;padding:14px;border:1px solid var(--line);border-radius:var(--r-md);background:#fff" id="icongrid"></div>
+  </div>
+
+  <div class="spec-sec">
+    <h2>5. 组件</h2>
+    <p class="lead">会话流只有六种元件：用户气泡、助手正文、活动行、折叠块、卡片、输入区。新增信息优先做「卡片」而不是新区块，避免版式发散。</p>
+    <div class="grid2">
+      <div>
+        <div class="bubble-row"><div class="bubble">用户气泡：右对齐、sunken 底、20px 圆角</div></div>
+        <div class="assistant" style="margin-top:8px"><p>助手正文：无气泡、无头像，直接铺在画布上，靠留白分段。</p></div>
+        <div class="activity"><span class="i"></span><span>活动行：读文件 / 用时 55 秒</span></div>
+        <details class="fold"><summary><span>折叠块：thinking / 工具输出</span><span class="spacer"></span></summary><div class="fold-body">默认收起，只有用户主动展开。</div></details>
+      </div>
+      <div>
+        <div class="card">
+          <div class="card-head"><span class="name">卡片</span><span class="path">工具 / 审批 / 协作 / 错误</span><span class="spacer"></span><span class="tag ok">ok</span></div>
+          <div class="card-body">头 = 图标 + 名 + 路径 + 状态标签；身 = 内容；脚 = 动作。四种卡片共用同一骨架。</div>
+          <div class="card-foot"><span class="spacer"></span><button class="btn sm">次要</button><button class="btn sm primary">主要</button></div>
+        </div>
+        <div class="composer" style="max-width:none;margin-top:14px">
+          <div class="ph">输入区：16px 圆角、单描边、底排放模式开关与发送圆钮</div>
+          <div class="row"><span class="spacer"></span><button class="send"></button></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="spec-sec">
+    <h2>6. 三条硬规矩</h2>
+    <p class="lead">这三条是把 Codex 风格落到 Axon「多分身」场景的关键，违反就会变成另一个产品。</p>
+    <div class="list">
+      <div class="list-row"><div class="grow"><div class="t1">① 分身身份靠位置，不靠颜色</div><div class="t2">侧栏树缩进 + 引导竖线表达父子；不给每个分身分配主题色（3 个以上就失效）。</div></div></div>
+      <div class="list-row"><div class="grow"><div class="t1">② 一屏一个焦点分身</div><div class="t2">会话屏永远只渲染当前选中分身的流；跨分身信息走账本（S4）与收件箱（S5），不做混流 EventLog。</div></div></div>
+      <div class="list-row"><div class="grow"><div class="t1">③ 需要你决策的东西永远有 chip</div><div class="t2">待批数 / 预算档 / 账本待表态常驻顶栏右侧，任何屏都能一眼看到并点进去。</div></div></div>
+    </div>
+  </div>
+
+  <div class="spec-sec">
+    <h2>7. 数据标注机制</h2>
+    <p class="lead">原型里蓝色虚线标注 = 已有协议支撑；红色虚线标注 = MX 缺口清单条目（G1~G9）。任一屏按 ⌘/ 或点顶栏眼睛图标切换。</p>
+    <div style="display:flex;gap:10px;align-items:center">
+      <span>示例：</span><span class="ann">agent.messages 已实现</span><span class="ann gap">G2.4 approval.request 未发射</span>
+    </div>
+  </div>
+
+</div>
+<script src="assets/shell.js"></script>
+<script>
+  window.addEventListener('load', () => {
+    const { ICONS, icon, mountIcons } = window.AxonShell;
+    const box = document.getElementById('icongrid');
+    box.innerHTML = Object.keys(ICONS)
+      .map((n) => `<span title="${n}" style="color:var(--text-secondary)">${icon(n, 'i-20')}</span>`)
+      .join('');
+    mountIcons();
+
+    // 组件样例里的几处空图标位
+    document.querySelector('.activity .i').innerHTML = icon('file', 'i-16').match(/<svg[\s\S]*<\/svg>/)[0];
+    document.querySelector('.send').innerHTML = icon('arrowUp', 'i-16');
+    document.querySelector('.fold > summary .spacer').insertAdjacentHTML('afterend', icon('chevD', 'i-14'));
+  });
+</script>
+</body>
+</html>

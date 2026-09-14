@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<title>Axon · S6 预算与用量</title>
+<link rel="stylesheet" href="assets/axon.css" />
+</head>
+<body data-screen="s6">
+<div class="window">
+  <aside class="sidebar" data-shell="sidebar"></aside>
+
+  <main class="main">
+    <header class="topbar">
+      <i data-icon="wallet"></i>
+      <span class="title">预算与用量</span>
+      <span class="spacer"></span>
+      <div data-shell="status"></div>
+      <button class="act" data-ann-toggle><i data-icon="eye" class="i-16"></i></button>
+      <button class="act"><i data-icon="panelR" class="i-16"></i></button>
+    </header>
+
+    <div class="body">
+      <section class="canvas">
+        <div class="page page-wide">
+          <div class="page-head">
+            <h1>预算与用量</h1>
+            <p>本屏只读。改限额在 M6 真模型接入前不提供——faux 下的数字没有决策价值。<span class="ann gap">G7.3 budget.get 新命令</span></p>
+          </div>
+
+          <div class="card attn" style="margin-bottom:18px">
+            <div class="card-head">
+              <i data-icon="alert" class="i-16"></i><span class="name">已过软线，进入 warning 档</span>
+              <span class="spacer"></span><span class="tag run">warning</span>
+              <span class="ann gap">G9.1 事件 limitUsd 实际装的是 spent</span>
+            </div>
+            <div class="card-body">
+              已用 <b>$1.13</b>，软线 $1.00，硬线 $1.50。到硬线后进入 <code>frozen</code>：所有分身停止新轮次，且当前无恢复通道（G9.2）——本屏必须常驻可查，而不是只靠两条转瞬即逝的事件。
+              <div class="bar warn" style="margin-top:12px"><span style="width:75%"></span></div>
+              <div class="hint">软线 $1.00（66%）· 硬线 $1.50（100%）</div>
+            </div>
+          </div>
+
+          <div class="grid3">
+            <div class="stat"><div class="k">已用</div><div class="v">$1.13</div><div class="s">今日 · 12 轮对话</div></div>
+            <div class="stat"><div class="k">软线 / 硬线</div><div class="v">$1.00 / $1.50</div><div class="s">来自 BudgetGuard 配置</div></div>
+            <div class="stat"><div class="k">档位</div><div class="v" style="color:var(--sem-run)">warning</div><div class="s">ok → warning → frozen（单向）</div></div>
+          </div>
+
+          <div class="side-section" style="padding-left:0;margin-top:10px">按分身（含子树累计）<span class="ann">AgentSnapshot.usage · registry 沿父链累加</span></div>
+          <div class="list">
+            <table class="tbl">
+              <thead>
+                <tr><th>分身</th><th>角色</th><th style="text-align:right">input</th><th style="text-align:right">output</th><th style="text-align:right">自身</th><th style="text-align:right">含子树</th></tr>
+              </thead>
+              <tbody>
+                <tr><td>Axon5 · 主控 <span class="tag mono">/0</span></td><td>Axon5</td><td class="num" style="text-align:right">182,400</td><td class="num" style="text-align:right">41,200</td><td class="num" style="text-align:right">$0.42</td><td class="num" style="text-align:right">$1.13</td></tr>
+                <tr><td style="padding-left:30px">架构师 #1 <span class="tag mono">/0/1</span></td><td>架构师</td><td class="num" style="text-align:right">96,100</td><td class="num" style="text-align:right">18,700</td><td class="num" style="text-align:right">$0.26</td><td class="num" style="text-align:right">$0.57</td></tr>
+                <tr><td style="padding-left:52px">后端实现 #2 <span class="tag mono">/0/1/2</span></td><td>后端实现</td><td class="num" style="text-align:right">120,800</td><td class="num" style="text-align:right">33,400</td><td class="num" style="text-align:right">$0.31</td><td class="num" style="text-align:right">$0.31</td></tr>
+                <tr><td style="padding-left:52px">测试工程师 #3 <span class="tag mono">/0/1/3</span></td><td>测试工程师</td><td class="num" style="text-align:right">—</td><td class="num" style="text-align:right">—</td><td class="num" style="text-align:right">$0.00</td><td class="num" style="text-align:right">$0.00</td></tr>
+                <tr><td style="padding-left:30px">文档 #4 <span class="tag mono">/0/4</span></td><td>文档</td><td class="num" style="text-align:right">14,200</td><td class="num" style="text-align:right">5,900</td><td class="num" style="text-align:right">$0.05</td><td class="num" style="text-align:right">$0.05</td></tr>
+                <tr><td style="padding-left:30px">数据迁移 #5 <span class="tag mono">/0/5</span></td><td>数据迁移</td><td class="num" style="text-align:right">21,700</td><td class="num" style="text-align:right">3,100</td><td class="num" style="text-align:right">$0.09</td><td class="num" style="text-align:right">$0.09</td></tr>
+              </tbody>
+            </table>
+          </div>
+
+          <div class="side-section" style="padding-left:0;margin-top:22px">按协作动作<span class="ann gap">G5.2 usage 分片维度</span></div>
+          <div class="grid2">
+            <div class="list">
+              <div class="list-row"><div class="grow"><div class="t1">delegate</div><div class="t2">5 笔 · 平均 $0.05</div></div><span class="when">$0.24</span></div>
+              <div class="list-row"><div class="grow"><div class="t1">consult</div><div class="t2">4 笔 · 平均 $0.02</div></div><span class="when">$0.07</span></div>
+              <div class="list-row"><div class="grow"><div class="t1">handoff</div><div class="t2">2 笔</div></div><span class="when">$0.16</span></div>
+              <div class="list-row"><div class="grow"><div class="t1">fork</div><div class="t2">1 笔 · context: all</div></div><span class="when">$0.19</span></div>
+            </div>
+            <div class="card" style="margin:0">
+              <div class="card-head"><i data-icon="alert" class="i-16"></i><span class="name">MU / M6 前的显示纪律</span></div>
+              <div class="card-body">
+                <p style="margin:0 0 8px">① 当前事件把累计 spent 塞进 <code>limitUsd</code>，UI 若直接渲染会出现「已用 $X / 上限 $X」同源同值——M4 必须先定协议再做这屏（G9.1）。</p>
+                <p style="margin:0 0 8px">② 逐条消息成本依赖 <code>MessageLike</code> 带 usage（G6.2），M6 真模型尖峰后才有可靠粒度。</p>
+                <p style="margin:0">③ frozen 是终态，本屏需要回答「为什么冻结 / 已用多少 / 上限多少」，而不只是弹一条 banner（G9.2）。</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <aside class="inspector">
+        <div class="panel">
+          <div class="panel-title"><span>档位语义</span></div>
+          <div class="prow sub"><span class="sdot done"></span><span>ok</span><span class="val">未过软线</span></div>
+          <div class="prow sub"><span class="sdot run"></span><span>warning</span><span class="val">过软线，仍可跑</span></div>
+          <div class="prow sub"><span class="sdot err"></span><span>frozen</span><span class="val">停新轮次，终态</span></div>
+        </div>
+        <div class="panel">
+          <div class="panel-title"><span>最近成本事件</span></div>
+          <div class="prow sub"><span>turn.end · #2</span><span class="val">$0.031</span></div>
+          <div class="prow sub"><span>turn.end · #1</span><span class="val">$0.018</span></div>
+          <div class="prow sub"><span>budget.warning</span><span class="val">08:41</span></div>
+        </div>
+      </aside>
+    </div>
+  </main>
+</div>
+<script src="assets/shell.js"></script>
+</body>
+</html>
