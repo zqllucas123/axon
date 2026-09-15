@@ -117,6 +117,10 @@ export class SessionPersistence {
   private readonly rollupIntervalMs: number;
   /** 每文件一条串行链（写入不交错，见文件头纪律 2）。 */
   private readonly queues = new Map<string, Promise<void>>();
+  /** 非队列的异步操作（删除/隔离）也纳入 flush 的等待集合。 */
+  private readonly inflight = new Set<Promise<unknown>>();
+  /** 每会话最近一次的汇总缓存：元数据变更（rename 等）不许把它冲掉。 */
+  private readonly rollups = new Map<string, SessionRollup>();
   private readonly issueList: StorageIssue[] = [];
   private sessionCountCache = 0;
   /** 待写的汇总缓存（合并到 window 之后落盘）。 */
@@ -146,6 +150,16 @@ export class SessionPersistence {
       ...(sessionId ? { sessionId } : {}),
     });
     while (this.issueList.length > this.issueLimit) this.issueList.shift();
+  }
+
+  /** 把一个不在队列里的异步操作登记进来，让 `flush()` 能等到它。 */
+  private track<T>(task: Promise<T>): Promise<T> {
+    this.inflight.add(task);
+    void task.then(
+      () => this.inflight.delete(task),
+      () => this.inflight.delete(task),
+    );
+    return task;
   }
 
   private absorb(issues: StorageIssue[]): void {
@@ -319,36 +333,51 @@ export class SessionPersistence {
   /**
    * 建会话目录：`session.json` + 各成员的 transcript header。
    *
-   * 顺序有意：先原子写 `session.json`（会话「存在」的判据），再写 header。
-   * 中途崩溃 → 目录在、header 可能缺 → 恢复时按 header 建节点，缺的那些只是没成员。
+   * 崩溃判据是「目录在不在 + session.json 在不在」：这个会话有它才算建过；
+   * header 可能缺（那成员就当没有），不影响会话本身。
    */
   async createSession(record: SessionRecord, headers: TranscriptHeader[] = []): Promise<WriteResult> {
-    const paths = this.pathsOf(record);
-    try {
-      await this.io.mkdir(paths.agentsDir);
-    } catch (err) {
-      return this.writeFailed(paths.sessionDir, `建会话目录失败：${errText(err)}`, record.id);
+    // **每一笔写都在这里同步入队，一个 await 都不先走**。两个理由，都是真盘上
+    // 抓出来的（`host.persistence.test.ts`）：1) 入队是同步的，`flush()` 才等得到
+    // 它们 —— 先 await 再入队的话，「建完会话立刻 flush」会漏掉 session.json，
+    // 随后那笔迟到的写还会把汇总缓存冲掉（saveRecord 不带 rollup）；2) header 与
+    // 消息行共用一条 per-file 队列，先入队 = 先落地 —— 反过来时消息行会排在
+    // header 前，而读侧只认第一份 agent 头（session-files.ts:397），那个成员
+    // 重启后就读不出身份了。目录创建下沉到各笔写自己的队列任务里。
+    const writes = [this.saveRecord(record), ...headers.map((h) => this.writeAgentHeader(record, h))];
+    let failed: WriteResult | undefined;
+    for (const write of writes) {
+      const result = await write;
+      if (!result.ok) failed = failed ?? result;
     }
-    const saved = await this.saveRecord(record);
-    if (!saved.ok) return saved;
-    for (const header of headers) {
-      const written = await this.writeAgentHeader(record, header);
-      if (!written.ok) return written;
-    }
+    if (failed) return failed;
     this.sessionCountCache = Math.max(this.sessionCountCache, 1);
     return { ok: true };
   }
 
-  /** 原子写 `session.json`（tmp + rename）。元数据变化时立刻写。 */
+  /**
+   * 原子写 `session.json`（tmp + rename）。元数据变化时立刻写。
+   *
+   * rollup **粘性**：不传时沿用本会话上一次的汇总。否则任何一次元数据变更
+   * （rename / 预算改写）都会把列表要看的汇总顺手抹掉 —— 而它下一次刷新要
+   * 等到 500ms 合并窗口之后。
+   */
   saveRecord(record: SessionRecord, rollup?: SessionRollup): Promise<WriteResult> {
     const paths = this.pathsOf(record);
+    if (rollup) this.rollups.set(record.id, rollup);
+    const effective = rollup ?? this.rollups.get(record.id);
     const payload = encodeSessionFile({
       storageVersion: SESSION_STORAGE_VERSION,
       savedAt: this.now(),
       record,
-      ...(rollup ? { rollup } : {}),
+      ...(effective ? { rollup: effective } : {}),
     });
-    return this.enqueue(paths.sessionFile, () => this.writeAtomic(paths.sessionFile, payload, record.id));
+    return this.enqueue(paths.sessionFile, async () => {
+      // mkdir 下沉到队列任务里：createSession 必须同步入队每一笔写，而入队时
+      // 目录可能还没建出来（见 createSession 注释）。
+      await this.io.mkdir(paths.sessionDir);
+      return this.writeAtomic(paths.sessionFile, payload, record.id);
+    });
   }
 
   /**
@@ -388,7 +417,7 @@ export class SessionPersistence {
       this.rollupTimer = undefined;
     }
     await this.writePendingRollup();
-    await Promise.all([...this.queues.values()]);
+    await Promise.all([...this.queues.values(), ...this.inflight]);
   }
 
   /** 写成员 transcript 的第一行（agent header）。 */
@@ -477,11 +506,16 @@ export class SessionPersistence {
   }
 
   /** 物理删除整个会话目录（决策 4A：一次 rm -rf 就是完整语义）。 */
-  async removeSession(record: SessionRecord): Promise<WriteResult> {
+  removeSession(record: SessionRecord): Promise<WriteResult> {
+    return this.track(this.doRemoveSession(record));
+  }
+
+  private async doRemoveSession(record: SessionRecord): Promise<WriteResult> {
     const paths = this.pathsOf(record);
     try {
       await this.io.rm(paths.sessionDir, { recursive: true, force: true });
       this.sessionCountCache = Math.max(0, this.sessionCountCache - 1);
+      this.rollups.delete(record.id);
       return { ok: true };
     } catch (err) {
       return this.writeFailed(paths.sessionDir, `删会话目录失败：${errText(err)}`, record.id);
@@ -489,9 +523,34 @@ export class SessionPersistence {
   }
 
   /**
+   * 删掉一个成员的 transcript（成员被移除时）。
+   *
+   * 必须真的删：留着它，下次启动扫 agents/*.jsonl 会把那个成员「复活」——
+   * 而它的引擎、队列、等待边都不在了，用户会看到一个永远不会动的僵尸节点。
+   */
+  removeTranscript(record: SessionRecord, path: string): Promise<WriteResult> {
+    return this.track(this.doRemoveTranscript(record, path));
+  }
+
+  private async doRemoveTranscript(record: SessionRecord, path: string): Promise<WriteResult> {
+    const paths = this.pathsOf(record);
+    const file = join(paths.agentsDir, transcriptFileName(path));
+    try {
+      await this.io.rm(file, { recursive: false, force: true });
+      return { ok: true };
+    } catch (err) {
+      return this.writeFailed(file, `删 transcript 失败：${errText(err)}`, record.id);
+    }
+  }
+
+  /**
    * 隔离一个坏文件：移到 `<sessionId>/.corrupt/<name>.<ts>`（**不删原文**，§4.8）。
    */
-  async quarantine(record: SessionRecord, fileName: string): Promise<WriteResult> {
+  quarantine(record: SessionRecord, fileName: string): Promise<WriteResult> {
+    return this.track(this.doQuarantine(record, fileName));
+  }
+
+  private async doQuarantine(record: SessionRecord, fileName: string): Promise<WriteResult> {
     const paths = this.pathsOf(record);
     const from = join(paths.agentsDir, fileName);
     const stamp = new Date(this.now()).toISOString().replace(/[:.]/g, '-');

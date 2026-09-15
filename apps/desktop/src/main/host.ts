@@ -47,6 +47,7 @@ import {
   type AdoptionPolicy,
   type AgentPath,
   type AgentSnapshot,
+  type AgentStatus,
   type ApprovalMode,
   type AxonConfig,
   type BudgetSnapshot,
@@ -102,7 +103,10 @@ import {
   buildSessionSummary,
   computeEffectiveBudget,
   titleFromPrompt,
+  type SessionStoreChange,
 } from './session-store.ts';
+import { SessionPersistence } from './session-persistence.ts';
+import type { TranscriptHeader } from './session-files.ts';
 import {
   adhocTasks,
   adhocTeam,
@@ -150,6 +154,16 @@ export interface HostOptions {
   defaultCwd?: string;
   /** 新建会话的缺省执行方式（S0 三张卡的默认选中项）。 */
   defaultExecutor?: SessionExecutor;
+  /**
+   * 会话落盘（M5）。缺省 = **不落盘**（内存态）。
+   *
+   * 为什么不在这里 new 一个默认实例：默认根是 `~/.axon/sessions`，
+   * 测试与冒烟一旦忘了传，就会把垃圾写进用户的 home。落盘根的决策
+   * 属于接线层（index.ts 读 `AXON_SESSIONS_DIR`），不属于宿主。
+   */
+  persistence?: SessionPersistence;
+  /** 启动装载的会话记录（M5 §4.5）。缺省 = 空表。 */
+  records?: readonly SessionRecord[];
 }
 
 /** 可被 `config.patch` 热改的运行期参数。 */
@@ -175,8 +189,8 @@ export class AxonHost {
   /** 团队表（由 TeamBridge 灌入，与 roles 同构）。 */
   private teams = new Map<string, TeamEntry>();
   private teamIssues: TeamIssue[] = [];
-  /** 会话元数据（M5 落盘前只在内存；见 session-store.ts）。 */
-  private readonly sessions = new SessionStore();
+  /** 会话元数据（落盘挂点见 onSessionChanged；M5 起由构造参数注入初始记录）。 */
+  private readonly sessions: SessionStore;
   /**
    * 每会话的预算档位上次观测值。
    *
@@ -207,7 +221,9 @@ export class AxonHost {
   private readonly lastActivity = new Map<AgentPath, number>();
 
   // ── M4：账本 / 审批 / 裁决 ───────────────────────
-  private readonly ledger = new Ledger();
+  private readonly ledger: Ledger;
+  /** 会话落盘（缺省 undefined = 纯内存，见 HostOptions.persistence）。 */
+  private readonly persistence: SessionPersistence | undefined;
   private readonly approvals: ApprovalBroker;
   private adoptionPolicy: AdoptionPolicy;
   private adoptionPolicyAt: number;
@@ -221,6 +237,12 @@ export class AxonHost {
   private readonly arbitrationTargets = new Map<string, AgentPath>();
 
   constructor(options: HostOptions) {
+    this.persistence = options.persistence;
+    this.sessions = new SessionStore({
+      ...(options.records ? { records: options.records } : {}),
+      onChange: (event) => this.onSessionChanged(event),
+    });
+    this.ledger = new Ledger({ onChange: (entry) => this.onLedgerChanged(entry) });
     this.emit = options.emit;
     this.modelSource = options.modelSource;
     this.tools = options.tools ?? [];
@@ -785,6 +807,10 @@ export class AxonHost {
     });
     const teamLimit = plan.team.maxConcurrent ?? 0;
     this.registry.setSessionLimit(sessionId, teamLimit);
+    this.persistNote(
+      rootPath,
+      `会话升级：主控换为「${plan.lead.displayName}」，新增 ${plan.members.length} 名成员`,
+    );
 
     // ② 成员
     const spawned = this.spawnMembers(sessionId, plan);
@@ -825,7 +851,141 @@ export class AxonHost {
    */
   private touchSession(sessionId: string): void {
     const summary = this.summaryOf(sessionId);
-    if (summary) this.emit('session.changed', { summary });
+    if (!summary) return;
+    this.scheduleRollup(sessionId, summary);
+    this.emit('session.changed', { summary });
+  }
+
+  // ── M5：落盘（写入点 = 状态变更点，§4.4）──────────────────
+
+  /**
+   * 会话记录的落盘（`SessionStore.onChange` 的落点）。
+   *
+   * 三条命令共用这一个入口，是为了让「哪些命令要落盘」只有一处答案：
+   * 宿主里任何一次 `this.sessions.create/update/remove` 都自动带上落盘，
+   * 不需要每个 call site 记得各写一遍。
+   */
+  private onSessionChanged(event: SessionStoreChange): void {
+    const p = this.persistence;
+    if (!p) return;
+    const record = event.record;
+    if (event.kind === 'create') {
+      // 此刻树已经建好（createRoot + 成员都注册完了），header 一次性写全。
+      const headers = this.registry.listOf(record.id).map((snap) => this.headerOf(snap));
+      void (async () => {
+        await p.createSession(record, headers);
+        await p.writeLedgerHeader(record);
+        this.scheduleRollup(record.id);
+      })();
+      return;
+    }
+    if (event.kind === 'remove') {
+      // 决策 4A：删会话 = 物理删整个目录（含成员 transcript 与账本）。
+      void p.removeSession(record);
+      return;
+    }
+    void p.saveRecord(record);
+  }
+
+  /** 成员快照 → transcript header（权威身份在 header 里，文件名只是索引）。 */
+  private headerOf(snapshot: AgentSnapshot): TranscriptHeader {
+    return {
+      sessionId: snapshot.sessionId,
+      path: snapshot.path,
+      ...(snapshot.parent !== undefined ? { parent: snapshot.parent } : {}),
+      role: snapshot.role,
+      displayName: snapshot.displayName,
+      ...(snapshot.forkMode !== undefined ? { forkMode: snapshot.forkMode } : {}),
+      createdAt: snapshot.createdAt,
+    };
+  }
+
+  private recordOf(path: AgentPath): SessionRecord | undefined {
+    // 用**纯路径解析**而不是 registry 查询：删成员时节点已经从 registry 摘掉了，
+    // 但它属于哪个会话仍写在路径里（`/<sessionId>/<leaf>`）。用 registry 查询的
+    // 话，`host.remove()` 里那句「删 transcript」永远查不到会话，文件就留下了，
+    // 重启后那个成员会复活（真盘测试抓到的）。
+    const sessionId = sessionIdOfPath(path);
+    return sessionId === undefined ? undefined : this.sessions.get(sessionId);
+  }
+
+  /** spawn 之后补一行 header（create 之前发生的那些由 createSession 一次写全）。 */
+  private persistAgentHeader(snapshot: AgentSnapshot): void {
+    const p = this.persistence;
+    if (!p) return;
+    const record = this.sessions.get(snapshot.sessionId);
+    if (!record) return;
+    void p.writeAgentHeader(record, this.headerOf(snapshot));
+  }
+
+  /** 每条 user / assistant / toolResult 消息一行（wire 的 message_end）。 */
+  private persistMessage(path: AgentPath, message: MessageLike): void {
+    const p = this.persistence;
+    if (!p) return;
+    const record = this.recordOf(path);
+    if (!record) return;
+    void p.appendMessage(record, path, message, Date.now());
+  }
+
+  /**
+   * 状态行：每次状态跃迁都写一条（含当时的 usage 快照）。
+   *
+   * 读侧只取最后一条来恢复 usage/lastError，所以「每次都写」比「只在终态写」
+   * 更稳：进程被杀在 running 中途时，至少还有一个近似的用量在盘上。
+   */
+  private persistState(path: AgentPath, status: AgentStatus): void {
+    const p = this.persistence;
+    if (!p) return;
+    const record = this.recordOf(path);
+    if (!record) return;
+    const snap = this.registry.snapshot(path);
+    void p.appendState(record, path, {
+      at: Date.now(),
+      status,
+      ...(snap ? { usage: snap.usage } : {}),
+      ...(snap?.lastError !== undefined ? { lastError: snap.lastError } : {}),
+    });
+  }
+
+  private persistNote(path: AgentPath, text: string): void {
+    const p = this.persistence;
+    if (!p) return;
+    const record = this.recordOf(path);
+    if (!record) return;
+    void p.appendNote(record, path, text);
+  }
+
+  private persistRemoveTranscript(path: AgentPath): void {
+    const p = this.persistence;
+    if (!p) return;
+    const record = this.recordOf(path);
+    if (!record) return;
+    void p.removeTranscript(record, path);
+  }
+
+  /** 账本落盘（Ledger.onChange）：账本按会话切片存，先找到它属于哪个会话。 */
+  private onLedgerChanged(entry: LedgerRecord): void {
+    const p = this.persistence;
+    if (!p) return;
+    const record = this.sessions.get(entry.sessionId);
+    if (!record) return;
+    void p.appendLedger(record, entry);
+  }
+
+  /** 汇总缓存（列表在懒加载下的数据源）：合并窗口由 persistence 管（§4.4）。 */
+  private scheduleRollup(sessionId: string, summary?: SessionSummary): void {
+    const p = this.persistence;
+    if (!p) return;
+    const record = this.sessions.get(sessionId);
+    if (!record) return;
+    const computed = summary ?? this.summaryOf(sessionId);
+    if (!computed) return;
+    p.scheduleRollup(record, {
+      at: Date.now(),
+      usage: computed.usage,
+      counts: computed.counts,
+      status: computed.status,
+    });
   }
 
   /**
@@ -1062,6 +1222,7 @@ export class AxonHost {
 
     this.registry.attachEngine(snapshot.path, engine);
     this.wire(snapshot.path, engine);
+    this.persistAgentHeader(snapshot);
     this.emit('agent.created', { snapshot }, snapshot.path);
     this.touchSession(sessionId);
 
@@ -1168,6 +1329,8 @@ export class AxonHost {
       }
       // M4：目标被删时也要结算，不留悬空的 open 记录。
       this.settleCollabFor(p, '目标已被删除');
+      // M5：成员 transcript 也要删 —— 留着它，重启后那个成员会「复活」。
+      this.persistRemoveTranscript(p);
       this.approvals.cancelFor(p);
       this.awaitingApproval.delete(p);
       const timer = this.idleTimers.get(p);
@@ -1415,6 +1578,7 @@ export class AxonHost {
       // 状态机的价值在于挡住写入，不在于惩罚调用方。
       return;
     }
+    this.persistState(path, status);
     this.onStatusChanged(path, status);
     this.emit('agent.status', error ? { path, status, error } : { path, status }, path);
     // 会话条的实时字段（status/成员计数）跟着变 —— 摘要只在真变了时才播，
@@ -1485,13 +1649,14 @@ export class AxonHost {
         case 'message_start':
           this.emit('agent.message.start', { messageId: path }, path);
           break;
-        case 'message_end':
-          this.emit(
-            'agent.message.end',
-            { messageId: path, message: event.message as unknown as MessageLike },
-            path,
-          );
+        case 'message_end': {
+          const message = event.message as unknown as MessageLike;
+          // 先登记落盘再播事件（写入本身异步串行，见 session-persistence）：
+          // 顺序反了的话，两条语句之间抛异常就会留下「已显示、未落盘」的消息。
+          this.persistMessage(path, message);
+          this.emit('agent.message.end', { messageId: path, message }, path);
           break;
+        }
         case 'tool_execution_start':
           this.emit(
             'agent.tool.start',
