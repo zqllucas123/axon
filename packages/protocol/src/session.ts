@@ -63,6 +63,55 @@ export type SessionStatus = 'open' | 'closed';
 /** 会话落盘 schema 版本 —— 与账本的 LEDGER_SCHEMA_VERSION 各自独立（M5 读侧迁移用）。 */
 export const SESSION_SCHEMA_VERSION = 1;
 
+/**
+ * 落盘**外箱**版本（M5）：会话目录布局与文件集的版本。
+ *
+ * 与 SESSION_SCHEMA_VERSION 分两层：
+ *  - 外箱（本常量）：目录结构、有哪些文件、文件名规则；
+ *  - 记录（SESSION_SCHEMA_VERSION）：单份 SessionRecord / transcript 的字段形状。
+ * 两者可以独立演进（例如改文件名规则不需要动记录字段）。
+ */
+export const SESSION_STORAGE_VERSION = 1;
+
+/**
+ * 会话汇总缓存（M5 懒加载的代价对冲，见 M5 §4.2）。
+ *
+ * 启动只读 session.json（不读树），列表要显示的用量/计数/状态就靠它。
+ * **它不是真相**：真相在 transcript 与 registry；选中会话后由实时值修正。
+ */
+export interface SessionRollup {
+  /** 观测时刻（写入时的时间戳）。 */
+  at: number;
+  usage: UsageTotals;
+  counts: SessionCounts;
+  /** 会话根的运行时状态（写入时的观测值）。 */
+  status: AgentStatus;
+  /** 上次退出时仍有 running/waiting 成员的时刻；无则缺省（M5 §4.6）。 */
+  interruptedAt?: number;
+}
+
+/** 存储问题的种类（M5 §4.8）。 */
+export type StorageIssueKind =
+  | 'corrupt-line'
+  | 'partial-line'
+  | 'missing-header'
+  | 'version-too-new'
+  | 'path-mismatch'
+  | 'unreadable-dir'
+  | 'orphan-dir';
+
+/**
+ * 存储问题 —— 坏文件不阻断启动，但要能被用户看见（S7 / S8 的数据源）。
+ */
+export interface StorageIssue {
+  kind: StorageIssueKind;
+  sessionId?: string;
+  /** 相对 sessions root 的路径（不暴露用户绝对路径）。 */
+  path: string;
+  detail: string;
+  at: number;
+}
+
 /** 会话标题上限：首条任务截断到 60 字（UX s0 原型的输入提示长度）。 */
 export const SESSION_TITLE_MAX = 60;
 
