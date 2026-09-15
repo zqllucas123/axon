@@ -90,7 +90,7 @@ export interface SessionRollup {
   interruptedAt?: number;
 }
 
-/** 存储问题的种类（M5 §4.8）。 */
+/** 存储问题的种类（M5 §4.8；`write-failed` 是切片 2 补的：R6 要求写失败不静默）。 */
 export type StorageIssueKind =
   | 'corrupt-line'
   | 'partial-line'
@@ -98,7 +98,8 @@ export type StorageIssueKind =
   | 'version-too-new'
   | 'path-mismatch'
   | 'unreadable-dir'
-  | 'orphan-dir';
+  | 'orphan-dir'
+  | 'write-failed';
 
 /**
  * 存储问题 —— 坏文件不阻断启动，但要能被用户看见（S7 / S8 的数据源）。
