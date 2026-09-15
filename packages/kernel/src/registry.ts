@@ -63,6 +63,15 @@ export interface AgentNode {
   engine?: AxonEngine;
 }
 
+/** `restoreNodes()` 的结果：给宿主做 issue 上报用。 */
+export interface RestoreResult {
+  restored: AgentPath[];
+  /** 因重复或父缺失而没建起来的路径。 */
+  skipped: AgentPath[];
+  /** children 里指向不存在节点、已被清理的引用。 */
+  dangling: AgentPath[];
+}
+
 export interface RegisterSpec {
   role: string;
   displayName: string;
@@ -306,6 +315,72 @@ export class AgentRegistry {
     };
     this.nodes.set(path, { snapshot });
     return structuredClone(snapshot);
+  }
+
+  /**
+   * 从落盘快照重建节点（M5 §4.5 的「registry 重建」）。
+   *
+   * 与 register()/createRoot() 的区别：这里**不做状态机校验、不查深度、不发新
+   * 序号**，因为树是磁盘上已经存在的既成事实 —— 恢复不是「重新创建」，而是
+   * 「把真相搬回内存」。真正该做的事只有三件：
+   *
+   *  1. 按深度排序插入（父必须先于子，否则「父不存在」）；
+   *  2. 重建 `counters`（从路径末段的 `<role>-<seq>` 解出序号），否则重启后
+   *     新成员会与旧路径重名 —— 重名会让 registry 静默覆盖一个活着的节点；
+   *  3. 清理 `children` 里指向不存在节点的悬空引用（transcript 缺失/坏文件时）。
+   *
+   * 状态降级（running→idle 等）**不在这里做**：那是宿主的恢复语义（§4.6），
+   * 传入的快照就是它算好的结果。引擎实例由 `engines` 注入（懒加载时才有）。
+   */
+  restoreNodes(
+    snapshots: readonly AgentSnapshot[],
+    options: { engines?: ReadonlyMap<AgentPath, AxonEngine> } = {},
+  ): RestoreResult {
+    const ordered = [...snapshots].sort((a, b) => this.depthOf(a.path) - this.depthOf(b.path));
+    const restored: AgentPath[] = [];
+    const skipped: AgentPath[] = [];
+    const dangling: AgentPath[] = [];
+
+    for (const snap of ordered) {
+      if (this.nodes.has(snap.path)) {
+        skipped.push(snap.path);
+        continue;
+      }
+      if (snap.parent && !this.nodes.has(snap.parent)) {
+        // 父缺失（例如父的 transcript 坏了）：跳过并在后面报出来。
+        // 不自动挂到会话根 —— 那会把一个孤儿伪装成正常成员。
+        skipped.push(snap.path);
+        continue;
+      }
+      const engine = options.engines?.get(snap.path);
+      this.nodes.set(
+        snap.path,
+        engine ? { snapshot: structuredClone(snap), engine } : { snapshot: structuredClone(snap) },
+      );
+      restored.push(snap.path);
+    }
+
+    // 悬空 children：清理并记录（不静默 —— UI 的树与磁盘不一致必须能解释）。
+    for (const path of restored) {
+      const node = this.nodes.get(path);
+      if (!node) continue;
+      const kept = node.snapshot.children.filter((c) => this.nodes.has(c));
+      for (const c of node.snapshot.children) if (!this.nodes.has(c)) dangling.push(c);
+      node.snapshot.children = kept;
+    }
+
+    // 序号重建：路径末段 `<role>-<seq>`（role 本身可能带 -，所以从右往左解析）。
+    for (const path of restored) {
+      const node = this.nodes.get(path);
+      if (!node?.snapshot.parent) continue;
+      const leaf = path.slice(path.lastIndexOf('/') + 1);
+      const m = /^(.*)-(\d+)$/.exec(leaf);
+      if (!m || !m[1] || !m[2]) continue;
+      const key = `${node.snapshot.parent}::${m[1]}`;
+      this.counters.set(key, Math.max(this.counters.get(key) ?? 0, Number(m[2])));
+    }
+
+    return { restored, skipped, dangling };
   }
 
   /**
