@@ -21,6 +21,7 @@ import { createModels, createAssistantMessageEventStream, createProvider } from 
 import { openAICompletionsApi } from '@earendil-works/pi-ai/api/openai-completions.lazy';
 import type { AssistantMessage, AssistantMessageEvent, Model } from '@earendil-works/pi-ai';
 import type { StreamFn } from '@earendil-works/pi-agent-core';
+import type { ModelSpec } from '@axon/protocol';
 
 export type { Model };
 
@@ -99,23 +100,15 @@ export async function createFauxSource(options?: {
 /**
  * 一个模型的最小声明。
  *
- * 为什么要手写而不是拉 pi 内置的 44 个 provider 目录：企业网关（如寒武智能/
- * 研究院网关）是**自定义 baseUrl + 自定义模型名**的组合，`/v1/models` 往往
- * 不实现（实测 kotei 网关返回 404），内置目录里也不会有这些模型 id。
- * 与其猜，不如让用户在配置里写清楚——写错了立刻 400，比静默走错模型强。
+ * **形状真相在 `@axon/protocol` 的 `ModelSpec`**（MU-1 搬家）：配置文件
+ * `provider.models` 的白名单校验要用它，而协议层不能反过来依赖 kernel。
+ * 这里保留别名，是因为 kernel 的调用点（createOpenAICompatSource 等）
+ * 一直用这个名字，改名只会制造无意义的 diff。
  *
- * `cost` 单位是**美元 / 百万 token**（pi 的 `calculateCost` 除以 1e6，
- * `pi-ai/dist/models.js:543-547`）。填 0 不会报错，只是预算熔断永远不触发。
+ * `cost` 单位是**美元 / 百万 token**（pi 的 `calculateCost` 除以 1e6）。
+ * 填 0 不会报错，只是预算熔断永远不触发。
  */
-export interface OpenAICompatModel {
-  id: string;
-  name?: string;
-  /** 模型是否会吐 reasoning/thinking 内容（如 deepseek-r1）。默认 false。 */
-  reasoning?: boolean;
-  contextWindow?: number;
-  maxTokens?: number;
-  cost?: Partial<{ input: number; output: number; cacheRead: number; cacheWrite: number }>;
-}
+export type OpenAICompatModel = ModelSpec;
 
 export interface OpenAICompatSpec {
   /** provider id，会出现在 assistant 消息的 `provider` 字段里。默认 `axon-gateway`。 */

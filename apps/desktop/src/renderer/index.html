@@ -37,7 +37,38 @@
         text-transform: uppercase; color: var(--dim);
         display: flex; justify-content: space-between; align-items: center;
       }
-      .panel-head + .roles, .panel-head + .tree { padding-top: 2px; }
+      .panel-head + .roles, .panel-head + .tree, .panel-head + .sessions { padding-top: 2px; }
+      .panel-head button.mini { padding: 1px 7px; font-size: 11px; }
+
+      /* ─ 会话列表（MU-1 临时壳）── */
+      .sessions {
+        flex: none; max-height: 34vh; overflow: auto; padding: 0 8px 8px;
+      }
+      .sessions .hint { color: var(--dim); font-size: 11px; padding: 4px 6px; }
+      .session {
+        display: flex; align-items: center; gap: 6px; padding: 6px 8px;
+        border-radius: 6px; cursor: pointer;
+      }
+      .session:hover { background: #23272f; }
+      .session.sel { background: #2a3140; }
+      .session .lbl {
+        flex: none; max-width: 110px; overflow: hidden;
+        text-overflow: ellipsis; white-space: nowrap; font-weight: 500;
+      }
+      .session .meta {
+        min-width: 0; flex: 1; color: var(--dim); font-size: 10px;
+        overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+      }
+      .session .pending {
+        flex: none; font-size: 10px; padding: 0 5px; border-radius: 999px;
+        background: #2e2817; color: var(--warn); border: 1px solid #4a3c22;
+      }
+      .session .danger {
+        flex: none; padding: 0 5px; font-size: 12px; line-height: 1.2;
+        opacity: 0; background: none; border-color: transparent;
+      }
+      .session:hover .danger { opacity: 1; }
+
       .roles { padding: 0 8px 8px; }
       .group-label {
         padding: 6px 6px 2px; font-size: 10px; color: var(--dim);
@@ -67,6 +98,7 @@
       }
 
       .tree { flex: 1; overflow: auto; padding: 0 8px 8px; }
+      .hint { color: var(--dim); font-size: 11px; padding: 6px 8px; }
       .node {
         padding: 6px 8px; border-radius: 6px; cursor: pointer;
         display: flex; align-items: center; gap: 8px;
@@ -148,6 +180,10 @@
       }
       .budget.warning { background: #2e2817; color: var(--warn); }
       .budget.frozen { background: #301a1d; color: var(--err); }
+      /* 会话口径那行自成一档：条纹底色与全局行区分，避免看成一件事说两遍。 */
+      .budget.session { background: none; border-bottom: none; padding-bottom: 2px; }
+      .budget.session.warning { color: #c99b46; }
+      .budget.session.frozen { color: #c96c75; }
       .log {
         flex: 1; overflow: auto; padding: 14px;
         font-family: ui-monospace, monospace; font-size: 12px;

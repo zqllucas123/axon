@@ -10,6 +10,7 @@ import { contextBridge, ipcRenderer } from 'electron';
 import {
   IPC_COMMAND_CHANNEL,
   ipcEventChannel,
+  type AgentPath,
   type AxonBridge,
   type CommandMap,
   type EventMap,
@@ -41,11 +42,19 @@ const bridge: AxonBridge = {
 
   subscribe<E extends keyof EventMap>(
     event: E,
-    handler: (payload: EventMap[E], meta: { source: string; at: number }) => void,
+    handler: (
+      payload: EventMap[E],
+      meta: { source?: AgentPath; sessionId?: string; at: number },
+    ) => void,
   ): () => void {
     const channel = ipcEventChannel(event);
     const listener = (_e: unknown, envelope: NotificationEnvelope<E>) => {
-      handler(envelope.payload, { source: envelope.source, at: envelope.at });
+      // source 在 MU-1 起是可选的（账本策略、会话级事件没有单一归属 Agent）。
+      handler(envelope.payload, {
+        ...(envelope.source !== undefined ? { source: envelope.source } : {}),
+        ...(envelope.sessionId !== undefined ? { sessionId: envelope.sessionId } : {}),
+        at: envelope.at,
+      });
     };
     ipcRenderer.on(channel, listener);
     // 返回退订而不是让调用方自己记 channel 名 —— 少一个出错的地方。

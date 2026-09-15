@@ -17,6 +17,7 @@ import {
   initialAdoption,
   isAncestorOf,
   mentionUri,
+  sessionIdOfPath,
   type Adoption,
   type AdoptedBy,
   type AgentPath,
@@ -33,6 +34,14 @@ export interface RecordCollabSpec {
   from: AgentPath;
   to: AgentPath;
   origin: CollabOrigin;
+  /**
+   * 所属会话。调用方（宿主）已经知道它，显式传入最稳。
+   *
+   * 缺省时从 `from`/`to` 路径的首段解（`sessionIdOfPath`）—— 留这条退路是因为
+   * 「路径里就写着会话」是多根模型的红利，不该逼调用方多传一个参数。
+   * 两者都没有就抛：一笔没有会话归属的账目在 MU-1 之后没有意义（无法切片）。
+   */
+  sessionId?: string;
   contextScope?: string | number | null;
   /** 记录时刻目标子树的累计 usage，作为 settle 时求增量的基线。 */
   usageBaseline?: UsageTotals;
@@ -114,9 +123,16 @@ export class Ledger {
     // 序号左补零：id 的字典序必须与时间序一致，否则 before 游标翻页会乱。
     const id = `L${String(this.seq).padStart(8, '0')}-${this.suffix()}`;
 
+    const sessionId =
+      spec.sessionId ?? sessionIdOfPath(spec.to) ?? sessionIdOfPath(spec.from);
+    if (!sessionId) {
+      throw new Error(`账本记录缺少会话归属: ${spec.from} → ${spec.to}`);
+    }
+
     const record: LedgerRecord = {
       version: LEDGER_SCHEMA_VERSION,
       id,
+      sessionId,
       action: spec.action,
       from: spec.from,
       to: spec.to,
@@ -222,6 +238,9 @@ export class Ledger {
   }
 
   private matches(r: LedgerRecord, q: LedgerQuery): boolean {
+    // 会话是最外层的切片维度：先过它，后面几项都是会话内的细筛。
+    if (q.sessionId && r.sessionId !== q.sessionId) return false;
+    if (q.participant && r.from !== q.participant && r.to !== q.participant) return false;
     if (q.agent) {
       const hit = q.subtree
         ? this.touchesSubtree(r, q.agent)

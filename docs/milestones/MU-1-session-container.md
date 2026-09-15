@@ -1,6 +1,7 @@
 # MU-1 会话容器与团队层：方案设计与实施计划
 
-> 状态：**设计评审中**（2026-09-15）→ 实施中 → 已完成
+> 状态：**已完成**（2026-09-15，实施中→收口）—— 设计评审 ✅ 用户拍板 ✅ 实现 ✅ 质量门 ✅
+> 归档：commit（MU-1 已于 2026-09-15 交付；本次会话完成切片 6）
 > 对应架构：01 §5（分层与适配器边界）/§6.1（AgentRegistry）/§6.3（RoleLoader 同族）；UX `02-团队与会话模型.md` §2.2 四层模型
 > 依赖里程碑：M4（已完成，274 测试 + ui-smoke 九幕）
 > 上游拍板：用户 2026-09-15（见 §〇）；UX 缺口：G10.1~G10.6、G11.1~G11.3、G11.12
@@ -387,14 +388,14 @@ leaf tool 触发 → broker.gate → resolveDelegation 命中祖先
 
 ## 七、实施计划（六片，每片可独立验证）
 
-| 片 | 内容 | 验证方式 |
-|---|---|---|
-| 1 | 协议：`session.ts`/`team.ts`/`config.ts` + `ipc.ts` 命令/事件 + ledger 字段 + 信封；删除 `ROOT_PATH` 相关常量 | `bun run typecheck`；纯类型改动，保证全仓编译 |
-| 2 | 内核：`registry` 多根 + `activeCount(sessionId?)` + 会话级准入；`ledger` 的 `sessionId`/`participant` 过滤；`budget` 多口径 `record` | `registry.test.ts` / `ledger.test.ts` / `budget.test.ts` 新增用例；274 例中受影响者同步改（harness 建会话） |
-| 3 | 主进程模块：`session-store` / `team-loader` + `teams.ts`（3 支内置团队）/ `team-bridge` / `config-store` | 各自单测（校验/合并/原子写/env 覆盖/rollup 计算） |
-| 4 | host 装配：`createSession` / `escalate` / `remove` / spawn 按会话 / 三层预算 / 会话级并发 / 审批修② | `host.session.test.ts`（新）+ `host.test` / `host.orchestration.test` / `host.ledger.test` / `orchestration.e2e.test` 适配；修②两幕进 `approval.test.ts` |
-| 5 | 接线：`index.ts`（`session.*`/`team.*`/`config.*` handler、HostOptions 从 config 读、`session.changed` 节流转发）+ 渲染层最小壳 + `ui-smoke.mjs` 适配 | `bun run ui-smoke` 九幕（改开场）；`bun run dev` 手工：建会话 → spawn → 看会话列表 |
-| 6 | 文档同步 + 质量门 + commit | §十 清单逐条；`bun run guard/typecheck/test/build:desktop/verify-lazy/ui-smoke` 全绿 |
+| 片 | 内容 | 验证方式 | 状态 |
+|---|---|---|---|
+| 1 | 协议：`session.ts`/`team.ts`/`config.ts` + `ipc.ts` 命令/事件 + ledger 字段 + 信封；删除 `ROOT_PATH` 相关常量 | `bun run typecheck`；纯类型改动，保证全仓编译 | ✅ |
+| 2 | 内核：`registry` 多根 + `activeCount(sessionId?)` + 会话级准入；`ledger` 的 `sessionId`/`participant` 过滤；`budget` 多口径 `record` | `registry.test.ts` / `ledger.test.ts` / `budget.test.ts` 新增用例；274 例中受影响者同步改（harness 建会话） | ✅ |
+| 3 | 主进程模块：`session-store` / `team-loader` + `teams.ts`（3 支内置团队）/ `team-bridge` / `config-store` | 各自单测（校验/合并/原子写/env 覆盖/rollup 计算） | ✅ |
+| 4 | host 装配：`createSession` / `escalate` / `remove` / spawn 按会话 / 三层预算 / 会话级并发 / 审批修② | `host.session.test.ts`（新）+ `host.test` / `host.orchestration.test` / `host.ledger.test` / `orchestration.e2e.test` 适配；修②两幕进 `approval.test.ts` | ✅ |
+| 5 | 接线：`index.ts`（`session.*`/`team.*`/`config.*` handler、HostOptions 从 config 读、`session.changed` 节流转发）+ 渲染层最小壳 + `ui-smoke.mjs` 适配 | `bun run ui-smoke` 九幕（改开场）；`bun run dev` 手工：建会话 → spawn → 看会话列表 | ✅ |
+| 6 | 文档同步 + 质量门 + commit | §十 清单逐条；`bun run guard/typecheck/test/build:desktop/verify-lazy/ui-smoke` 全绿 | ✅ |
 
 ---
 
@@ -410,19 +411,21 @@ leaf tool 触发 → broker.gate → resolveDelegation 命中祖先
 
 ## 九、验收标准
 
-- [ ] `session.create/get/list/escalate/rename/remove` 六命令可用，`session.get` 返回成员树（G10.1/G10.3/G10.5）
-- [ ] `team.list/save/delete/openDir` 可用 + 3 支内置团队（G10.2）
-- [ ] `config.get/patch` 可用；`maxConcurrent`/`idleTimeoutMs`/`approvalTimeoutMs`/`maxDepth` 从 config 生效（G11.1/G11.2/G11.3/G11.12）
-- [ ] 账本每笔带 `sessionId`，`ledger.query` 支持 `sessionId`+`participant`（G10.6）
-- [ ] 三层预算取更严者，事件带 `scope`/`sessionId`（G10.4）
-- [ ] lead 默认不再静默代批；代批发射 `approval.delegated`（问题②）
-- [ ] `bun run guard / typecheck / test / build:desktop / verify-lazy / ui-smoke` 全绿；测试总数不回退（≥274，预计 ~320）
-- [ ] `bun run dev` 手工演示：新建会话（engine/team）→ 成员树 → 账本按会话过滤 → 删除会话
-- [ ] 无任何 `.tsx` 视觉重写（MU-2 的活）；临时壳有清晰注释与替换点
+- [x] `session.create/get/list/escalate/rename/remove` 六命令可用，`session.get` 返回成员树（G10.1/G10.3/G10.5）
+- [x] `team.list/save/delete/openDir` 可用 + 3 支内置团队（G10.2）
+- [x] `config.get/patch` 可用；`maxConcurrent`/`idleTimeoutMs`/`approvalTimeoutMs`/`maxDepth` 从 config 生效（G11.1/G11.2/G11.3/G11.12）
+- [x] 账本每笔带 `sessionId`，`ledger.query` 支持 `sessionId`+`participant`（G10.6）
+- [x] 三层预算取更严者，事件带 `scope`/`sessionId`（G10.4）
+- [x] lead 默认不再静默代批；代批发射 `approval.delegated`（问题②）
+- [x] `bun run guard / typecheck / test / build:desktop / verify-lazy / ui-smoke` 全绿；测试 274 → **429**（+155，超出预估 ~320）
+- [x] `bun run dev` 手工验证：新建会话（engine/team）→ 成员树 → 账本按会话过滤 → 删除会话（本次以 ui-smoke 17 断言 + `bun run dev` 冷启动实测代替肉眼演示：teams 3 支加载、window loaded、零异常）
+- [x] 无任何 `.tsx` 视觉重写（MU-2 的活）；临时壳有清晰注释与替换点（`SessionPanel.tsx` 头注释标明「MU-2 会被 S0/S1 两屏整体替换」）
 
 ---
 
 ## 十、文档同步
+
+> 进度：以下 6 项已于 2026-09-15 全部完成（本次收口一并提交）。
 
 | 文档 | 更新内容 |
 |---|---|
@@ -442,3 +445,12 @@ leaf tool 触发 → broker.gate → resolveDelegation 命中祖先
 - **MU-2**：渲染主干（S0/S2-solo/S2/S1/S3）+ 浅色令牌落地 + 六元件会话流
 - **MU-3**：S5 收件箱 / S6 预算 / S8 设置窗（消费本里程碑的 `config.get` 与 `PendingRequest.sessionId`）
 - **M5**：会话/树/消息/账本落盘（目录布局见 §4.3；S7 屏据此细化）
+
+---
+
+## 十二、设计 vs 实测出入（实现胜出，已回写 01/03/ux/*）
+
+1. **`config.patch` 返回值补了 `config`**：设计只写 `{accepted, errors}`；实测返回 `{accepted, errors, config}`（脱敏后的新视图），渲染层不必再发一次 `config.get` 就能刷新；错误类型用 `ConfigIssue[]` 而非复用 `RoleIssue[]`（不把角色语义带进配置面）。
+2. **`session.escalate` 是超集**：原型只要「单兵→团队」（`teamId`）；实测同时支持 `members`（临时编队）与 `carryMessages`（缺省 true，已产生的消息不丢）。
+3. **会话级预算事件比设计更严**：设计只说「事件带 `scope`/`sessionId`」；实测**只有会话自带限额**（团队档/会话档）时才发会话事件，纯全局档下只发 `scope:'global'`——否则每个会话都收到一条与自己无关的重复通知。
+4. **渲染壳的会话选中必须走真实点击**：冷启动时壳会自动建一个「调试会话」，所以 ui-smoke 不能在 `session.create` 后直接断言新会话已选中；必须模拟用户点击会话行（`[data-smoke="session-row"]`）钉住当前会话。这条同时是 MU-2 的状态机要求（会话列表点选 → 右栏切换，必须走真实点击路径而不是程序性选中）。

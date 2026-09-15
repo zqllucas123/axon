@@ -186,11 +186,37 @@ try {
     return false;
   };
 
-  const spawned = await evalJs(
-    `window.axon.invoke('agent.spawn', { role: 'blank', parent: '/root' }).then(r => r.path)`,
+  // ── 4.5 会话容器（MU-1）：建会话 → 左栏出现会话行 → 树以会话根为根
+  //     多根模型（§4.1）下没有「总是存在的 /root」，一切寻址从会话根出发。
+  const session = await evalJs(
+    `window.axon.invoke('session.create', { title: '冒烟会话', executor: 'engine' })
+      .then(s => ({ id: s.record.id, root: s.rootPath }))`,
   );
-  if (!spawned) {
-    log(false, '冒烟 Agent 创建失败');
+  if (!session?.root || session.root !== `/${session.id}`) {
+    log(false, `会话创建失败（${JSON.stringify(session)}）`);
+    exit(1);
+  }
+  log(true, `会话已创建（session.create → ${session.root}）`);
+
+  // 渲染壳冷启动时会自己补一个「调试会话」（无会话可用则没树可挂），
+  // 所以这里显式把当前会话点到冒烟自己这个 —— 否则断言会跟着竞态飘。
+  await until(`!!document.querySelector('[data-smoke="session-row"][data-session="${session.id}"]')`);
+  await evalJs(`document.querySelector('[data-smoke="session-row"][data-session="${session.id}"]').click()`);
+  const sessionRow = await until(`!!document.querySelector('.session.sel[data-session="${session.id}"]')`);
+  log(sessionRow, '左栏选中冒烟会话（session.created → React 重渲染 → 点击选中）');
+  if (!sessionRow) exit(1);
+
+  const rootNode = await until(
+    `[...document.querySelectorAll('.tree .node')].some(el => el.title.startsWith('${session.root} '))`,
+  );
+  log(rootNode, `Agent 树以会话根为根（${session.root}）`);
+  if (!rootNode) exit(1);
+
+  const spawned = await evalJs(
+    `window.axon.invoke('agent.spawn', { role: 'blank', parent: '${session.root}' }).then(r => r.path)`,
+  );
+  if (!spawned || !String(spawned).startsWith(`${session.root}/`)) {
+    log(false, `冒烟 Agent 创建失败或没挂在会话根下（${JSON.stringify(spawned)}）`);
     exit(1);
   }
   log(true, `冒烟 Agent 已创建（${spawned}）`);

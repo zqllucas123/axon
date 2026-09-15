@@ -29,13 +29,14 @@ import {
   type ModelSource,
 } from '@axon/kernel';
 import { AxonHost, type HostOptions } from './host.ts';
+import type { AgentSnapshot } from '@axon/protocol';
 import { ALL_ROLES } from './roles.ts';
 
 // ── 测试小件 ────────────────────────────────────────────────────────────
 
 interface RawEvent {
   event: string;
-  source: string;
+  source: string | undefined;
   payload: { path?: string; status?: string; error?: unknown } & Record<string, unknown>;
 }
 
@@ -57,7 +58,12 @@ async function e2e(opts: E2EOpts) {
     maxConcurrent: opts.maxConcurrent,
     budget: opts.budget,
   });
-  return { host, events };
+  // MU-1：树以会话为根。这些幕测的是编排语义，所以统一在 harness 里开一个
+  // 单兵会话，把 spawn 收成「挂到会话根下」的便捷函数。
+  const root = host.createSession({ title: 'e2e 会话', executor: 'engine' }).rootPath;
+  const spawn = (spec: { role: string; forkMode?: string }): AgentSnapshot =>
+    host.spawn({ parent: root, ...spec } as never);
+  return { host, root, spawn, events };
 }
 
 /** 从 LLM 转录里解析 agent 工具已创建的子路径（toolResult 文本：「已创建子 Agent /path」）。 */
@@ -145,7 +151,7 @@ describe('M3 E2E 幕 1：spawn → wait → resume → 收尾', () => {
     // 失效，会把外层读窄成 null。属性读取 + 非空断言永远合法。
     const childRef: { path: AgentPath | null } = { path: null };
 
-    const { host, events } = await e2e({
+    const { host, spawn, events } = await e2e({
       routes: {
         '做 X': (ctx, i) => {
           if (i === 0) return toolCallMsg('agent', { role: 'developer', task: '实现 A' });
@@ -162,7 +168,7 @@ describe('M3 E2E 幕 1：spawn → wait → resume → 收尾', () => {
       },
     });
 
-    const planner = host.spawn({ role: 'planner' });
+    const planner = spawn({ role: 'planner' });
     const run = host.requestRun(planner.path, '做 X');
 
     // 第二次 agent_wait 是确定性挂起点：子被 gate B 卡在答话上（running），父必然 waiting。
@@ -210,7 +216,7 @@ describe('M3 E2E 幕 2：gate=1 父等两子，退位补位无死锁', () => {
     const gateB = replyGate('B 已完成');
     const idsRef: { ids: AgentPath[] | null } = { ids: null };
 
-    const { host, events } = await e2e({
+    const { host, spawn, events } = await e2e({
       maxConcurrent: 1,
       routes: {
         '做 X': (ctx, i) => {
@@ -228,7 +234,7 @@ describe('M3 E2E 幕 2：gate=1 父等两子，退位补位无死锁', () => {
       },
     });
 
-    const planner = host.spawn({ role: 'planner' });
+    const planner = spawn({ role: 'planner' });
     const run = host.requestRun(planner.path, '做 X');
 
     // 父 agent_wait → 退位 waiting；d1 FIFO 补位 running；d2 仍 parked waiting。
@@ -269,17 +275,20 @@ describe('M3 E2E 幕 2：gate=1 父等两子，退位补位无死锁', () => {
 
 describe('M3 E2E 幕 3：非后代 wait 目标 → 工具抛错不掀翻整轮', () => {
   it('父 wait 已存在的旁系 agent → tool 失败（ok:false），父轮继续走完收尾', async () => {
-    const { host, events } = await e2e({
+    // 目标路径要先存在才能写进 routes（routes 在 session.create 之前就定好了），
+    // 所以用一只可变盒子把 spawn 结果递进去。
+    let blankPath = '';
+    const { host, spawn, events } = await e2e({
       routes: {
         '做 X': (_ctx, i) => {
-          if (i === 0) return toolCallMsg('agent_wait', { ids: ['/root/blank-1'] });
+          if (i === 0) return toolCallMsg('agent_wait', { ids: [blankPath] });
           return fauxAssistantMessage('目标非法，换路收尾');
         },
       },
     });
 
-    host.spawn({ role: 'blank' }); // 旁系（/root 的另一子）——存在但非 planner 的后代
-    const planner = host.spawn({ role: 'planner' });
+    blankPath = spawn({ role: 'blank' }).path; // 旁系（会话根的另一子）——存在但非 planner 的后代
+    const planner = spawn({ role: 'planner' });
     await host.requestRun(planner.path, '做 X');
     await waitFor(() => host.get(planner.path)?.status === 'done');
 

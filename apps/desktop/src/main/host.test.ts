@@ -9,7 +9,13 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { ROOT_PATH, type EventMap, type RoleDefinition } from '@axon/protocol';
+import {
+  type AgentPath,
+  type AgentSnapshot,
+  type EventMap,
+  type RoleDefinition,
+  type SpawnAgentPayload,
+} from '@axon/protocol';
 import {
   createFauxSource,
   fauxAssistantMessage,
@@ -72,7 +78,13 @@ function makeTools(calls: string[]) {
 
 interface Harness {
   host: AxonHost;
-  events: { event: keyof EventMap; source: string }[];
+  /** 当前会话根（MU-1：树以会话为根，“/root” 已不存在）。 */
+  root: AgentPath;
+  /** 省掉 parent 的 spawn —— 缺省挂到会话根下（测试里绝大多数情况如此）。 */
+  spawn: (
+    spec: Omit<SpawnAgentPayload, 'parent'> & { parent?: AgentPath },
+  ) => AgentSnapshot;
+  events: { event: keyof EventMap; source: AgentPath | undefined }[];
   calls: string[];
   setResponses: (r: unknown[]) => void;
 }
@@ -87,22 +99,31 @@ async function harness(): Promise<Harness> {
     tools: makeTools(calls),
     emit: (event, _payload, source) => events.push({ event, source }),
   });
-  return { host, events, calls, setResponses: (r) => src.setResponses(r as never) };
+  // MU-1：多根模型下没有「总是存在的根」——先开一个会话，树才有地方挂。
+  const root = host.createSession({ title: '测试会话', executor: 'engine' }).rootPath;
+  return {
+    host,
+    root,
+    spawn: (spec) => host.spawn({ parent: root, ...spec }),
+    events,
+    calls,
+    setResponses: (r) => src.setResponses(r as never),
+  };
 }
 
 describe('AxonHost —— 分身创建', () => {
   it('按角色创建，displayName 与状态正确', async () => {
     const h = await harness();
-    const s = h.host.spawn({ role: 'boss' });
-    expect(s.path).toBe('/root/boss-1');
+    const s = h.spawn({ role: 'boss' });
+    expect(s.path).toBe(`${h.root}/boss-1`);
     expect(s.displayName).toBe('主管');
     expect(s.status).toBe('idle');
-    expect(s.parent).toBe(ROOT_PATH);
+    expect(s.parent).toBe(h.root);
   });
 
   it('overrides 能改 displayName 而不落盘到角色', async () => {
     const h = await harness();
-    h.host.spawn({ role: 'boss', overrides: { displayName: '临时主管' } });
+    h.spawn({ role: 'boss', overrides: { displayName: '临时主管' } });
     expect(h.host.list().find((s) => s.role === 'boss')?.displayName).toBe('临时主管');
     // 角色定义本身不受影响
     expect(h.host.listRoles().entries.find((r) => r.role.name === 'boss')?.role.displayName).toBe('主管');
@@ -110,12 +131,12 @@ describe('AxonHost —— 分身创建', () => {
 
   it('未知角色报错', async () => {
     const h = await harness();
-    expect(() => h.host.spawn({ role: 'ghost' })).toThrow(/角色不存在/);
+    expect(() => h.spawn({ role: 'ghost' })).toThrow(/角色不存在/);
   });
 
   it('发出 agent.created 事件', async () => {
     const h = await harness();
-    h.host.spawn({ role: 'boss' });
+    h.spawn({ role: 'boss' });
     expect(h.events.map((e) => e.event)).toContain('agent.created');
   });
 
@@ -145,12 +166,12 @@ describe('AxonHost —— 分身创建', () => {
     expect(changed.length).toBe(1);
 
     // 覆盖生效：spawn 出来后指令/白名单用的是用户版本
-    const reader = h.host.spawn({ role: 'reader' });
+    const reader = h.spawn({ role: 'reader' });
     expect(reader.displayName).toBe('披着只读外套的主管');
     expect(h.host.listRoles().entries.find((r) => r.role.name === 'reader')?.overridesBuiltin).toBe(true);
 
     // 被新表替换掉的角色（heir 未在表中）不再可 spawn
-    expect(() => h.host.spawn({ role: 'heir' })).toThrow(/角色不存在/);
+    expect(() => h.spawn({ role: 'heir' })).toThrow(/角色不存在/);
   });
 
   it('内置角色条目默认 source=builtin 且 overridesBuiltin 缺省', async () => {
@@ -165,7 +186,7 @@ describe('AxonHost —— 分身创建', () => {
     const h = await harness();
     h.setResponses([fauxAssistantMessage('首答')]);
 
-    const boss = h.host.spawn({ role: 'boss' });
+    const boss = h.spawn({ role: 'boss' });
     await h.host.prompt(boss.path, 'x');
 
     // 换表之后，旧实例照常能继续跑（引擎/白名单都已快照在 spawn 时）
@@ -184,7 +205,7 @@ describe('AxonHost —— 权限只能减不能加', () => {
       fauxAssistantMessage('被拦了'),
     ]);
 
-    const reader = h.host.spawn({ role: 'reader' });
+    const reader = h.spawn({ role: 'reader' });
     await h.host.prompt(reader.path, '去 poke 一下');
 
     // reader 只有 peek 权限，poke 的 execute 绝不该被调到
@@ -198,7 +219,7 @@ describe('AxonHost —— 权限只能减不能加', () => {
       fauxAssistantMessage('看完了'),
     ]);
 
-    const reader = h.host.spawn({ role: 'reader' });
+    const reader = h.spawn({ role: 'reader' });
     await h.host.prompt(reader.path, '看一眼');
     expect(h.calls).toContain('peek');
   });
@@ -211,8 +232,8 @@ describe('AxonHost —— 权限只能减不能加', () => {
     ]);
 
     // reader(只有 peek) 下挂一个 boss(声称要 peek+poke)
-    const reader = h.host.spawn({ role: 'reader' });
-    const child = h.host.spawn({ role: 'boss', parent: reader.path });
+    const reader = h.spawn({ role: 'reader' });
+    const child = h.spawn({ role: 'boss', parent: reader.path });
     await h.host.prompt(child.path, 'poke');
 
     // 交集后只剩 peek —— 角色配置里写了 poke 也不作数
@@ -225,11 +246,11 @@ describe('AxonHost —— 上下文分身语义', () => {
     const h = await harness();
     h.setResponses([fauxAssistantMessage('父的回答')]);
 
-    const boss = h.host.spawn({ role: 'boss' });
+    const boss = h.spawn({ role: 'boss' });
     await h.host.prompt(boss.path, '父级的问题');
     expect(h.host.messagesOf(boss.path).length).toBeGreaterThan(0);
 
-    const child = h.host.spawn({ role: 'reader', parent: boss.path });
+    const child = h.spawn({ role: 'reader', parent: boss.path });
     expect(h.host.messagesOf(child.path)).toEqual([]);
   });
 
@@ -237,11 +258,11 @@ describe('AxonHost —— 上下文分身语义', () => {
     const h = await harness();
     h.setResponses([fauxAssistantMessage('父的回答')]);
 
-    const boss = h.host.spawn({ role: 'boss' });
+    const boss = h.spawn({ role: 'boss' });
     await h.host.prompt(boss.path, '父级的问题');
     const parentLen = h.host.messagesOf(boss.path).length;
 
-    const heir = h.host.spawn({ role: 'heir', parent: boss.path });
+    const heir = h.spawn({ role: 'heir', parent: boss.path });
     expect(h.host.messagesOf(heir.path).length).toBe(parentLen);
   });
 
@@ -249,11 +270,11 @@ describe('AxonHost —— 上下文分身语义', () => {
     const h = await harness();
     h.setResponses([fauxAssistantMessage('父的回答')]);
 
-    const boss = h.host.spawn({ role: 'boss' });
+    const boss = h.spawn({ role: 'boss' });
     await h.host.prompt(boss.path, '父级的问题');
 
     // heir 默认 all，这里强制 none
-    const heir = h.host.spawn({ role: 'heir', parent: boss.path, forkMode: 'none' });
+    const heir = h.spawn({ role: 'heir', parent: boss.path, forkMode: 'none' });
     expect(h.host.messagesOf(heir.path)).toEqual([]);
   });
 
@@ -264,11 +285,11 @@ describe('AxonHost —— 上下文分身语义', () => {
       fauxAssistantMessage('子的回答'),
     ]);
 
-    const boss = h.host.spawn({ role: 'boss' });
+    const boss = h.spawn({ role: 'boss' });
     await h.host.prompt(boss.path, '父级的问题');
     const before = h.host.messagesOf(boss.path).length;
 
-    const heir = h.host.spawn({ role: 'heir', parent: boss.path });
+    const heir = h.spawn({ role: 'heir', parent: boss.path });
     await h.host.prompt(heir.path, '子级追问');
 
     expect(h.host.messagesOf(heir.path).length).toBeGreaterThan(before);
@@ -281,19 +302,19 @@ describe('AxonHost —— 生命周期', () => {
     const h = await harness();
     h.setResponses([fauxAssistantMessage('好')]);
 
-    const boss = h.host.spawn({ role: 'boss' });
+    const boss = h.spawn({ role: 'boss' });
     await h.host.prompt(boss.path, '问题');
 
     expect(h.host.get(boss.path)?.status).toBe('done');
-    expect(h.host.get(ROOT_PATH)!.usage.inputTokens).toBeGreaterThan(0);
+    expect(h.host.get(h.root)!.usage.inputTokens).toBeGreaterThan(0);
   });
 
   it('级联删除返回子先父后的路径', async () => {
     const h = await harness();
-    const a = h.host.spawn({ role: 'boss' });
-    const b = h.host.spawn({ role: 'reader', parent: a.path });
+    const a = h.spawn({ role: 'boss' });
+    const b = h.spawn({ role: 'reader', parent: a.path });
     expect(h.host.remove(a.path)).toEqual([b.path, a.path]);
-    expect(h.host.list().map((s) => s.path)).toEqual([ROOT_PATH]);
+    expect(h.host.list().map((s) => s.path)).toEqual([h.root]);
   });
 
   it('execute 分发未知命令时报错', async () => {
@@ -306,7 +327,7 @@ describe('AxonHost —— 生命周期', () => {
   it('execute agent.prompt 立刻返回（不等模型）', async () => {
     const h = await harness();
     h.setResponses([fauxAssistantMessage('好')]);
-    const boss = h.host.spawn({ role: 'boss' });
+    const boss = h.spawn({ role: 'boss' });
     // UI 不能被一轮模型调用卡住
     await expect(
       h.host.execute('agent.prompt', { path: boss.path, text: 'x' }),

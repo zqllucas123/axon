@@ -26,6 +26,7 @@
 
 import {
   parentPath,
+  sessionIdOfPath,
   type AgentPath,
   type ApprovalMode,
   type EventMap,
@@ -44,7 +45,7 @@ export interface ApprovalBrokerOptions {
   approvalModeOf: (path: AgentPath) => ApprovalMode | undefined;
   /** 该 agent 是否还存在（remove 之后要取消其挂起请求）。 */
   exists: (path: AgentPath) => boolean;
-  emit: <E extends keyof EventMap>(event: E, payload: EventMap[E], source: AgentPath) => void;
+  emit: <E extends keyof EventMap>(event: E, payload: EventMap[E], source?: AgentPath) => void;
   /** 等人批期间把该 agent 挂出/收回 idle 看门狗的视野。 */
   onWaitStart?: (path: AgentPath) => void;
   onWaitEnd?: (path: AgentPath) => void;
@@ -69,7 +70,8 @@ export interface ApprovalDecision {
 export class ApprovalBroker {
   private readonly pending = new Map<string, Entry>();
   private readonly opts: ApprovalBrokerOptions;
-  private readonly timeoutMs: number;
+  /** 可热改（S8 的「审批超时」）：保存配置后新请求立刻用新值。 */
+  private timeoutMs: number;
   private readonly now: () => number;
   private seq = 0;
 
@@ -77,6 +79,15 @@ export class ApprovalBroker {
     this.opts = options;
     this.timeoutMs = options.timeoutMs ?? DEFAULT_APPROVAL_TIMEOUT_MS;
     this.now = options.now ?? (() => Date.now());
+  }
+
+  /** 改审批超时（毫秒）；0 = 不超时。只影响**之后**的请求。 */
+  setTimeoutMs(ms: number): void {
+    this.timeoutMs = ms > 0 ? ms : 0;
+  }
+
+  get currentTimeoutMs(): number {
+    return this.timeoutMs;
   }
 
   dispose(): void {
@@ -91,21 +102,13 @@ export class ApprovalBroker {
    * 计算穿透结果，不产生副作用 —— 便于单测把「谁代批」钉死。
    *
    * 返回 undefined 表示「没人能代批，得问人」。
+   * MU-1 起它是 `delegatedApproval` 的薄封装，保留这个名字是因为测试与
+   * 既有调用点都在用它（两者共用一份逻辑，不会漂移）。
    */
   resolveDelegation(origin: AgentPath): { allow: true; ancestor?: AgentPath } | undefined {
-    const own = this.opts.approvalModeOf(origin);
-    if (own === 'full_access' || own === 'auto') return { allow: true };
-
-    let cursor = parentPath(origin);
-    while (cursor) {
-      const mode = this.opts.approvalModeOf(cursor);
-      // root 无角色（mode undefined）：它代表「人」，不能代批，必须落到人手上。
-      if (mode === 'full_access' || mode === 'auto') {
-        return { allow: true, ancestor: cursor };
-      }
-      cursor = parentPath(cursor);
-    }
-    return undefined;
+    const d = this.delegatedApproval(origin);
+    if (!d) return undefined;
+    return d.ancestor ? { allow: true, ancestor: d.ancestor } : { allow: true };
   }
 
   /** 穿透路径 origin → … → root，供 UI 说清「这个请求替谁问、经过了谁」。 */
@@ -120,6 +123,32 @@ export class ApprovalBroker {
   }
 
   /**
+   * 代批判定（MU-1 修②）：返回「谁会替它批」及其档位；`ancestor` 缺省表示
+   * 这个 agent 自己就有放行档（自批，不是代批）。
+   *
+   * 从 `resolveDelegation` 里拆出来是为了让**留痕**与**判定**共用同一份逻辑：
+   * gate() 拿到结果后发 `approval.delegated`，不至于出现「判定说代批了，
+   * 事件说没人」这种两处漂移。
+   */
+  delegatedApproval(
+    origin: AgentPath,
+  ): { allow: true; ancestor?: AgentPath; mode: ApprovalMode } | undefined {
+    const own = this.opts.approvalModeOf(origin);
+    if (own === 'full_access' || own === 'auto') return { allow: true, mode: own };
+
+    let cursor = parentPath(origin);
+    while (cursor) {
+      const mode = this.opts.approvalModeOf(cursor);
+      // 会话根若没有角色（mode undefined）：它代表「人」，不能代批，必须落到人手上。
+      if (mode === 'full_access' || mode === 'auto') {
+        return { allow: true, ancestor: cursor, mode };
+      }
+      cursor = parentPath(cursor);
+    }
+    return undefined;
+  }
+
+  /**
    * HITL 门。返回可直接交给 `onBeforeTool` 的结果。
    *
    * 注意它只处理 HITL；白名单拦截在调用方（host.spawn 的 onBeforeTool）先行，
@@ -129,8 +158,26 @@ export class ApprovalBroker {
     // D5：编排工具豁免
     if (ORCHESTRATION_TOOLS.has(tool)) return { allow: true };
 
-    const delegated = this.resolveDelegation(origin);
-    if (delegated) return { allow: true };
+    const delegated = this.delegatedApproval(origin);
+    if (delegated) {
+      // 修②：代批必须留痕。旧实现在这里直接 return，于是「默认配置下 HITL
+      // 形同虚设」这件事在界面上完全不可见（既没有请求，也没有记录）。
+      if (delegated.ancestor) {
+        this.opts.emit(
+          'approval.delegated',
+          {
+            origin,
+            tool,
+            approver: delegated.ancestor,
+            mode: delegated.mode,
+            chain: this.chainOf(origin),
+            at: this.now(),
+          },
+          origin,
+        );
+      }
+      return { allow: true };
+    }
 
     const mode = this.opts.approvalModeOf(origin) ?? 'always_ask';
     const requestId = `apr-${(this.seq += 1)}`;
@@ -141,6 +188,8 @@ export class ApprovalBroker {
     const request: PendingRequest = {
       requestId,
       kind: 'approval',
+      // 会话归属从路径解 —— 多根模型下它就写在路径首段，不必额外传参。
+      sessionId: sessionIdOfPath(origin) ?? '',
       origin,
       chain,
       tool,
@@ -168,7 +217,16 @@ export class ApprovalBroker {
       this.opts.onWaitStart?.(origin);
       this.opts.emit(
         'approval.request',
-        { requestId, origin, chain, tool, args, approvalMode: mode, message: request.message },
+        {
+          requestId,
+          sessionId: request.sessionId,
+          origin,
+          chain,
+          tool,
+          args,
+          approvalMode: mode,
+          message: request.message,
+        },
         origin,
       );
     });

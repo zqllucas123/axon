@@ -21,7 +21,6 @@ import { AxonHost } from '../apps/desktop/src/main/host.ts';
 import { ALL_ROLES } from '../apps/desktop/src/main/roles.ts';
 import { loadConfig, resolveModelChoice } from '../apps/desktop/src/main/model-config.ts';
 import { createOpenAICompatSource } from '../packages/kernel/src/provider.ts';
-import { ROOT_PATH } from '@axon/protocol';
 
 const { config } = await loadConfig();
 const choice = resolveModelChoice(config);
@@ -51,16 +50,25 @@ const host = new AxonHost({
   emit: (event, payload, source) => {
     const p = payload as { status?: string; toolName?: string; error?: unknown };
     const detail = p.status ?? p.toolName ?? '';
-    timeline.push(`${String(event).padEnd(18)} ${source.padEnd(22)} ${detail}`);
-    if (String(event) === 'agent.status') console.log(`  · ${source} → ${p.status}`);
-    if (p.error) console.log(`  ! ${source} error: ${JSON.stringify(p.error).slice(0, 200)}`);
+    timeline.push(`${String(event).padEnd(18)} ${(source ?? '-').padEnd(22)} ${detail}`);
+    if (String(event) === 'agent.status') console.log(`  · ${source ?? '-'} → ${p.status}`);
+    if (p.error) console.log(`  ! ${source ?? '-'} error: ${JSON.stringify(p.error).slice(0, 200)}`);
   },
 });
 
+// 多根模型（MU-1）：先开一个会话，再在它的树下派 planner。
+// 旧版本直接拿 ROOT_PATH 当父，现在没有「总是存在的根」了。
+const session = await host.execute('session.create', {
+  title: '真模型编排验收',
+  executor: 'engine',
+});
+console.log(`session = ${session.record.id}（根 ${session.rootPath}）\n`);
+
 // planner 是唯一被期望「先拆活再派活」的内置角色；六件套它全都有（M3 授权矩阵）。
+// 它是**会话成员**（挂在会话根下），单兵根自己不发编排工具（MU-1）。
 const planner = await host.execute('agent.spawn', {
   role: 'planner',
-  parent: ROOT_PATH,
+  parent: session.rootPath,
 });
 console.log(`planner = ${planner.path}\n`);
 
@@ -90,9 +98,9 @@ for (const a of agents) {
   );
 }
 
-const children = agents.filter((a) => a.path !== planner.path && a.path !== ROOT_PATH);
+const children = agents.filter((a) => a.path !== planner.path && a.path !== session.rootPath);
 const waited = timeline.some((l) => l.includes('waiting'));
-const root = agents.find((a) => a.path === ROOT_PATH);
+const root = agents.find((a) => a.path === session.rootPath);
 
 // ── M4：账本盘点 ──────────────────────────────────────────
 const ledger = await host.execute('ledger.query', {});

@@ -24,8 +24,8 @@ export interface BudgetLimits {
 }
 
 export class BudgetGuard {
-  private readonly softUsd: number;
-  private readonly hardUsd: number;
+  private softUsd: number;
+  private hardUsd: number;
   private spentUsd = 0;
   private state: BudgetState = 'ok';
 
@@ -33,6 +33,17 @@ export class BudgetGuard {
     this.hardUsd = limits.hardUsd;
     this.softUsd =
       limits.softUsd ?? (limits.hardUsd > 0 ? limits.hardUsd * 0.8 : 0);
+  }
+
+  /**
+   * 换限额（MU-1：S8 设置界面保存后要立刻生效）。
+   *
+   * 只换限额，**不清已花费** —— 钱已经花了，改上限不该让账目归零。
+   * 档位也不主动回退：下一次 record() 会按新限额重新判定。
+   */
+  setLimits(limits: BudgetLimits): void {
+    this.hardUsd = limits.hardUsd;
+    this.softUsd = limits.softUsd ?? (limits.hardUsd > 0 ? limits.hardUsd * 0.8 : 0);
   }
 
   get disabled(): boolean {

@@ -134,7 +134,46 @@ export function formatForkMode(mode: ForkMode): string {
 
 export type AgentPath = string;
 
-export const ROOT_PATH: AgentPath = '/root';
+// ─────────────────────────────────────────────────────────────
+// 会话寻址（MU-1 起：多根注册表，一个会话一棵树）
+//
+// 旧模型是单根 `/root`（恒存在、所有分身挂在它下面）。换轴后它被删掉了，
+// 因为设计稿的成员树顶层就是会话的 lead（单兵会话是「内置引擎」一行），
+// 没有「应用根」这一层；保留它则深度计算要跳两层。详见 MU-1 §4.1。
+// ─────────────────────────────────────────────────────────────
+
+/** 会话根路径 = `/<sessionId>`。 */
+export function sessionRootPath(sessionId: string): AgentPath {
+  if (sessionId.length === 0 || sessionId.includes('/')) {
+    throw new TypeError(`sessionId 不得为空或含 "/": ${sessionId}`);
+  }
+  return `/${sessionId}`;
+}
+
+/** 从路径取会话 id（`/sX/a/b` → `sX`）；`/` 或空路径返回 undefined。 */
+export function sessionIdOfPath(path: AgentPath): string | undefined {
+  if (!path.startsWith('/')) return undefined;
+  const first = path.slice(1).split('/')[0];
+  return first ? first : undefined;
+}
+
+/**
+ * 会话内相对路径（`/sX/a/b` → `/a/b`；会话根 → `/`）。
+ *
+ * UI 一律显示这个而不是绝对路径：用户关心的是「架构师在 /a/b」而不是
+ * 「它在 /s7k2x-9f3a/a/b」——后者把内部 id 糊到了界面上。
+ */
+export function relativePathOf(path: AgentPath, sessionId: string): AgentPath {
+  const root = `/${sessionId}`;
+  if (path === root) return '/';
+  return path.startsWith(`${root}/`) ? path.slice(root.length) : path;
+}
+
+/** 会话内深度：会话根 = 0，成员 = 1，孙 = 2（与旧模型 `/root` 为 0 同构）。 */
+export function depthFromSessionRoot(path: AgentPath): number {
+  const segments = path.split('/').filter((s) => s.length > 0);
+  return Math.max(0, segments.length - 1);
+}
 
 export function childPath(parent: AgentPath, id: string): AgentPath {
   if (id.includes('/')) throw new TypeError(`agent id 不得包含 "/": ${id}`);

@@ -13,7 +13,13 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { ROOT_PATH, type AgentPath, type EventMap, type RoleDefinition } from '@axon/protocol';
+import {
+  type AgentPath,
+  type AgentSnapshot,
+  type EventMap,
+  type RoleDefinition,
+  type SpawnAgentPayload,
+} from '@axon/protocol';
 import {
   createFauxSource,
   fauxAssistantMessage,
@@ -57,7 +63,7 @@ async function harness(opts: HarnessOpts = {}) {
   if (opts.costByText) {
     modelSource = withTurnCost(modelSource, (ctx) => opts.costByText![lastUserText(ctx)] ?? 0);
   }
-  const events: { event: keyof EventMap; source: string }[] = [];
+  const events: { event: keyof EventMap; source: AgentPath | undefined }[] = [];
   const host = new AxonHost({
     modelSource,
     roles: opts.roles ?? ROLES,
@@ -66,7 +72,11 @@ async function harness(opts: HarnessOpts = {}) {
     budget: opts.budget,
     idleTimeoutMs: opts.idleTimeoutMs,
   });
-  return { host, events };
+  // MU-1：并发闸门现在有两个口径（全局 + 会话），所以先开一个会话。
+  const root = host.createSession({ title: '测试会话', executor: 'engine' }).rootPath;
+  const spawn = (spec: Omit<SpawnAgentPayload, 'parent'> & { parent?: AgentPath }): AgentSnapshot =>
+    host.spawn({ parent: root, ...spec });
+  return { host, root, spawn, events };
 }
 
 /** 一个可控「何时放行」的回复门。 */
@@ -93,8 +103,8 @@ async function viWaitFor(pred: () => boolean, timeoutMs = 3000): Promise<void> {
 describe('M3 闸门：requestRun / parked / drain', () => {
   it('额满时新任务 parked（waiting 排队），空出后 FIFO 补位', async () => {
     const h = await harness({ maxConcurrent: 1 });
-    const a = h.host.spawn({ role: 'boss' });
-    const b = h.host.spawn({ role: 'boss' });
+    const a = h.spawn({ role: 'boss' });
+    const b = h.spawn({ role: 'boss' });
 
     const pa = h.host.requestRun(a.path, '任务 A');
     await viWaitFor(() => h.host.get(a.path)?.status === 'running');
@@ -110,8 +120,8 @@ describe('M3 闸门：requestRun / parked / drain', () => {
 
   it('requestRun 拒绝正在运行与已排队的 Agent（同步抛错）', async () => {
     const h = await harness({ maxConcurrent: 1 });
-    const a = h.host.spawn({ role: 'boss' });
-    const b = h.host.spawn({ role: 'boss' });
+    const a = h.spawn({ role: 'boss' });
+    const b = h.spawn({ role: 'boss' });
     const pa = h.host.requestRun(a.path, '1');
     await viWaitFor(() => h.host.get(a.path)?.status === 'running');
     expect(() => h.host.requestRun(a.path, '2')).toThrow(/正在运行/);
@@ -123,7 +133,7 @@ describe('M3 闸门：requestRun / parked / drain', () => {
 
   it('终态 Agent 可直接追加任务（归位 idle 再启动）', async () => {
     const h = await harness();
-    const a = h.host.spawn({ role: 'boss' });
+    const a = h.spawn({ role: 'boss' });
     await h.host.requestRun(a.path, '1');
     expect(h.host.get(a.path)?.status).toBe('done');
     await h.host.requestRun(a.path, '追加'); // done → idle → running → done
@@ -140,8 +150,8 @@ describe('M3 wait：退位-解挂', () => {
       routes: { 子任务: gc.factory, 父任务: gp.factory },
     });
 
-    const parent = h.host.spawn({ role: 'boss' });
-    const child = h.host.spawn({ role: 'boss', parent: parent.path });
+    const parent = h.spawn({ role: 'boss' });
+    const child = h.spawn({ role: 'boss', parent: parent.path });
 
     void h.host.requestRun(child.path, '子任务');
     await viWaitFor(() => h.host.get(child.path)?.status === 'running');
@@ -164,8 +174,8 @@ describe('M3 wait：退位-解挂', () => {
 
   it('等待的目标已终态时直接 resolve，不挂起', async () => {
     const h = await harness();
-    const parent = h.host.spawn({ role: 'boss' });
-    const child = h.host.spawn({ role: 'boss', parent: parent.path });
+    const parent = h.spawn({ role: 'boss' });
+    const child = h.spawn({ role: 'boss', parent: parent.path });
     await h.host.requestRun(child.path, 't');
     expect(h.host.get(child.path)?.status).toBe('done');
 
@@ -177,8 +187,8 @@ describe('M3 wait：退位-解挂', () => {
     const gp = gate('父答复');
     const h = await harness({ routes: { 父任务: gp.factory } });
 
-    const parent = h.host.spawn({ role: 'boss' });
-    const child = h.host.spawn({ role: 'boss', parent: parent.path });
+    const parent = h.spawn({ role: 'boss' });
+    const child = h.spawn({ role: 'boss', parent: parent.path });
 
     const parentRun = h.host.requestRun(parent.path, '父任务');
     await viWaitFor(() => h.host.get(parent.path)?.status === 'running');
@@ -197,8 +207,8 @@ describe('M3 wait：退位-解挂', () => {
     const gp = gate('父答复');
     const h = await harness({ maxConcurrent: 1, routes: { 父任务: gp.factory } });
 
-    const parent = h.host.spawn({ role: 'boss' });
-    const child = h.host.spawn({ role: 'boss', parent: parent.path });
+    const parent = h.spawn({ role: 'boss' });
+    const child = h.spawn({ role: 'boss', parent: parent.path });
 
     const parentRun = h.host.requestRun(parent.path, '父任务'); // 父占满唯一额度
     await viWaitFor(() => h.host.get(parent.path)?.status === 'running');
@@ -228,7 +238,7 @@ describe('M3 预算熔断', () => {
       budget: { hardUsd: 0.02 },
       costByText: { 1: 0.018, 2: 0.03 },
     });
-    const a = h.host.spawn({ role: 'boss' });
+    const a = h.spawn({ role: 'boss' });
 
     await h.host.requestRun(a.path, '1'); // 0.018 ≥ 0.016 软线
     expect(h.events.filter((e) => e.event === 'budget.warning')).toHaveLength(1);
@@ -239,7 +249,7 @@ describe('M3 预算熔断', () => {
     expect(h.host.budgetState()).toBe('frozen');
 
     // 只挡新起点：spawn / requestRun 都拒绝
-    expect(() => h.host.spawn({ role: 'boss' })).toThrow(/预算已冻结/);
+    expect(() => h.spawn({ role: 'boss' })).toThrow(/预算已冻结/);
     expect(() => h.host.requestRun(a.path, '3')).toThrow(/预算已冻结/);
   });
 
@@ -251,8 +261,8 @@ describe('M3 预算熔断', () => {
       routes: { 'B 长活': gb.factory },
     });
 
-    const a = h.host.spawn({ role: 'boss' });
-    const b = h.host.spawn({ role: 'boss' });
+    const a = h.spawn({ role: 'boss' });
+    const b = h.spawn({ role: 'boss' });
 
     const pb = h.host.requestRun(b.path, 'B 长活'); // B 先开跑（gate 挂着 = 长任务中）
     await viWaitFor(() => h.host.get(b.path)?.status === 'running');
@@ -263,7 +273,7 @@ describe('M3 预算熔断', () => {
     expect(h.host.get(b.path)?.status).toBe('running'); // 在跑者不受影响
 
     // frozen 只挡新起点
-    expect(() => h.host.spawn({ role: 'boss' })).toThrow(/预算已冻结/);
+    expect(() => h.spawn({ role: 'boss' })).toThrow(/预算已冻结/);
 
     gb.release(); // B 收尾自然完成
     await pb;
@@ -275,7 +285,7 @@ describe('M3 idle 看门狗', () => {
   it('running 且超时无任何事件 → 中断（按空闲计时，不按总时长）', async () => {
     const g = gate('很慢');
     const h = await harness({ idleTimeoutMs: 100, routes: { 慢活: g.factory } });
-    const a = h.host.spawn({ role: 'boss' });
+    const a = h.spawn({ role: 'boss' });
 
     const pa = h.host.requestRun(a.path, '慢活');
     void pa.catch(() => undefined); // 中断后 requestRun 的 Promise 走异常路径
@@ -283,7 +293,7 @@ describe('M3 idle 看门狗', () => {
 
     // 真空闲 100ms 后看门狗 interrupt
     await viWaitFor(() => h.host.get(a.path)?.status === 'interrupted', 2000);
-    expect(h.host.get(ROOT_PATH)!.children.length).toBe(1);
+    expect(h.host.get(h.root)!.children.length).toBe(1);
   });
 });
 
@@ -291,7 +301,10 @@ describe('M3 授权矩阵与工具绑定（切片 5）', () => {
   it('内置角色全部拿到六件套（按其角色白名单裁剪）', async () => {
     const h = await harness({ roles: ALL_ROLES });
     for (const role of ALL_ROLES) {
-      const a = h.host.spawn({ role: role.name });
+      // 不写白名单的角色（内置引擎）= 叶子工具不设限，也就不在「授权矩阵」的
+      // 讨论范围内：它拿不拿编排工具由**会话形态**决定（host.buildRootEngine）。
+      if (!role.tools) continue;
+      const a = h.spawn({ role: role.name });
       const names = h.host.orchestrationToolsFor(a.path, new Set(role.tools)).map((t) => t.name);
       expect(names.sort()).toEqual([...ORCHESTRATION_TOOL_NAMES].sort());
     }
@@ -310,7 +323,7 @@ describe('M3 授权矩阵与工具绑定（切片 5）', () => {
         },
       ],
     });
-    const a = h.host.spawn({ role: 'leaf_only' });
+    const a = h.spawn({ role: 'leaf_only' });
     expect(h.host.orchestrationToolsFor(a.path, new Set(['read', 'grep']))).toHaveLength(0);
   });
 
@@ -327,7 +340,7 @@ describe('M3 授权矩阵与工具绑定（切片 5）', () => {
         },
       ],
     });
-    const a = h.host.spawn({ role: 'half' });
+    const a = h.spawn({ role: 'half' });
     expect(h.host.orchestrationToolsFor(a.path, new Set(['agent', 'agent_wait'])).map((t) => t.name).sort()).toEqual(
       ['agent', 'agent_wait'],
     );
@@ -335,7 +348,7 @@ describe('M3 授权矩阵与工具绑定（切片 5）', () => {
 
   it('集成：agent 工具在真实宿主上立 pid 子 Agent，子跑完 wait/check 拿到终态', async () => {
     const h = await harness({ roles: ALL_ROLES, maxConcurrent: 2 });
-    const planner = h.host.spawn({ role: 'planner' });
+    const planner = h.spawn({ role: 'planner' });
     const byName = new Map(h.host.orchestrationToolsFor(planner.path).map((t) => [t.name, t]));
 
     // ① agent：spawn 子（挂在 planner 名下），子立刻开跑（scripted fallback 回复）
@@ -361,7 +374,7 @@ describe('M3 授权矩阵与工具绑定（切片 5）', () => {
 
   it('集成：agent_resume + agent_wait 把终态子 Agent 重新拉起', async () => {
     const h = await harness({ roles: ALL_ROLES, maxConcurrent: 2 });
-    const planner = h.host.spawn({ role: 'planner' });
+    const planner = h.spawn({ role: 'planner' });
     const byName = new Map(h.host.orchestrationToolsFor(planner.path).map((t) => [t.name, t]));
 
     const spawnR = await byName.get('agent')!.execute('c', { role: 'developer', task: '初稿' } as never);
@@ -385,7 +398,7 @@ describe('M3 授权矩阵与工具绑定（切片 5）', () => {
       budget: { hardUsd: 0.01 },
       costByText: { 撞线: 0.02 },
     });
-    const planner = h.host.spawn({ role: 'planner' });
+    const planner = h.spawn({ role: 'planner' });
     await h.host.requestRun(planner.path, '撞线');
     expect(h.host.budgetState()).toBe('frozen');
 

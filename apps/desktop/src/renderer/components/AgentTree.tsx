@@ -7,11 +7,13 @@ import type { AgentPath, AgentSnapshot } from '@axon/protocol';
 
 export interface AgentTreeProps {
   agents: AgentSnapshot[];
+  /** 要渲染的树根（MU-1：会话根 `/<sessionId>`，不再是全局 `/root`）。 */
+  rootPath: AgentPath;
   selected: AgentPath;
   onSelect: (path: AgentPath) => void;
 }
 
-export function AgentTree({ agents, selected, onSelect }: AgentTreeProps) {
+export function AgentTree({ agents, rootPath, selected, onSelect }: AgentTreeProps) {
   const byPath = new Map(agents.map((s) => [s.path, s]));
 
   const renderNode = (path: AgentPath, depth: number): ReactNode => {
@@ -38,7 +40,9 @@ export function AgentTree({ agents, selected, onSelect }: AgentTreeProps) {
       <div className="panel-head">
         <span>Agent 树</span>
       </div>
-      <div className="tree">{renderNode('/root', 0)}</div>
+      <div className="tree">
+        {renderNode(rootPath, 0) ?? <div className="hint">（本会话还没有成员）</div>}
+      </div>
     </>
   );
 }

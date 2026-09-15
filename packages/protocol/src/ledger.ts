@@ -65,6 +65,14 @@ export interface LedgerRecord {
   version: number;
   /** 单调递增序号 + 随机后缀，保证排序稳定且不猜测。 */
   id: string;
+  /**
+   * 所属会话（MU-1 起必填）。
+   *
+   * 为什么它是**必填**而不是可选：协作只发生在同一会话的成员之间，
+   * 而 `/sX/a` 这类路径也只在会话内唯一 —— 没有 sessionId，账本就无法按会话切片，
+   * S4 与右栏精简账本面板会直接变成假数据（UX 02 §7 早就把这条列为 M4 的接口建议）。
+   */
+  sessionId: string;
   action: CollabAction;
   /** 发起方。永远是 agent —— M4 不做人工发起（决策 D1）。 */
   from: AgentPath;
@@ -106,10 +114,23 @@ export const LEDGER_MAX_RECORDS = 10_000;
 // ─────────────────────────────────────────────────────────────
 
 export interface LedgerQuery {
+  /** 限定某会话 —— 账本的主键维度（`/sX/a` 这类路径只在会话内唯一）。 */
+  sessionId?: string;
   /** 限定与某 agent 相关（from 或 to 命中）。 */
   agent?: AgentPath;
-  /** 与 agent 同用时，把子树内的 agent 也算命中。 */
+  /**
+   * 与 agent 同用时，把子树内的 agent 也算命中。
+   *
+   * 子树前缀比较天然被 sessionId 约束：`/sX/a` 不可能是 `/sY` 的后代。
+   */
   subtree?: boolean;
+  /**
+   * 只看与某成员**直接**相关的条目（`from === participant || to === participant`）。
+   *
+   * 与 `agent` 的分工：`agent` 是「以这个人为中心的检索」（可带子树），
+   * `participant` 是「这个人自己发起/被派的那几笔」——S2 右栏的精简账本面板用它。
+   */
+  participant?: AgentPath;
   action?: CollabAction[];
   adoption?: Adoption[];
   status?: LedgerStatus[];

@@ -29,6 +29,8 @@ export class RoleBridge {
   private readonly loader: RoleLoader;
   private readonly host: AxonHost;
   private disposeWatch: (() => void) | null = null;
+  /** 角色表变化后的旁路钩子（index.ts 用它触发团队重校验）。 */
+  private onChangedCb: (() => void) | null = null;
   /** 上次已同步状态的 JSON 快照，用于去重。 */
   private lastKey = '';
 
@@ -66,10 +68,21 @@ export class RoleBridge {
     this.disposeWatch = null;
   }
 
+  /**
+   * 角色表变化后的旁路钩子。
+   *
+   * 用回调而不是让 RoleBridge 直接拿 TeamBridge：团队依赖角色，角色不依赖团队
+   * —— 反向引用会把两个 loader 的初始化顺序、热重载顺序、dispose 顺序全部绑定。
+   */
+  onChanged(cb: () => void): void {
+    this.onChangedCb = cb;
+  }
+
   private sync(state: RoleLoadState): void {
     const key = JSON.stringify(state);
     if (key === this.lastKey) return;
     this.lastKey = key;
     this.host.updateRoles(state.entries, state.issues);
+    this.onChangedCb?.();
   }
 }

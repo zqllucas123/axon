@@ -12,7 +12,7 @@ import { ApprovalBroker } from './approval.ts';
 interface Emitted {
   event: keyof EventMap;
   payload: unknown;
-  source: AgentPath;
+  source: AgentPath | undefined;
 }
 
 function makeBroker(
@@ -73,17 +73,28 @@ describe('ApprovalBroker · 三档行为', () => {
 });
 
 describe('ApprovalBroker · 父链穿透（TabTin subagent-hitl 同构）', () => {
-  it('父档为 auto ⇒ 父代批，不惊动人', async () => {
+  it('父档为 auto ⇒ 父代批，不惊动人（但留痕：approval.delegated）', async () => {
     const { broker, emitted } = makeBroker({
       '/root/planner-1': 'auto',
       '/root/planner-1/tester-1': 'always_ask',
     });
     const r = await broker.gate('/root/planner-1/tester-1', 'shell', {});
     expect(r.allow).toBe(true);
-    expect(emitted).toHaveLength(0);
+    // MU-1 修②：代批**不再静默**。人不用到场，但事后必须能从事件流看出
+    // 「这次动手是 planner-1 替 tester-1 放行的」——否则事后审计无迹可寻。
+    expect(emitted).toHaveLength(1);
+    expect(emitted[0]!.event).toBe('approval.delegated');
+    expect(emitted[0]!.payload).toMatchObject({
+      origin: '/root/planner-1/tester-1',
+      tool: 'shell',
+      approver: '/root/planner-1',
+      mode: 'auto',
+      chain: ['/root/planner-1/tester-1', '/root/planner-1', '/root'],
+    });
+    expect(REQ(emitted)).toBeUndefined(); // 没有惊动人
   });
 
-  it('父也是 always_ask ⇒ 继续向上找', async () => {
+  it('父也是 always_ask ⇒ 继续向上找（找到 full_access 的祖先为止）', async () => {
     const modes: Record<string, ApprovalMode> = {
       '/root/a-1': 'full_access',
       '/root/a-1/b-1': 'always_ask',
@@ -92,7 +103,11 @@ describe('ApprovalBroker · 父链穿透（TabTin subagent-hitl 同构）', () =
     const { broker, emitted } = makeBroker(modes);
     const r = await broker.gate('/root/a-1/b-1/c-1', 'shell', {});
     expect(r.allow).toBe(true);
-    expect(emitted).toHaveLength(0);
+    // 越过了两层 always_ask，最终由 a-1 代批；事件里要能看出是谁。
+    expect(emitted).toHaveLength(1);
+    expect(emitted[0]!.event).toBe('approval.delegated');
+    expect((emitted[0]!.payload as EventMap['approval.delegated']).approver).toBe('/root/a-1');
+    expect(REQ(emitted)).toBeUndefined();
   });
 
   it('整条链都 always_ask ⇒ 惊动人，chain 带完整穿透路径', async () => {

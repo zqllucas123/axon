@@ -18,6 +18,7 @@ import type {
   RoleIssue,
   UsageTotals,
 } from './agent.ts';
+import type { ConfigIssue, ConfigPatch, ConfigSnapshot } from './config.ts';
 import type {
   Adoption,
   AdoptionPolicy,
@@ -25,6 +26,14 @@ import type {
   LedgerQueryResult,
   LedgerRecord,
 } from './ledger.ts';
+import type {
+  CreateSessionPayload,
+  EscalateSessionPayload,
+  SessionDetail,
+  SessionListQuery,
+  SessionSummary,
+} from './session.ts';
+import type { TeamDefinition, TeamEntry, TeamIssue } from './team.ts';
 
 // ─────────────────────────────────────────────────────────────
 // 信封
@@ -49,8 +58,15 @@ export type ResponseEnvelope<C extends keyof CommandMap = keyof CommandMap> =
 export interface NotificationEnvelope<E extends keyof EventMap = keyof EventMap> {
   event: E;
   payload: EventMap[E];
-  /** 事件来自哪个 agent；UI 据此把事件路由到树上的节点。 */
-  source: AgentPath;
+  /**
+   * 事件来自哪个 agent；UI 据此把事件路由到树上的节点。
+   *
+   * MU-1 起改为**可选**：会话/团队/配置级事件（`session.created`、`teams.changed`、
+   * `config.changed`）没有单一 agent 源，硬塞一个只会逼实现编个假路径出来。
+   */
+  source?: AgentPath;
+  /** 事件所属会话；会话内的事件必有，全局事件没有。 */
+  sessionId?: string;
   at: number;
 }
 
@@ -60,12 +76,27 @@ export interface NotificationEnvelope<E extends keyof EventMap = keyof EventMap>
 
 export interface SpawnAgentPayload {
   role: string;
-  /** 省略则挂在 ROOT 下。 */
+  /** 父 Agent 路径。MU-1 起父子树以会话为根，缺省值交给宿主按会话选。 */
   parent?: AgentPath;
+  /**
+   * 归属会话。只缺 parent 时用它定位会话根（`/<sessionId>`）。
+   *
+   * 两个都给也可以，但两者必须同属一个会话（宿主体检查），否则会造出
+   * 跨树的孤儿节点 —— 那会让「按会话切片」全部失真。
+   */
+  sessionId?: string;
   /** 覆盖角色默认的分身模式。 */
   forkMode?: ForkModeSpec;
-  /** 一次性覆写，不落盘。 */
-  overrides?: Partial<Pick<RoleDefinition, 'displayName' | 'instructions' | 'model'>>;
+  /**
+   * 一次性覆写，不落盘。
+   *
+   * MU-1 起带上 `tools`/`approval`：团队成员计划（session-instantiate）把
+   * 「引用角色 + 本队覆写」预合成后再交到这里。**覆写只减不增** 的守门人
+   * 在宿主（host.spawn），不在调用方 —— 这里只是传声筒。
+   */
+  overrides?: Partial<
+    Pick<RoleDefinition, 'displayName' | 'instructions' | 'model' | 'tools' | 'approval'>
+  >;
   /** 创建后立即投喂的首条任务。 */
   initialPrompt?: string;
 }
@@ -124,6 +155,45 @@ export interface CommandMap {
 
   /** 拉当前预算档位；frozen 是终态，没有查询通道 UI 刷新后就瞎了。 */
   'budget.get': { payload: Record<string, never>; result: BudgetSnapshot };
+
+  // ─ MU-1：会话（一等公民，UX 02 §2.2）──
+
+  /** 建会话并按执行方式实例化（engine 只建根 / team 按编队 / adhoc 现挑）。 */
+  'session.create': { payload: CreateSessionPayload; result: SessionSummary };
+  /** 会话详情：摘要 + 本会话成员树（S2 右栏顶部面板、S5 deep link 的数据源）。 */
+  'session.get': { payload: { sessionId: string }; result: SessionDetail | null };
+  'session.list': { payload: SessionListQuery; result: SessionSummary[] };
+  /** 单兵 → 团队的升级（「叫人」）；已产生的消息不丢。 */
+  'session.escalate': { payload: EscalateSessionPayload; result: SessionDetail };
+  'session.rename': { payload: { sessionId: string; title: string }; result: SessionSummary };
+  /** 删会话 = 级联删整棵树 + 清理账本切片/挂起/队列。 */
+  'session.remove': { payload: { sessionId: string }; result: { removedPaths: AgentPath[] } };
+
+  // ── MU-1：团队（S3 团队管理）──
+
+  'team.list': {
+    payload: Record<string, never>;
+    result: { entries: TeamEntry[]; issues: TeamIssue[] };
+  };
+  /** 创建或覆盖同名用户团队；校验失败时 accepted=false 且带 errors。 */
+  'team.save': {
+    payload: { team: TeamDefinition };
+    result: { accepted: boolean; errors: TeamIssue[] };
+  };
+  'team.delete': { payload: { name: string }; result: { deleted: boolean; errors: TeamIssue[] } };
+  'team.openDir': { payload: Record<string, never>; result: { path: string } };
+
+  // ── MU-1：配置（S8 设置窗）──
+
+  'config.get': { payload: Record<string, never>; result: ConfigSnapshot };
+  /**
+   * 改配置。与 role.save / team.save 同构：**校验失败不落盘**，
+   * 返回 issues 让 UI 逐字段标红，而不是抛错让人去猜哪个字段坏了。
+   */
+  'config.patch': {
+    payload: { patch: ConfigPatch };
+    result: { accepted: boolean; errors: ConfigIssue[]; config: ConfigSnapshot };
+  };
 }
 
 /**
@@ -136,6 +206,13 @@ export interface CommandMap {
 export interface PendingRequest {
   requestId: string;
   kind: 'approval' | 'question';
+  /**
+   * 请求属于哪个会话。
+   *
+   * 它是 S5 收件箱「跨会话聚合」的分组键（UX 02 §3.4 的「双重主键」：
+   * 请求属于某会话，但「有人卡住等你」是跨会话的）。
+   */
+  sessionId: string;
   /** 谁要动手。 */
   origin: AgentPath;
   chain: AgentPath[];
@@ -196,6 +273,8 @@ export interface EventMap {
   /** 工具执行前的 HITL 门；沿父链穿透后仍无人代批时才发到人面前。 */
   'approval.request': {
     requestId: string;
+    /** 属于哪个会话（MU-1：收件箱按会话切片；渲染层要能直接把事件拼进待办表）。 */
+    sessionId: string;
     /** 谁要动手。 */
     origin: AgentPath;
     /** 穿透路径 origin → … → root。 */
@@ -229,9 +308,66 @@ export interface EventMap {
    *
    * `spentUsd` 与 `limits` 必须是两个不同来源的数 —— 之前的 `limitUsd` 字段
    * 实际塞的是 spent，导致 UI 上「已用 / 上限」永远相等（M4 修订 G9.1）。
+   *
+   * MU-1 加 `scope`：三层限额（全局/团队/会话）取更严者后，UI 必须知道
+   * 是哪一层触发的——否则会话被团队预算卡住时，用户看全局额度还富余，会以为程序坏了。
    */
-  'budget.warning': { usage: UsageTotals; spentUsd: number; softUsd: number; hardUsd: number };
-  'budget.frozen': { usage: UsageTotals; spentUsd: number; softUsd: number; hardUsd: number };
+  'budget.warning': BudgetEventPayload;
+  'budget.frozen': BudgetEventPayload;
+
+  // ─ MU-1：会话 / 团队 / 配置 ──
+
+  /** 会话建立成功。 */
+  'session.created': { summary: SessionSummary };
+  /**
+   * 会话 rollup 变化（成员状态 / 账本 / 待批 / 用量）。
+   *
+   * 发送侧要节流（≤ 4Hz/会话，实现放 index.ts 转发层）：一个忙碌会话的
+   * turn.end + status 事件会以每秒几十条的频率出现，不节流会把 IPC 打满。
+   */
+  'session.changed': { summary: SessionSummary };
+  /** 会话被删。`paths` 是级联删掉的全部路径（子先父后），UI 逐个摘节点。 */
+  'session.removed': { sessionId: string; paths: AgentPath[] };
+
+  /** 团队集合变化（保存/删除/外部改文件后热重载）。UI 直接拿 entries 重绘。 */
+  'teams.changed': { entries: TeamEntry[]; issues: TeamIssue[] };
+  /** 配置落盘成功（含来自其他途径的变更）；UI 全量重绘而不是局部打补丁。 */
+  'config.changed': { config: ConfigSnapshot };
+
+  /**
+   * 代批留痕（MU-1 审批修②）。
+   *
+   * 背景：`resolveDelegation` 只要链上有 auto/full_access 祖先就直接放行，
+   * **不发事件、无记录**；而内置 planner/architect/aligner 都是 auto，
+   * aligner 又常当 lead ⇒ 默认配置下 HITL 形同虚设。留痕之后，S5 的
+   * 「已处理流水」与调试台都能回答「这次是谁替你批的」。
+   */
+  'approval.delegated': {
+    /** 真正要动手的那个 agent。 */
+    origin: AgentPath;
+    tool: string;
+    /** 替它批的祖先。 */
+    approver: AgentPath;
+    /** 代批者生效的审批档（auto 或 full_access）。 */
+    mode: ApprovalMode;
+    /** 穿透路径 origin → … → approver。 */
+    chain: AgentPath[];
+    at: number;
+  };
+}
+
+/** 预算跃迁事件的载荷（warning / frozen 共用）。 */
+export interface BudgetEventPayload {
+  usage: UsageTotals;
+  spentUsd: number;
+  softUsd: number;
+  hardUsd: number;
+  /** 触发口径：全局档还是某会话档。 */
+  scope: 'global' | 'session';
+  /** scope='session' 时必有。 */
+  sessionId?: string;
+  /** 生效上限来自哪一层（会话口径时有意义，UI 显示「受团队预算限制」）。 */
+  limitedBy?: 'global' | 'team' | 'session';
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -247,7 +383,10 @@ export interface AxonBridge {
 
   subscribe<E extends keyof EventMap>(
     event: E,
-    handler: (payload: EventMap[E], meta: { source: AgentPath; at: number }) => void,
+    handler: (
+      payload: EventMap[E],
+      meta: { source?: AgentPath; sessionId?: string; at: number },
+    ) => void,
   ): () => void;
 }
 

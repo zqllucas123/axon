@@ -19,22 +19,16 @@
 import { readFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
+import type { AxonConfig } from '@axon/protocol';
 import type { OpenAICompatModel } from '@axon/kernel';
 
-/** `~/.axon/config.json` 的形状。字段全部可选 —— 文件不存在等价于「用 faux」。 */
-export interface AxonConfig {
-  provider?: {
-    id?: string;
-    name?: string;
-    baseUrl?: string;
-    apiKey?: string;
-    models?: OpenAICompatModel[];
-    defaultModel?: string;
-    headers?: Record<string, string>;
-  };
-  /** 预算硬线（美元）。缺省不设限。 */
-  budgetUsd?: number;
-}
+/**
+ * `AxonConfig` 的形状真相已搬到 `@axon/protocol`（config.ts）。
+ *
+ * 搬家的理由：设置界面（S8）与 `config.get/patch` 命令都要用它，而渲染层
+ * 不能依赖主进程内部模块。这里保留 re-export，让既有调用点不必改 import。
+ */
+export type { AxonConfig };
 
 /** 解析结果：要么用 faux，要么给出一份完整可用的真 provider 规格。 */
 export type ModelChoice =

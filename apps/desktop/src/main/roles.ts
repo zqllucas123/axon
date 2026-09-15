@@ -22,10 +22,10 @@ import type { RoleDefinition } from '@axon/protocol';
 import { ORCHESTRATION_TOOL_NAMES } from './orchestrator.ts';
 
 /** 只读工具集 —— 能看不能改。 */
-const READ_ONLY = ['read', 'grep', 'glob', 'ls'];
+export const READ_ONLY = ['read', 'grep', 'glob', 'ls'];
 
 /** 读写工具集 —— 加上编辑与执行。 */
-const READ_WRITE = [...READ_ONLY, 'edit', 'write', 'bash'];
+export const READ_WRITE = [...READ_ONLY, 'edit', 'write', 'bash'];
 
 /**
  * 编排工具（M3 决策 #1 拍板）：七个内置角色**全部**拿到六件套。
@@ -112,7 +112,9 @@ export const BUILTIN_ROLES: RoleDefinition[] = [
     ].join('\n'),
     // 只有读能力——它的价值在判断而非行动。连 write 都不给，避免它"顺手帮忙改一下"
     tools: withOrchestration(...READ_ONLY),
-    approval: 'auto',
+    // MU-1 修②：原先这里是 auto。它常被当团队 lead，而「链上有 auto 祖先就静默放行
+    // 后代的一切工具调用」等于把 HITL 关掉（且不留痕）。默认档位收紧到 always_ask。
+    approval: 'always_ask',
     // ★ 唯一继承上下文的角色：它的职责就是核对「实际做的」与「当初说的」，
     //   没有上下文就无从核对。这是 all 作为"显式逃生门"的正当用例。
     defaultForkMode: 'all',
@@ -152,4 +154,71 @@ export const CLONE_ROLE: RoleDefinition = {
   defaultForkMode: 'all',
 };
 
-export const ALL_ROLES: RoleDefinition[] = [...BUILTIN_ROLES, BLANK_ROLE, CLONE_ROLE];
+/**
+ * 内置引擎 —— 单兵会话的执行者（MU-1 新增，S0 的第一张卡）。
+ *
+ * 它是「不组队，就自己干」在角色表里的落点。两条刻意的选择：
+ *
+ * 1. **tools 缺省（= 叶子工具不设限）**：用户选的是「怎么干」，不是「选哪个角色」。
+ *    单兵会话里再叠一层能力白名单，只会在改个错别字时把人挡在外面。
+ * 2. **拿不到编排工具**：编排工具由宿主按「本会话里有没有成员」发放
+ *    （host.buildRootEngine），不由角色白名单决定 —— 一个人管理一支不存在的
+ *    队伍，是幻觉的温床。要组队走 session.escalate（S2-solo 的「叫人」）。
+ *
+ * 审批档 always_ask：单兵没有可代批的下属，每次动手都得人拍板。
+ */
+export const ENGINE_ROLE: RoleDefinition = {
+  name: 'engine',
+  displayName: '内置引擎',
+  description: '不组队的默认执行者：一个人把活干完',
+  instructions: [
+    '你是 Axon 的内置执行引擎，独立完成用户交给你的任务。',
+    '你没有下属：不要试图分派或等待任何 agent，直接用工具把活干完。',
+    '任务确实超出单兵范围时，如实体现在回复里（建议组建团队），等人来定夺。',
+  ].join('\n'),
+  approval: 'always_ask',
+  defaultForkMode: 'none',
+};
+
+/**
+ * 团队主控 —— 团队会话的 lead（MU-1 新增）。
+ *
+ * 为什么需要这个角色，而不是拿现成的 Axon5 当 lead：
+ *
+ * 权限是**沿树向下求交**的（父 ∩ 子，AGENTS.md §5 的不变量）。团队按星形实例化时
+ * 成员挂在 lead 底下，于是 lead 的角色白名单等于整支团队的**能力上限**。
+ * Axon5 只有读工具，拿它当 lead 会让「全栈小队」整队都写不了盘 —— 那不是设计意图
+ * （设计要的是「主控不动手」，那是**行为**约束，由提示词表达，不该塑进白名单）。
+ *
+ * 所以主控是独立类型：白名单取团队能力包络（读写 + 编排六件套），
+ * 行为上「只拆解与汇总，不写实现」由 instructions 约束。
+ * 另两条也刻进了定义：context 用 `all`（lead 必须知道前情才能分活），
+ * 审批档 `always_ask`（修②：默认不给「代批全部后代」这项权力）。
+ */
+export const LEAD_ROLE: RoleDefinition = {
+  name: 'lead',
+  displayName: '团队主控',
+  description: '团队会话的主控：拆解目标、分派成员、核对进展、汇总交付',
+  instructions: [
+    '你是团队主控。你的产出是**分派与汇总**，不是实现代码。',
+    '先把目标拆成可独立验收的子任务，标明依赖与验收标准，再分派。',
+    '分派时说清「谁做什么、做完什么样算好」；不要只说「看一下 X」。',
+    '成员是并行资源：能并行就并行，但会改同一个文件的活要串起来，避免互相踩。',
+    '用 agent_wait 等结果、agent_list 看全局；成员卡住时替它决策或换人。',
+    '交付前逐条对照最初的目标，指出「说要做但没做」的部分。',
+  ].join('\n'),
+  // 团队能力包络：成员的白名单只能在这之内取子集。
+  tools: withOrchestration(...READ_WRITE),
+  // 修②：lead 一律 always_ask（validateTeam 也会拒绝 lead 解析结果为 auto 的团队）。
+  approval: 'always_ask',
+  // 与 Axon5 同理：没有上下文就无从分派（这是 all 的正当用例之一）。
+  defaultForkMode: 'all',
+};
+
+export const ALL_ROLES: RoleDefinition[] = [
+  ...BUILTIN_ROLES,
+  ENGINE_ROLE,
+  LEAD_ROLE,
+  BLANK_ROLE,
+  CLONE_ROLE,
+];

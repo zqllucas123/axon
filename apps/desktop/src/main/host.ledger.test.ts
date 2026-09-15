@@ -14,11 +14,12 @@
 
 import { describe, expect, it } from 'vitest';
 import {
-  ROOT_PATH,
+  sessionIdOfPath,
   type AgentPath,
   type EventMap,
   type LedgerRecord,
   type RoleDefinition,
+  type SpawnAgentPayload,
 } from '@axon/protocol';
 import {
   Type,
@@ -70,7 +71,7 @@ const ROLES: RoleDefinition[] = [
 interface Rec {
   event: keyof EventMap;
   payload: unknown;
-  source: AgentPath;
+  source: AgentPath | undefined;
 }
 
 interface HarnessOpts {
@@ -101,8 +102,13 @@ async function harness(opts: HarnessOpts = {}) {
     approvalTimeoutMs: opts.approvalTimeoutMs ?? 0,
     idleTimeoutMs: 0,
   });
+  // MU-1：先开会话 —— 多根下没有「总是存在的根」，账本也以会话为主键。
+  const root = host.createSession({ title: '测试会话', executor: 'engine' }).rootPath;
   return {
     host,
+    root,
+    spawn: (spec: Omit<SpawnAgentPayload, 'parent'> & { parent?: AgentPath }) =>
+      host.spawn({ parent: root, ...spec }),
     events,
     ledgerEvents: () =>
       events.filter((e) => e.event === 'ledger.recorded' || e.event === 'ledger.updated'),
@@ -149,10 +155,10 @@ describe('M4 落账：delegate 的完整生命周期', () => {
       routes: { 派活: spawnScript('worker', '干活'), 干活: () => fauxAssistantMessage('干完了') },
       costByText: { 干活: 0.02 },
     });
-    const boss = h.host.spawn({ role: 'boss' });
+    const boss = h.spawn({ role: 'boss' });
     await h.host.requestRun(boss.path, '派活');
 
-    const child = '/root/boss-1/worker-1' as AgentPath;
+    const child = `${h.root}/boss-1/worker-1` as AgentPath;
     await waitFor(() => h.host.get(child)?.status === 'done');
     await waitFor(() => h.records()[0]?.status === 'settled');
 
@@ -170,7 +176,7 @@ describe('M4 落账：delegate 的完整生命周期', () => {
     const h = await harness({
       routes: { 派活: spawnScript('worker', '干活'), 干活: () => fauxAssistantMessage('ok') },
     });
-    const boss = h.host.spawn({ role: 'boss' });
+    const boss = h.spawn({ role: 'boss' });
     await h.host.requestRun(boss.path, '派活');
     await waitFor(() => h.records()[0]?.status === 'settled');
 
@@ -188,7 +194,7 @@ describe('M4 落账：delegate 的完整生命周期', () => {
         干活: () => fauxAssistantMessage('ok'),
       },
     });
-    const boss = h.host.spawn({ role: 'boss' });
+    const boss = h.spawn({ role: 'boss' });
     await h.host.requestRun(boss.path, '派活');
     await waitFor(() => h.records().length === 1);
 
@@ -200,8 +206,11 @@ describe('M4 落账：delegate 的完整生命周期', () => {
 
   it('快照带 forkMode / sessionId —— 与账本 contextScope 同源（MX G4.1/G4.4）', async () => {
     const h = await harness();
-    const boss = h.host.spawn({ role: 'boss', forkMode: '3' });
-    expect(boss.sessionId).toBe(boss.path);
+    const boss = h.spawn({ role: 'boss', forkMode: '3' });
+    // MU-1：sessionId 从「自己的路径」变成了**会话主键**（账本/审批/用量都按它切片）。
+    // 还是「与账本同源」那个意思，只是那把钥匙换成了会话 id。
+    expect(boss.sessionId).toBe(sessionIdOfPath(h.root));
+    expect(boss.sessionId).toBe(h.host.get(h.root)!.sessionId);
     expect(boss.forkMode).toBe('3');
   });
 });
@@ -212,9 +221,9 @@ describe('M4 结算的边界情况', () => {
     const h = await harness({
       routes: { 派活: spawnScript('worker', '慢活'), 慢活: () => gateLock },
     });
-    const boss = h.host.spawn({ role: 'boss' });
+    const boss = h.spawn({ role: 'boss' });
     void h.host.requestRun(boss.path, '派活');
-    const child = '/root/boss-1/worker-1' as AgentPath;
+    const child = `${h.root}/boss-1/worker-1` as AgentPath;
     await waitFor(() => h.records().length === 1);
     expect(h.records()[0]!.status).toBe('open');
 
@@ -231,7 +240,7 @@ describe('M4 结算的边界情况', () => {
         再干: () => fauxAssistantMessage('第二轮'),
       },
     });
-    const boss = h.host.spawn({ role: 'boss' });
+    const boss = h.spawn({ role: 'boss' });
     await h.host.requestRun(boss.path, '派活');
     await waitFor(() => h.records().every((r) => r.status === 'settled'));
     expect(h.records()).toHaveLength(1);
@@ -241,12 +250,12 @@ describe('M4 结算的边界情况', () => {
     const h = await harness({
       routes: { 派活: spawnScript('worker', '干活'), 干活: () => fauxAssistantMessage('ok') },
     });
-    const boss = h.host.spawn({ role: 'boss' });
+    const boss = h.spawn({ role: 'boss' });
     await h.host.requestRun(boss.path, '派活');
     await waitFor(() => h.records().length === 1);
 
     expect(h.host.queryLedger({ agent: boss.path, subtree: true }).total).toBe(1);
-    expect(h.host.queryLedger({ agent: '/root/nobody-9', subtree: true }).total).toBe(0);
+    expect(h.host.queryLedger({ agent: `${h.root}/nobody-9`, subtree: true }).total).toBe(0);
     expect(h.host.queryLedger({ adoption: ['pending'] }).total).toBe(1);
     expect(h.host.queryLedger({ adoption: ['adopted'] }).total).toBe(0);
   });
@@ -257,7 +266,7 @@ describe('M4 裁决：人工（默认）', () => {
     const h = await harness({
       routes: { 派活: spawnScript('worker', '干活'), 干活: () => fauxAssistantMessage('ok') },
     });
-    const boss = h.host.spawn({ role: 'boss' });
+    const boss = h.spawn({ role: 'boss' });
     await h.host.requestRun(boss.path, '派活');
     await waitFor(() => h.records()[0]?.status === 'settled');
 
@@ -275,15 +284,15 @@ describe('M4 裁决：人工（默认）', () => {
     const h = await harness({
       routes: { 派活: spawnScript('worker', '干活'), 干活: () => fauxAssistantMessage('ok') },
     });
-    const boss = h.host.spawn({ role: 'boss' });
+    const boss = h.spawn({ role: 'boss' });
     await h.host.requestRun(boss.path, '派活');
     await waitFor(() => h.records()[0]?.status === 'settled');
 
     expect(h.host.getAdoptionPolicy()).toEqual({ mode: 'human' });
     expect(h.host.list().map((a) => a.path)).toEqual([
-      ROOT_PATH,
-      '/root/boss-1',
-      '/root/boss-1/worker-1',
+      h.root,
+      `${h.root}/boss-1`,
+      `${h.root}/boss-1/worker-1`,
     ]);
   });
 
@@ -302,8 +311,8 @@ describe('M4 裁决：AutoAdoption 委派（决策 D2）', () => {
         干活: () => fauxAssistantMessage('干完了'),
       },
     });
-    const aligner = h.host.spawn({ role: 'aligner' });
-    const boss = h.host.spawn({ role: 'boss' });
+    const aligner = h.spawn({ role: 'aligner' });
+    const boss = h.spawn({ role: 'boss' });
     await h.host.requestRun(boss.path, '派活');
     await waitFor(() => h.records()[0]?.status === 'settled');
 
@@ -326,7 +335,7 @@ describe('M4 裁决：AutoAdoption 委派（决策 D2）', () => {
       adoptionPolicy: { mode: 'delegate', arbiterRole: 'worker' },
       routes: { 派活: spawnScript('worker', '干活'), 干活: () => fauxAssistantMessage('ok') },
     });
-    const boss = h.host.spawn({ role: 'boss' });
+    const boss = h.spawn({ role: 'boss' });
     await h.host.requestRun(boss.path, '派活');
     await waitFor(() => h.records()[0]?.status === 'settled');
     await waitFor(() => h.records()[0]?.adoptedNote !== undefined);
@@ -342,7 +351,7 @@ describe('M4 裁决：AutoAdoption 委派（决策 D2）', () => {
       adoptionPolicy: { mode: 'delegate', arbiterRole: 'aligner' },
       routes: { 派活: spawnScript('worker', '干活'), 干活: () => fauxAssistantMessage('ok') },
     });
-    const boss = h.host.spawn({ role: 'boss' });
+    const boss = h.spawn({ role: 'boss' });
     await h.host.requestRun(boss.path, '派活');
     await waitFor(() => h.records()[0]?.adoptedNote !== undefined);
     expect(h.records()[0]!.adoptedNote).toMatch(/找不到角色/);
@@ -356,8 +365,8 @@ describe('M4 裁决：AutoAdoption 委派（决策 D2）', () => {
         干活: () => fauxAssistantMessage('ok'),
       },
     });
-    const aligner = h.host.spawn({ role: 'aligner' });
-    const boss = h.host.spawn({ role: 'boss' });
+    const aligner = h.spawn({ role: 'aligner' });
+    const boss = h.spawn({ role: 'boss' });
     await h.host.requestRun(boss.path, '派活');
     await waitFor(() => h.records()[0]?.status === 'settled');
 
@@ -397,7 +406,7 @@ describe('M4 审批穿透接线', () => {
         动手: leafCallScript('danger'),
       },
     });
-    const agent = h.host.spawn({ role: 'cautious' });
+    const agent = h.spawn({ role: 'cautious' });
     void h.host.requestRun(agent.path, '动手');
 
     await waitFor(() => h.host.listPending().length === 1);
@@ -405,7 +414,7 @@ describe('M4 审批穿透接线', () => {
 
     const req = h.host.listPending()[0]!;
     expect(req.origin).toBe(agent.path);
-    expect(req.chain).toEqual([agent.path, ROOT_PATH]);
+    expect(req.chain).toEqual([agent.path, h.root]);
     expect(req.tool).toBe('danger');
     expect(req.approvalMode).toBe('always_ask');
 
@@ -422,7 +431,7 @@ describe('M4 审批穿透接线', () => {
         动手: leafCallScript('danger'),
       },
     });
-    const agent = h.host.spawn({ role: 'cautious' });
+    const agent = h.spawn({ role: 'cautious' });
     void h.host.requestRun(agent.path, '动手');
     await waitFor(() => h.host.listPending().length === 1);
     h.host.respondApproval(h.host.listPending()[0]!.requestId, false, '太危险');
@@ -443,8 +452,8 @@ describe('M4 审批穿透接线', () => {
         动手: leafCallScript('danger'),
       },
     });
-    const boss = h.host.spawn({ role: 'boss' }); // approval: auto
-    const child = h.host.spawn({ role: 'cautious', parent: boss.path });
+    const boss = h.spawn({ role: 'boss' }); // approval: auto
+    const child = h.spawn({ role: 'cautious', parent: boss.path });
     await h.host.requestRun(child.path, '动手');
 
     expect(calls).toEqual(['danger']);
@@ -456,10 +465,10 @@ describe('M4 审批穿透接线', () => {
     const h = await harness({
       routes: { 派活: spawnScript('worker', '干活'), 干活: () => fauxAssistantMessage('ok') },
     });
-    const agent = h.host.spawn({ role: 'cautious' });
+    const agent = h.spawn({ role: 'cautious' });
     await h.host.requestRun(agent.path, '派活');
     expect(h.host.listPending()).toHaveLength(0);
-    expect(h.host.get('/root/cautious-1/worker-1')).not.toBeNull();
+    expect(h.host.get(`${h.root}/cautious-1/worker-1`)).not.toBeNull();
   });
 
   it('白名单拦截优先于 HITL —— 未获授权的工具不该惊动人', async () => {
@@ -476,7 +485,7 @@ describe('M4 审批穿透接线', () => {
       [{ role: { ...ROLES[3]!, tools: [] }, source: 'builtin', errors: [] }],
       [],
     );
-    const restricted = h.host.spawn({ role: 'cautious' });
+    const restricted = h.spawn({ role: 'cautious' });
     await h.host.requestRun(restricted.path, '动手');
 
     expect(calls).toHaveLength(0);
@@ -493,7 +502,7 @@ describe('M4 审批穿透接线', () => {
         动手: leafCallScript('danger'),
       },
     });
-    const agent = h.host.spawn({ role: 'cautious' });
+    const agent = h.spawn({ role: 'cautious' });
     void h.host.requestRun(agent.path, '动手');
     await waitFor(() => h.host.listPending().length === 1);
 
@@ -509,7 +518,7 @@ describe('M4 预算修订（MX G9.1 回归）', () => {
       costByText: { 烧钱: 0.5 },
       routes: { 烧钱: () => fauxAssistantMessage('花完了') },
     });
-    const boss = h.host.spawn({ role: 'boss' });
+    const boss = h.spawn({ role: 'boss' });
     await h.host.requestRun(boss.path, '烧钱');
 
     const warn = h.events.find((e) => e.event === 'budget.warning')!
@@ -526,7 +535,7 @@ describe('M4 预算修订（MX G9.1 回归）', () => {
       costByText: { 烧钱: 0.5 },
       routes: { 烧钱: () => fauxAssistantMessage('花完了') },
     });
-    const boss = h.host.spawn({ role: 'boss' });
+    const boss = h.spawn({ role: 'boss' });
     await h.host.requestRun(boss.path, '烧钱');
 
     const snap = h.host.budgetSnapshot();
@@ -539,7 +548,7 @@ describe('M4 预算修订（MX G9.1 回归）', () => {
   it('熔断关闭时 disabled=true 且永不跃迁', async () => {
     const h = await harness({ budget: { hardUsd: 0 }, costByText: { 烧钱: 99 },
       routes: { 烧钱: () => fauxAssistantMessage('花完了') } });
-    const boss = h.host.spawn({ role: 'boss' });
+    const boss = h.spawn({ role: 'boss' });
     await h.host.requestRun(boss.path, '烧钱');
     expect(h.host.budgetSnapshot().disabled).toBe(true);
     expect(h.host.budgetSnapshot().state).toBe('ok');
