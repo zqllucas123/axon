@@ -20,13 +20,7 @@
     </header>
 
     <!-- 未组队：会话条明示当前是内置引擎，随时可升级 -->
-    <div class="session-bar">
-      <i data-icon="spark" class="i-14"></i>
-      <span>未组队 · 由 <b style="color:var(--text)">Axon 内置引擎</b> 直接执行 —— 不落协作账本，无审批穿透链</span>
-      <span class="spacer"></span>
-      <button class="btn sm"><i data-icon="users" class="i-14"></i>叫人（升级为团队会话）</button>
-      <span class="ann gap">G10.5 session.escalate</span>
-    </div>
+    <div class="session-bar" data-shell="session-bar" data-view="chat"></div>
 
     <div class="body">
       <div class="col">
@@ -110,11 +104,12 @@
       </div>
 
       <aside class="inspector">
+        <div data-shell="members"></div>
+
         <div class="panel">
           <div class="panel-title"><span>会话信息</span></div>
-          <div class="prow"><i data-icon="spark" class="i-16"></i><span>执行方式</span><span class="val">内置引擎</span></div>
           <div class="prow"><i data-icon="folder" class="i-16"></i><span>工作目录</span><span class="val">/prjs/axon</span></div>
-          <div class="prow"><i data-icon="shield" class="i-16"></i><span>审批档</span><span class="val">write-confirm</span></div>
+          <div class="prow"><i data-icon="shield" class="i-16"></i><span>审批档</span><span class="val">always_ask</span></div>
           <div class="prow"><i data-icon="wallet" class="i-16"></i><span>本会话花费</span><span class="val">$0.02</span></div>
           <div class="hint" style="padding:2px 10px 8px">单兵会话没有分身树、没有协作账本、没有穿透链——S4 / S5 对它是空的。这是刻意的：小任务不该付编排的心智税。</div>
         </div>

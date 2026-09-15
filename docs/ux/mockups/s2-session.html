@@ -24,13 +24,7 @@
       <button class="act is-on"><i data-icon="panelR" class="i-16"></i></button>
     </header>
 
-    <div class="session-bar">
-      <i data-icon="users" class="i-14"></i>
-      <span>会话「支付回调幂等改造」· 团队 <b style="color:var(--text)">全栈小队</b> · 4 成员已实例化 · 当前查看成员 <b style="color:var(--text)">后端实现 #2</b></span>
-      <span class="spacer"></span>
-      <button class="btn sm ghost"><i data-icon="plus" class="i-14"></i>临时加人</button>
-      <span class="ann gap">G10.3 session.get 带 team 引用</span>
-    </div>
+    <div class="session-bar" data-shell="session-bar" data-view="chat"></div>
 
     <div class="body">
       <div class="col">
@@ -118,7 +112,7 @@
               <span class="ann gap">G2.4 approval.request 未发射</span>
             </div>
             <div class="card-body">
-              该命令会改数据库结构（新增唯一索引）。当前角色审批档 <b>write-confirm</b>，请求已沿父链向上穿透到你：
+              该命令会改数据库结构（新增唯一索引）。当前角色审批档 <b>always_ask</b>，请求已沿父链向上穿透到你：
               <div class="chain" style="margin-top:10px">
                 <span class="node">后端实现 #2</span><span class="arr">→</span>
                 <span class="node">架构师 #1<span style="color:var(--text-dim)"> 无权代批</span></span><span class="arr">→</span>
@@ -203,7 +197,7 @@
             <div class="ph">对「后端实现 #2」说点什么…</div>
             <div class="row">
               <button class="act"><i data-icon="plus" class="i-16"></i></button>
-              <button class="mode"><i data-icon="hand" class="i-14"></i>审批：write-confirm</button>
+              <button class="mode"><i data-icon="hand" class="i-14"></i>审批：always_ask</button>
               <span class="spacer"></span>
               <button class="mode">类型 后端实现 · claude-sonnet<span class="ann gap">G4.3 生效 model</span></button>
               <button class="send"><i data-icon="arrowUp" class="i-16"></i></button>
@@ -214,19 +208,62 @@
 
       <!-- 右侧检视面板 -->
       <aside class="inspector">
+        <div data-shell="members"></div>
+
         <div class="panel">
           <div class="panel-title">
-            <span>成员信息</span><span class="spacer"></span>
-            <button class="act"><i data-icon="plus" class="i-14"></i></button>
+            <span>当前成员</span><span class="tag mono">/0/1/2</span><span class="spacer"></span>
+            <button class="act" title="打开该成员定义"><i data-icon="pen" class="i-14"></i></button>
           </div>
           <div class="prow"><i data-icon="users" class="i-16"></i><span>类型</span><span class="val">后端实现</span></div>
           <div class="prow"><i data-icon="layers" class="i-16"></i><span>所属团队</span><span class="val">全栈小队</span></div>
           <div class="prow"><i data-icon="spark" class="i-16"></i><span>模型</span><span class="val">claude-sonnet<span class="ann gap">G4.3</span></span></div>
           <div class="prow"><i data-icon="layers" class="i-16"></i><span>上下文</span><span class="val">fork: none<span class="ann gap">G4.4</span></span></div>
-          <div class="prow"><i data-icon="shield" class="i-16"></i><span>审批档</span><span class="val">write-confirm</span></div>
+          <div class="prow"><i data-icon="shield" class="i-16"></i><span>审批档</span><span class="val">always_ask</span></div>
           <div class="prow"><i data-icon="list" class="i-16"></i><span>工具</span><span class="val">6 / 11<span class="ann gap">G4.5</span></span><i data-icon="chevD" class="i-14 chev"></i></div>
           <div class="prow"><i data-icon="clock" class="i-16"></i><span>在等谁</span><span class="val">测试 #3<span class="ann gap">G4.6</span></span></div>
           <div class="prow"><i data-icon="wallet" class="i-16"></i><span>本树用量</span><span class="val">$0.31</span></div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-title">
+            <span>本会话账本</span>
+            <span class="tag err" style="margin-left:6px">3 待表态</span>
+            <span class="spacer"></span>
+            <a class="act" href="s4-ledger.html" title="展开为全幅"><i data-icon="panelR" class="i-14"></i></a>
+          </div>
+          <div class="led-mini">
+            <div class="lm todo">
+              <i data-icon="reply" class="i-14"></i>
+              <div class="g">
+                <div><span class="v">delegate</span> <span class="p">#2 → 测试 #3</span></div>
+                <div class="d">补一组并发回调的回归用例，覆盖同一 provider_txn_id 的 5 并发</div>
+                <div class="acts">
+                  <button class="btn sm">采纳</button>
+                  <button class="btn sm ghost">驳回</button>
+                  <span class="ann gap">G7.2 ledger.adopt</span>
+                </div>
+              </div>
+            </div>
+            <div class="lm">
+              <i data-icon="branch" class="i-14"></i>
+              <div class="g">
+                <div><span class="v">consult</span> <span class="p">#3 → #2（本成员）</span> <span class="tag wait">待你答</span></div>
+                <div class="d">重复回调返回 200 还是 409？</div>
+              </div>
+            </div>
+            <div class="lm">
+              <i data-icon="commit" class="i-14"></i>
+              <div class="g">
+                <div><span class="v">handoff</span> <span class="p">Axon5 → #2</span> <span class="tag ok">已采纳</span></div>
+                <div class="d">「支付回调幂等改造」整段交接，含验收口径</div>
+              </div>
+            </div>
+          </div>
+          <div class="hint" style="padding:8px 10px">
+            面板只列与<b>当前成员</b>相关的条目；全队 12 笔点右上角展开。
+            <span class="ann gap">G7.1 ledger.query 需支持 sessionId + participant 过滤</span>
+          </div>
         </div>
 
         <div class="panel">
@@ -236,13 +273,6 @@
           <div class="prow sub"><i data-icon="reply" class="i-16"></i><span>delegate</span><span class="val">派活，等回执</span></div>
           <div class="prow sub"><i data-icon="commit" class="i-16"></i><span>handoff</span><span class="val">整段交接</span></div>
           <div class="hint" style="padding:4px 10px 8px">人手动发起协作是否开放，待 M4 评审拍板（MX §4 候选意图）。</div>
-        </div>
-
-        <div class="panel">
-          <div class="panel-title"><span>近期协作</span><span class="spacer"></span><a class="act" href="s4-ledger.html"><i data-icon="chevR" class="i-14"></i></a></div>
-          <div class="prow sub"><span class="sdot wait"></span><span>delegate → 测试 #3</span><span class="val">02:11</span></div>
-          <div class="prow sub"><span class="sdot done"></span><span>consult ← 架构师 #1</span><span class="val">09:40</span></div>
-          <div class="prow sub"><span class="sdot done"></span><span>handoff ← Axon5</span><span class="val">昨天</span></div>
         </div>
       </aside>
     </div>

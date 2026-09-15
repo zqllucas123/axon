@@ -2,7 +2,7 @@
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8" />
-<title>Axon · S5 审批与提问收件箱</title>
+<title>Axon · S5 收件箱</title>
 <link rel="stylesheet" href="assets/axon.css" />
 </head>
 <body data-screen="s5">
@@ -12,7 +12,7 @@
   <main class="main">
     <header class="topbar">
       <i data-icon="inbox"></i>
-      <span class="title">审批与提问</span>
+      <span class="title">收件箱</span>
       <span class="tag">M4 新增</span>
       <span class="spacer"></span>
       <div data-shell="status"></div>
@@ -25,11 +25,12 @@
         <div class="page">
           <div class="page-head">
             <h1>收件箱</h1>
-            <p>子分身的审批请求沿父链向上穿透；父级无权代批时冒泡到你。刷新/重连后由 pending.list 补拉，请求不会丢。<span class="ann gap">G1.1 / G1.3 / G2.4</span></p>
+            <p><b>跨会话聚合</b>——你在 A 会话里干活时 B 会话有人卡住了，这是本屏存在的唯一理由；会话内的审批<b>就地</b>出现在会话流里，不得只藏在这里。子分身的请求沿父链向上穿透，父级无权代批时冒泡到你；刷新/重连后由 pending.list 补拉。<span class="ann gap">G1.1 / G1.3 / G2.4</span></p>
           </div>
 
           <div class="toolbar">
             <div class="seg"><button class="is-on">待处理 2</button><button>今天已处理 7</button><button>全部</button></div>
+            <div class="seg"><button class="is-on">全部会话</button><button>支付回调幂等 1</button><button>六工具补测 1</button></div>
             <span style="flex:1"></span>
             <button class="btn sm ghost">全部拒绝</button>
           </div>
@@ -40,18 +41,21 @@
               <i data-icon="shield" class="i-16"></i>
               <span class="name">审批 · bash</span>
               <span class="path">bunx prisma migrate dev --name idem_unique</span>
+              <a class="tag" href="s2-session.html"><i data-icon="folder" class="i-14"></i>支付回调幂等改造</a>
+              <span class="ann gap">G5.1 PendingRequest 需带 sessionId</span>
               <span class="spacer"></span>
               <span class="tag run">等待 00:42 / 超时 05:00</span>
               <span class="ann gap">G5.1 超时 + 已决状态</span>
             </div>
             <div class="card-body">
-              <p style="margin:0 0 10px">发起：<b>后端实现 #2</b>（角色审批档 <code>write-confirm</code>）。命令会修改数据库结构：为回调表新增唯一索引 <code>(provider, provider_txn_id)</code>。</p>
+              <p style="margin:0 0 10px">发起：<b>后端实现 #2</b>（角色审批档 <code>always_ask</code>）。命令会修改数据库结构：为回调表新增唯一索引 <code>(provider, provider_txn_id)</code>。</p>
               <div class="chain">
                 <span class="node">后端实现 #2</span><span class="arr">→</span>
-                <span class="node">架构师 #1 <span style="color:var(--text-dim)">read-only，无权代批</span></span><span class="arr">→</span>
-                <span class="node">Axon5 · 主控 <span style="color:var(--text-dim)">full-auto，但破坏性命令不自动放行</span></span><span class="arr">→</span>
+                <span class="node">架构师 #1 <span style="color:var(--text-dim)">always_ask，无权代批</span></span><span class="arr">→</span>
+                <span class="node">Axon5 · 主控 <span style="color:var(--text-dim)">always_ask，无权代批</span></span><span class="arr">→</span>
                 <span class="node you">你</span>
               </div>
+              <p class="ann gap" style="margin:10px 0 0">链上必须全链 always_ask，请求才会真的到人：auto / full_access 的祖先会直接代批（approval.ts:103）。主控若是 auto，整条 HITL 链静默失效 —— 见 03 §7 D-1</p>
               <details class="fold" style="margin-top:12px">
                 <summary><i data-icon="terminal" class="i-16"></i><span>完整命令与工作目录</span><span class="spacer"></span><i data-icon="chevD" class="i-14"></i></summary>
                 <div class="fold-body mono">cwd: /Users/lucaszhou/works/prjs/demo/apps/api
@@ -76,6 +80,7 @@ env: DATABASE_URL=postgres://…(已脱敏)</div>
             <div class="card-head">
               <i data-icon="help" class="i-16"></i>
               <span class="name">提问 · Axon5 · 主控</span>
+              <a class="tag" href="s2-session.html"><i data-icon="folder" class="i-14"></i>把 orchestrator 的六工具补测</a>
               <span class="spacer"></span>
               <span class="tag wait">等待 03:10</span>
               <span class="ann gap">G1.2 question.respond</span>
@@ -113,8 +118,8 @@ env: DATABASE_URL=postgres://…(已脱敏)</div>
             <div class="list-row">
               <i data-icon="check" class="i-16"></i>
               <div class="grow">
-                <div class="t1">代批 · read_file<span class="tag mono">测试工程师 #3</span></div>
-                <div class="t2">由 Axon5 · 主控 在链上代批（full-auto 且为只读操作）</div>
+                <div class="t1">放行 · read_file<span class="tag mono">测试工程师 #3</span></div>
+                <div class="t2">自身档位 auto，叶子工具调用直接放行，未惊动人。⚠️ 这正是需要警惕的地方：链上任意一级是 auto 都会静默放行它的全部后代请求。</div>
               </div>
               <span class="when">09:20</span>
             </div>
@@ -125,10 +130,10 @@ env: DATABASE_URL=postgres://…(已脱敏)</div>
       <aside class="inspector">
         <div class="panel">
           <div class="panel-title"><span>穿透规则</span></div>
-          <div class="prow sub"><span>read-only</span><span class="val">只读放行，写必问</span></div>
-          <div class="prow sub"><span>write-confirm</span><span class="val">写盘 / 破坏性必问</span></div>
-          <div class="prow sub"><span>full-auto</span><span class="val">可代批后代的同档请求</span></div>
-          <div class="hint" style="padding:2px 10px 8px">父级只能代批「不高于自身档位」的请求；任何一级无权代批即继续向上，最终到人。</div>
+          <div class="prow sub def"><span class="k">always_ask</span><span class="d">自己的叶子工具调用必问</span></div>
+          <div class="prow sub def"><span class="k">auto</span><span class="d">自己的调用直接放行，并可代批后代</span></div>
+          <div class="prow sub def"><span class="k">full_access</span><span class="d">同 auto；语义更强，内置角色未用</span></div>
+          <div class="hint" style="padding:2px 10px 8px">沿父链向上找第一个 auto / full_access 代批；都没有则到人。⚠️ 档位是<b>按 Agent</b> 而非按工具的：除编排工具（D5 豁免）外没有风险分级。<span class="ann gap">approval.ts:97,103 ・ 原型早先假设的「只读放行 / 写必问」与「父只能代批不高于自身档位的请求」两条，代码里都不存在</span></div>
         </div>
         <div class="panel">
           <div class="panel-title"><span>阻塞影响</span></div>

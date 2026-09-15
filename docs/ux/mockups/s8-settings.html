@@ -1,0 +1,616 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<title>Axon · S8 设置</title>
+<link rel="stylesheet" href="assets/axon.css" />
+</head>
+<body data-screen="s8">
+<div class="window is-settings">
+  <!-- 设置窗自带子导航：不塞进主侧栏（两套 IA 会打架） -->
+  <aside class="st-sidebar">
+    <div class="traffic">
+      <span class="dot r"></span><span class="dot y"></span><span class="dot g"></span>
+    </div>
+
+    <a class="st-back" href="s1-workbench.html"><i data-icon="chevL" class="i-16"></i><span>返回应用</span></a>
+
+    <div class="st-search">
+      <i data-icon="search" class="i-14"></i><span class="ph">搜索设置…</span>
+    </div>
+
+    <nav class="st-nav">
+      <div class="st-group">个人</div>
+      <button class="st-item is-on" data-pane="general"><i data-icon="settings" class="i-16"></i><span>通用</span></button>
+      <button class="st-item" data-pane="appearance"><i data-icon="eye" class="i-16"></i><span>外观</span></button>
+      <button class="st-item" data-pane="models"><i data-icon="layers" class="i-16"></i><span>模型与网关</span></button>
+      <button class="st-item" data-pane="orchestration"><i data-icon="shield" class="i-16"></i><span>编排与安全</span></button>
+
+      <div class="st-group">在主窗里管</div>
+      <a class="st-item is-ext" href="s3-teams.html"><i data-icon="users" class="i-16"></i><span>团队与角色</span><i data-icon="arrowUp" class="i-14 ext"></i></a>
+      <a class="st-item is-ext" href="s6-budget.html"><i data-icon="wallet" class="i-16"></i><span>预算与用量</span><i data-icon="arrowUp" class="i-14 ext"></i></a>
+      <p class="st-navnote">这两项会回主窗打开。设置里只放「上限与默认值」，「花了多少、谁超支了」是仪表盘，跟着会话走。</p>
+
+      <div class="st-group">其他</div>
+      <button class="st-item" data-pane="about"><i data-icon="help" class="i-16"></i><span>关于 Axon</span></button>
+    </nav>
+  </aside>
+
+  <main class="st-main">
+    <div class="st-body">
+
+      <!-- ================= 通用 ================= -->
+      <section class="st-pane" data-pane="general">
+        <h1 class="st-h1">通用</h1>
+        <p class="st-lede">影响所有会话的默认值。团队与角色级的设置可以覆盖这里的默认，且只能更严、不能更松。</p>
+
+        <div class="st-sec">权限</div>
+        <div class="grp">
+          <div class="srow">
+            <div class="txt">
+              <div class="t">默认审批档</div>
+              <div class="d">
+                新建角色没写 <code>approval</code> 字段时用它。角色自带的审批档优先，且只能比这里更严。
+                <span class="ann">packages/protocol/src/agent.ts:162-164 ・ 默认 always_ask :164</span>
+                <span class="ann gap">⚠️ 档位是「按 Agent」而不是「按工具」的：除编排工具（D5 豁免）外没有风险分级；而且链上任意一个 auto / full_access 祖先都会静默代批掉全部后代请求（approval.ts:97,103）</span>
+              </div>
+            </div>
+            <div class="ctl">
+              <button class="sel">每次必问（always_ask）<i data-icon="chevD" class="i-14"></i></button>
+            </div>
+          </div>
+
+          <div class="srow">
+            <div class="txt">
+              <div class="t">编排工具豁免人工审批<span class="tag">架构不变量</span></div>
+              <div class="d">
+                六个编排工具（<code>agent</code> / <code>agent_wait</code> / <code>agent_check</code> / <code>agent_message</code> /
+                <code>agent_resume</code> / <code>agent_interrupt</code> 与 <code>ledger_adopt</code>，实为 7 个名字）不触发 HITL ——
+                否则一次 delegate 会同时弹出「派活」和「执行」两次确认。不提供开关。
+                <span class="ann">approval.ts:36,159 ・ orchestrator.ts:87-96</span>
+              </div>
+            </div>
+            <div class="ctl">
+              <button class="btn sm ghost">查看清单</button>
+            </div>
+          </div>
+
+          <div class="srow">
+            <div class="txt">
+              <div class="t">审批超时</div>
+              <div class="d">
+                超时按「拒绝」处理，并把原因回灌给模型让它换条路。0 = 永不超时（不推荐：分身的轮次会被吊住）。
+                <span class="ann">HostOptions.approvalTimeoutMs ・ host.ts:96 ・ 默认 300s approval.ts:40</span>
+                <span class="ann gap">G11.2 index.ts 构造 host 时没传，生产恒 300s</span>
+              </div>
+            </div>
+            <div class="ctl">
+              <button class="sel">5 分钟<i data-icon="chevD" class="i-14"></i></button>
+            </div>
+          </div>
+        </div>
+
+        <div class="st-sec">常规</div>
+        <div class="grp">
+          <div class="srow">
+            <div class="txt">
+              <div class="t">默认执行方式</div>
+              <div class="d">
+                新建会话时预选哪张模式卡。默认「内置引擎」—— 协作是成本不是福利，不是每个任务都值得配一支队伍。
+                <span class="ann">docs/ux/02-团队与会话模型.md §3.1</span>
+                <span class="ann gap">G10.1 session.create 不存在</span>
+              </div>
+            </div>
+            <div class="ctl">
+              <div class="seg sm"><button class="is-on">内置引擎</button><button>指定团队</button></div>
+            </div>
+          </div>
+
+          <div class="srow">
+            <div class="txt">
+              <div class="t">默认工作目录</div>
+              <div class="d">新建会话的起始目录；会话内仍可单独改。
+                <span class="ann gap">G10.1</span></div>
+            </div>
+            <div class="ctl">
+              <span class="path">/Users/lucaszhou/works/prjs/axon</span>
+              <button class="btn sm">更改</button>
+            </div>
+          </div>
+
+          <div class="srow">
+            <div class="txt">
+              <div class="t">在菜单栏中显示</div>
+              <div class="d">关闭主窗口后把 Axon 留在菜单栏，随时接得住待批请求。
+                <span class="ann gap">G11.5</span></div>
+            </div>
+            <div class="ctl"><button class="tgl on" aria-pressed="true"></button></div>
+          </div>
+
+          <div class="srow">
+            <div class="txt">
+              <div class="t">运行任务时防止系统休眠</div>
+              <div class="d">有成员处于 running 时阻止显示器休眠。只影响「保持唤醒」，不影响系统更新与关机。
+                <span class="ann gap">G11.5</span></div>
+            </div>
+            <div class="ctl"><button class="tgl" aria-pressed="false"></button></div>
+          </div>
+
+          <div class="srow">
+            <div class="txt">
+              <div class="t">角色目录</div>
+              <div class="d">
+                角色就是目录里的 JSON；改完自动热重载（防抖 300ms）。内置角色被同名文件覆盖时，团队管理里会标「已覆盖」。
+                <span class="ann">role.openDir 已实现 ・ packages/protocol/src/ipc.ts:102 ・ index.ts:58</span>
+              </div>
+            </div>
+            <div class="ctl">
+              <span class="path">~/.axon/roles</span>
+              <button class="btn sm primary">在访达中打开</button>
+            </div>
+          </div>
+
+          <div class="srow">
+            <div class="txt">
+              <div class="t">配置文件位置</div>
+              <div class="d">
+                网关与全局预算存这里（明文 0600）。环境变量 <code>AXON_CONFIG</code> / <code>AXON_BASE_URL</code> /
+                <code>AXON_API_KEY</code> / <code>AXON_MODEL</code> 优先级更高，会盖过文件。
+                <span class="ann">model-config.ts:53 ・ 优先级 :68-80</span>
+                <span class="ann gap">G11.1 现在只读不写，设置界面的「保存」需要新增写盘路径</span>
+              </div>
+            </div>
+            <div class="ctl">
+              <span class="path">~/.axon/config.json</span>
+              <button class="btn sm">更改</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ================= 外观 ================= -->
+      <section class="st-pane" data-pane="appearance" hidden>
+        <h1 class="st-h1">外观</h1>
+        <p class="st-lede">令牌已全部语义化，但实现层只有一套硬编码的深色 —— 外观节基本是新增需求。</p>
+
+        <div class="st-sec">主题</div>
+        <div class="grp">
+          <div class="srow">
+            <div class="txt">
+              <div class="t">主题</div>
+              <div class="d">
+                设计令牌可加一层 <code>[data-theme=dark]</code> 覆盖。注意现状是反的：<b>实现是深色、设计稿是浅色</b>，
+                窗口底色还在主进程里写死，没接令牌。
+                <span class="ann">renderer/index.html:11-15 ・ index.ts:211-213 ・ 令牌 axon.css:6-58 ・ 01 §6</span>
+                <span class="ann gap">G11.9 主题是纯新增</span>
+              </div>
+            </div>
+            <div class="ctl">
+              <div class="seg sm"><button class="is-on">浅色</button><button>深色</button><button>跟随系统</button></div>
+            </div>
+          </div>
+
+          <div class="srow">
+            <div class="txt">
+              <div class="t">显示协议数据标注</div>
+              <div class="d">
+                在界面上标出每一项数据来自哪个协议事件 / 命令。原型里 ⌘/ 可切换；实现后指向真实事件流，是 M4/M5 最省事的自查工具。
+                <span class="ann">原型 assets/shell.js mountShell()</span>
+              </div>
+            </div>
+            <div class="ctl"><button class="tgl on" aria-pressed="true"></button></div>
+          </div>
+        </div>
+
+        <div class="st-sec">排版</div>
+        <div class="grp">
+          <div class="srow">
+            <div class="txt">
+              <div class="t">信息密度</div>
+              <div class="d">「紧凑」把列表行高收 25%，一屏多放约 1/3；会话正文不受影响。
+                <span class="ann gap">G11.9</span></div>
+            </div>
+            <div class="ctl"><div class="seg sm"><button class="is-on">舒适</button><button>紧凑</button></div></div>
+          </div>
+
+          <div class="srow">
+            <div class="txt">
+              <div class="t">会话正文字号</div>
+              <div class="d">会话流比界面字号大一档，是刻意的（长文阅读优先）。
+                <span class="ann">axon.css 字阶 ・ 01 §2</span></div>
+            </div>
+            <div class="ctl">
+              <button class="sel">15px（默认）<i data-icon="chevD" class="i-14"></i></button>
+            </div>
+          </div>
+
+          <div class="srow">
+            <div class="txt">
+              <div class="t">减弱动态效果</div>
+              <div class="d">关掉流式逐字与卡片进场动画，尊重系统的 <code>prefers-reduced-motion</code>。
+                <span class="ann gap">G11.9</span></div>
+            </div>
+            <div class="ctl"><div class="seg sm"><button class="is-on">跟随系统</button><button>始终减弱</button></div></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ================= 模型与网关 ================= -->
+      <section class="st-pane" data-pane="models" hidden>
+        <h1 class="st-h1">模型与网关</h1>
+        <p class="st-lede">Axon 只走 OpenAI 兼容网关（<code>openai-completions</code>）：一个网关 + 一份模型清单 + 一条全局预算。</p>
+
+        <div class="st-sec">当前生效</div>
+        <div class="grp">
+          <div class="srow">
+            <div class="txt">
+              <div class="t">执行模型</div>
+              <div class="d">
+                配置缺失时 Axon 不崩：静默降级到 faux（脚本化假模型），并把原因同时标在顶栏与这里。
+                四种降级原因：未配 baseUrl / 未配 apiKey / 模型清单为空 / 指定模型不在清单内。
+                <span class="ann">index.ts:88-115 ・ model-config.ts:76,82,92,97</span>
+                <span class="ann gap">G11.6 无 provider.test 命令，「测试连接」需新增</span>
+              </div>
+            </div>
+            <div class="ctl">
+              <span class="tag run">faux · 未配置 baseUrl</span>
+              <button class="btn sm">测试连接</button>
+            </div>
+          </div>
+
+          <div class="srow">
+            <div class="txt">
+              <div class="t">网关名称</div>
+              <div class="d">只用于界面显示。<span class="ann">provider.name ・ model-config.ts:103</span></div>
+            </div>
+            <div class="ctl"><input class="inp w-md" value="Axon Gateway" /></div>
+          </div>
+
+          <div class="srow">
+            <div class="txt">
+              <div class="t">Base URL</div>
+              <div class="d">OpenAI 兼容端点，末尾斜杠会被忽略。
+                <span class="ann">provider.baseUrl ・ model-config.ts:29 ・ 归一化 provider.ts:175</span></div>
+            </div>
+            <div class="ctl"><input class="inp mono w-md" value="https://api.example.com/v1" /></div>
+          </div>
+
+          <div class="srow">
+            <div class="txt">
+              <div class="t">API Key</div>
+              <div class="d">
+                现在明文存 <code>~/.axon/config.json</code>（0600）。钥匙串明确推迟到 M6；在那之前这一项就是明文，界面必须说实话。
+                <span class="ann">model-config.ts:15-19 ・ 脱敏 maskKey :113-115</span>
+              </div>
+            </div>
+            <div class="ctl">
+              <span class="path">sk-••••••••••••3f9a</span>
+              <button class="btn sm">更换</button>
+            </div>
+          </div>
+
+          <div class="srow">
+            <div class="txt">
+              <div class="t">默认模型</div>
+              <div class="d">缺省取模型清单第一项。<span class="ann">provider.defaultModel ・ model-config.ts:95</span></div>
+            </div>
+            <div class="ctl">
+              <button class="sel">claude-sonnet<i data-icon="chevD" class="i-14"></i></button>
+            </div>
+          </div>
+
+          <div class="srow">
+            <div class="txt">
+              <div class="t">自定义请求头</div>
+              <div class="d">给网关带额外 header（网关路由、灰度标记等）。
+                <span class="ann">provider.headers ・ model-config.ts:33</span></div>
+            </div>
+            <div class="ctl"><button class="btn sm ghost">编辑（2）</button></div>
+          </div>
+        </div>
+
+        <div class="st-sec">模型清单</div>
+        <div class="grp">
+          <div class="srow head">
+            <div class="txt"><div class="t">模型 / 推理 / 上下文 / 最大输出 / 价格（$ / 百万 token）</div></div>
+            <div class="ctl"><button class="btn sm ghost"><i data-icon="plus" class="i-14"></i>添加模型</button></div>
+          </div>
+          <div class="srow">
+            <div class="txt">
+              <div class="t"><code>claude-sonnet</code> <span class="tag">默认</span></div>
+              <div class="d">200,000 上下文 · 8,192 最大输出 · in $3 / out $15</div>
+            </div>
+            <div class="ctl"><button class="btn sm ghost"><i data-icon="pen" class="i-14"></i></button></div>
+          </div>
+          <div class="srow">
+            <div class="txt">
+              <div class="t"><code>deepseek-r1</code> <span class="tag">reasoning</span></div>
+              <div class="d">128,000 上下文 · 8,192 最大输出 · in $1 / out $4
+                <span class="ann">reasoning: true ⇒ 会话流会多出 thinking 折叠块</span></div>
+            </div>
+            <div class="ctl"><button class="btn sm ghost"><i data-icon="pen" class="i-14"></i></button></div>
+          </div>
+          <div class="srow">
+            <div class="txt">
+              <div class="t"><code>local-qwen</code> <span class="tag">未填 cost</span></div>
+              <div class="d">128,000 上下文 · 8,192 最大输出 · 价格 0（成本不计入预算 ⇒ 熔断永不触发）
+                <span class="ann">默认值 MODEL_DEFAULTS ・ provider.ts:134-138</span></div>
+            </div>
+            <div class="ctl"><button class="btn sm ghost"><i data-icon="pen" class="i-14"></i></button></div>
+          </div>
+          <div class="srow">
+            <div class="txt">
+              <div class="t">每角色的模型覆盖<span class="tag wait">M6</span></div>
+              <div class="d">
+                <code>RoleDefinition.model</code> 已在 schema 里并通过校验，但建引擎时写死用网关默认模型，该字段目前没有消费方。
+                放到这里是为了说明：它会从这一页的清单里选，而不是变成第二个模型配置入口。
+                <span class="ann">packages/protocol/src/agent.ts:191 ・ host.spawn ・ 03 §M6</span>
+              </div>
+            </div>
+            <div class="ctl"><button class="btn sm ghost" disabled>配置</button></div>
+          </div>
+        </div>
+
+        <div class="st-sec">预算</div>
+        <div class="grp">
+          <div class="srow">
+            <div class="txt">
+              <div class="t">全局硬线</div>
+              <div class="d">
+                到线只挡<b>新起点</b>（spawn / prompt），在跑的不杀。≤ 0 = 关闭熔断。
+                <span class="ann">config.budgetUsd ・ index.ts:181-185 ・ host.ts:150 ・ 语义 budget.ts:74-83</span>
+              </div>
+            </div>
+            <div class="ctl"><input class="inp w-sm" value="$5.00" /><span class="tag">/ 日</span></div>
+          </div>
+
+          <div class="srow">
+            <div class="txt">
+              <div class="t">软线（预警）</div>
+              <div class="d">
+                <code>BudgetLimits.softUsd</code> 支持单独指定，但现阶段<b>没有任何配置入口</b>，只能按硬线 × 0.8 推算。
+                <span class="ann">budget.ts:34-36</span>
+                <span class="ann gap">G11.7 软线不可配</span>
+              </div>
+            </div>
+            <div class="ctl"><span class="tag">自动 = 硬线 × 0.8 → $4.00</span></div>
+          </div>
+
+          <div class="srow">
+            <div class="txt">
+              <div class="t">团队级 / 会话级预算</div>
+              <div class="d">
+                现在只有全局一条线（<code>BudgetGuard</code> 只有一个实例，挂在 root 累计上）。团队预算与会话下调是设计目标，协议与实现都还没有。
+                <span class="ann">02 §3.4 ・ host.ts:116</span>
+                <span class="ann gap">G10.4</span>
+              </div>
+            </div>
+            <div class="ctl"><a class="btn sm ghost" href="s6-budget.html">去预算页看口径</a></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ================= 编排与安全 ================= -->
+      <section class="st-pane" data-pane="orchestration" hidden>
+        <h1 class="st-h1">编排与安全</h1>
+        <p class="st-lede">并发闸门、看门狗与协作裁决策略。四项里三项在 <code>HostOptions</code> 里已经有落点，只差接线。</p>
+
+        <div class="st-sec">闸门与看门狗</div>
+        <div class="grp">
+          <div class="srow">
+            <div class="txt">
+              <div class="t">并发上限</div>
+              <div class="d">
+                只有 running 占额度；waiting（parked 排队 / suspended 父等后代）不占。promote 免检、wait 仅限后代 ——
+                死锁因此结构性不可能。
+                <span class="ann">host.ts:149 ・ registry.ts:145-152</span>
+              </div>
+            </div>
+            <div class="ctl"><input class="inp w-sm" value="6" /><span class="tag">个 running</span></div>
+          </div>
+
+          <div class="srow">
+            <div class="txt">
+              <div class="t">最大分身深度</div>
+              <div class="d">
+                超过深度时 spawn 直接失败。registry 里写死默认 2，<b>没有任何注入点</b>（host 从不传）。
+                <span class="ann">registry.ts:88 DEFAULT_MAX_DEPTH</span>
+                <span class="ann gap">G11.3 需先给 RegistryOptions 接通路</span>
+              </div>
+            </div>
+            <div class="ctl"><input class="inp w-sm" value="2" /><span class="tag">层</span></div>
+          </div>
+
+          <div class="srow">
+            <div class="txt">
+              <div class="t">空闲看门狗</div>
+              <div class="d">
+                按<b>空闲</b>而非总时长计时：running 且这么久没有任何事件就中断。等审批期间豁免（否则人拖五分钟再批，
+                工具刚跑起来就被判卡死）。0 = 关闭。
+                <span class="ann">host.ts:94,102,153 ・ 豁免 host.ts:139-143</span>
+              </div>
+            </div>
+            <div class="ctl">
+              <button class="sel">5 分钟<i data-icon="chevD" class="i-14"></i></button>
+            </div>
+          </div>
+
+          <div class="srow">
+            <div class="txt">
+              <div class="t">agent_wait 默认超时</div>
+              <div class="d">等后代的上限，模型可以在工具参数里单独覆盖（<code>timeoutSec</code>）。
+                <span class="ann">orchestrator.ts:98 ・ 覆盖 :231</span></div>
+            </div>
+            <div class="ctl"><input class="inp w-sm" value="600" /><span class="tag">秒（常量）</span></div>
+          </div>
+        </div>
+
+        <div class="st-sec">协作裁决</div>
+        <div class="grp">
+          <div class="srow">
+            <div class="txt">
+              <div class="t">裁决策略</div>
+              <div class="d">
+                「人工表态」= 每条 delegate / consult 落账后都要你按采纳或驳回；「委派仲裁」把表态权交给一个成员
+                （可按角色或按具体 Agent 指定）。命令已就绪，设置界面是它的第一个入口。
+                <span class="ann">protocol/ledger.ts:140-145 ・ ipc.ts:118-122（已实现）</span>
+              </div>
+            </div>
+            <div class="ctl">
+              <div class="seg sm"><button class="is-on">人工表态</button><button>委派仲裁</button></div>
+            </div>
+          </div>
+
+          <div class="srow">
+            <div class="txt">
+              <div class="t">仲裁者</div>
+              <div class="d">委派仲裁时生效。仲裁者<b>不能</b>是被问的那个成员自己，否则等于自己批自己。
+                <span class="ann">arbiter / arbiterRole ・ protocol/ledger.ts:140</span></div>
+            </div>
+            <div class="ctl">
+              <button class="sel">按角色：主控（aligner）<i data-icon="chevD" class="i-14"></i></button>
+            </div>
+          </div>
+
+          <div class="srow">
+            <div class="txt">
+              <div class="t">审批档与穿透规则<span class="tag wait">在通用</span></div>
+              <div class="d">
+                默认审批档、编排工具豁免、审批超时三项都归「通用 › 权限」；父链穿透规则（父档为 auto / full_access 可代批）
+                是架构行为，不可配置。
+                <span class="ann">approval.ts:110-126 resolveDelegation</span>
+              </div>
+            </div>
+            <div class="ctl"><button class="btn sm ghost" data-goto="general">打开通用</button></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ================= 关于 ================= -->
+      <section class="st-pane" data-pane="about" hidden>
+        <h1 class="st-h1">关于 Axon</h1>
+        <p class="st-lede">版本、路径与许可证。这一页没有开关，只有事实与出口。</p>
+
+        <div class="st-sec">版本</div>
+        <div class="grp">
+          <div class="srow">
+            <div class="txt">
+              <div class="t">Axon <span class="tag mono">0.1.0</span></div>
+              <div class="d">
+                内核 pi-agent-core <code>0.85.1</code> ・ Electron <code>33.2.1</code> ・ esbuild <code>0.24.2</code>。
+                版本是刻意锁死的：升级前先跑 contract test，并对照风险登记。
+                <span class="ann">AGENTS.md §5 ・ docs/02 §4</span>
+              </div>
+            </div>
+            <div class="ctl"><button class="btn sm ghost">检查更新</button></div>
+          </div>
+
+          <div class="srow">
+            <div class="txt">
+              <div class="t">打开源许可证</div>
+              <div class="d">捆绑依赖项的第三方声明。
+                <span class="ann gap">G11.10 无 LICENSE 聚合产物</span></div>
+            </div>
+            <div class="ctl"><button class="btn sm">查看</button></div>
+          </div>
+        </div>
+
+        <div class="st-sec">文件位置</div>
+        <div class="grp">
+          <div class="srow">
+            <div class="txt">
+              <div class="t">配置文件</div>
+              <div class="d">网关与全局预算。
+                <span class="ann">model-config.ts:53</span>
+                <span class="ann gap">G11.1 写入器需新增</span></div>
+            </div>
+            <div class="ctl">
+              <span class="path">~/.axon/config.json</span>
+              <button class="btn sm">在访达中显示</button>
+            </div>
+          </div>
+
+          <div class="srow">
+            <div class="txt">
+              <div class="t">角色目录</div>
+              <div class="d">内置 7 个角色 + 你的自定义角色。
+                <span class="ann">index.ts:58 ・ role.openDir（已实现）</span></div>
+            </div>
+            <div class="ctl">
+              <span class="path">~/.axon/roles</span>
+              <button class="btn sm">在访达中打开</button>
+            </div>
+          </div>
+
+          <div class="srow">
+            <div class="txt">
+              <div class="t">会话与账本</div>
+              <div class="d">
+                目前全在内存：关掉应用，会话、账本、用量一起消失。落盘是 M5 的范围，这里先如实标注。
+                <span class="ann">docs/ux/02 §2.2 ・ 03 §M5</span>
+                <span class="ann gap">G11.11 无持久化</span>
+              </div>
+            </div>
+            <div class="ctl"><span class="tag wait">M5</span></div>
+          </div>
+        </div>
+
+        <div class="st-sec">危险区</div>
+        <div class="grp danger-zone">
+          <div class="srow">
+            <div class="txt">
+              <div class="t">重置所有设置</div>
+              <div class="d">
+                只重置设置与 <code>config.json</code>，<b>不动</b>角色目录与团队。<span class="ann gap">G11.1</span>
+              </div>
+            </div>
+            <div class="ctl"><button class="btn sm danger">重置…</button></div>
+          </div>
+        </div>
+      </section>
+
+    </div>
+  </main>
+</div>
+<script src="assets/shell.js"></script>
+<script>
+  const items = [...document.querySelectorAll('.st-item[data-pane]')];
+  const panes = [...document.querySelectorAll('.st-pane')];
+  const main = document.querySelector('.st-main');
+
+  function show(id) {
+    if (!panes.some((p) => p.dataset.pane === id)) id = 'general';
+    items.forEach((i) => i.classList.toggle('is-on', i.dataset.pane === id));
+    panes.forEach((p) => (p.hidden = p.dataset.pane !== id));
+    main.scrollTop = 0;
+  }
+  items.forEach((i) =>
+    i.addEventListener('click', () => {
+      history.replaceState(null, '', '#' + i.dataset.pane);
+      show(i.dataset.pane);
+    })
+  );
+  document.querySelectorAll('[data-goto]').forEach((b) =>
+    b.addEventListener('click', () => {
+      history.replaceState(null, '', '#' + b.dataset.goto);
+      show(b.dataset.goto);
+    })
+  );
+  show(location.hash.slice(1) || 'general');
+
+  // 原型里的开关可点，仅切换视觉状态
+  document.querySelectorAll('.tgl:not([disabled])').forEach((t) =>
+    t.addEventListener('click', () => {
+      t.classList.toggle('on');
+      t.setAttribute('aria-pressed', t.classList.contains('on'));
+    })
+  );
+  document.querySelectorAll('.seg button').forEach((b) =>
+    b.addEventListener('click', () => {
+      [...b.parentElement.children].forEach((x) => x.classList.remove('is-on'));
+      b.classList.add('is-on');
+    })
+  );
+</script>
+</body>
+</html>

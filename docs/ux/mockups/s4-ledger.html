@@ -2,17 +2,18 @@
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8" />
-<title>Axon · S4 协作账本</title>
+<title>Axon · S2 会话 · 协作账本</title>
 <link rel="stylesheet" href="assets/axon.css" />
 </head>
-<body data-screen="s4">
+<body data-screen="s2">
 <div class="window">
   <aside class="sidebar" data-shell="sidebar"></aside>
 
   <main class="main">
     <header class="topbar">
-      <i data-icon="book"></i>
-      <span class="title">协作账本</span>
+      <i data-icon="folder"></i>
+      <span class="title">支付回调幂等改造</span>
+      <span class="tag"><i data-icon="book" class="i-14"></i>协作账本</span>
       <span class="tag">M4 新增</span>
       <span class="spacer"></span>
       <div data-shell="status"></div>
@@ -20,12 +21,14 @@
       <button class="act is-on"><i data-icon="panelR" class="i-16"></i></button>
     </header>
 
+    <div class="session-bar" data-shell="session-bar" data-view="ledger"></div>
+
     <div class="body">
       <section class="canvas">
         <div class="page page-wide">
           <div class="page-head">
             <h1>协作账本</h1>
-            <p>协作只有四个动词：consult / fork / delegate / handoff。每次动作即一条账目，不做自由消息总线。<span class="ann gap">G7.1 ledger.query · G8.1 ledger.recorded</span></p>
+            <p>本会话内 6 个成员之间发生的全部协作。只有四个动词：consult / fork / delegate / handoff，每次动作即一条账目，不做自由消息总线。<span class="ann gap">G7.1 ledger.query 需带 sessionId</span></p>
           </div>
 
           <div class="toolbar">
@@ -33,6 +36,11 @@
             <div class="seg"><button class="is-on">全部表态</button><button>待表态 3</button><button>已采纳 6</button><button>已驳回 1</button></div>
             <span style="flex:1"></span>
             <button class="btn sm ghost"><i data-icon="filter" class="i-14"></i>限定子树 /0/1</button>
+          </div>
+
+          <div class="hint" style="margin:-4px 0 14px">
+            作用域写死在本会话：<b>跨会话的账本无意义</b>——协作只发生在同一会话的成员之间，而 <code>/0/1/2</code> 这类路径也只在本会话内唯一。
+            要看别的会话，去<a href="s1-workbench.html" style="color:var(--sem-info)">会话总览</a>切过去。
           </div>
 
           <div class="list">
@@ -135,6 +143,8 @@
       </section>
 
       <aside class="inspector">
+        <div data-shell="members"></div>
+
         <div class="panel">
           <div class="panel-title"><span>本会话汇总</span></div>
           <div class="prow sub"><span>协作笔数</span><span class="val">12</span></div>

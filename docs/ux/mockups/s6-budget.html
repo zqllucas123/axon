@@ -24,52 +24,73 @@
         <div class="page page-wide">
           <div class="page-head">
             <h1>预算与用量</h1>
-            <p>本屏只读。改限额在 M6 真模型接入前不提供——faux 下的数字没有决策价值。<span class="ann gap">G7.3 budget.get 新命令</span></p>
+            <p><b>全局口径</b>：跨会话的总额与档位。单个任务花了多少、花在谁身上，看那个会话自己的「用量」页。<span class="ann gap">G7.3 budget.get 新命令</span></p>
           </div>
 
           <div class="card attn" style="margin-bottom:18px">
             <div class="card-head">
-              <i data-icon="alert" class="i-16"></i><span class="name">已过软线，进入 warning 档</span>
+              <i data-icon="alert" class="i-16"></i><span class="name">1 个会话已进入 warning 档</span>
               <span class="spacer"></span><span class="tag run">warning</span>
               <span class="ann gap">G9.1 事件 limitUsd 实际装的是 spent</span>
             </div>
             <div class="card-body">
-              已用 <b>$1.13</b>，软线 $1.00，硬线 $1.50。到硬线后进入 <code>frozen</code>：所有分身停止新轮次，且当前无恢复通道（G9.2）——本屏必须常驻可查，而不是只靠两条转瞬即逝的事件。
-              <div class="bar warn" style="margin-top:12px"><span style="width:75%"></span></div>
-              <div class="hint">软线 $1.00（66%）· 硬线 $1.50（100%）</div>
+              今日全局已用 <b>$1.49</b> / $5.00；其中「支付回调幂等改造」已用 $1.13，超过它自己的软线 $1.00。到硬线后进入 <code>frozen</code>：该会话所有成员停止新轮次，且当前无恢复通道（G9.2）。
+              <div class="bar warn" style="margin-top:12px"><span style="width:30%"></span></div>
+              <div class="hint">全局日预算 $5.00 · 已用 30%；冒烟的是单个会话，不是总额——<b>这就是预算也要分层的理由</b>。</div>
             </div>
           </div>
 
           <div class="grid3">
-            <div class="stat"><div class="k">已用</div><div class="v">$1.13</div><div class="s">今日 · 12 轮对话</div></div>
-            <div class="stat"><div class="k">软线 / 硬线</div><div class="v">$1.00 / $1.50</div><div class="s">来自 BudgetGuard 配置</div></div>
-            <div class="stat"><div class="k">档位</div><div class="v" style="color:var(--sem-run)">warning</div><div class="s">ok → warning → frozen（单向）</div></div>
+            <div class="stat"><div class="k">今日已用</div><div class="v">$1.49</div><div class="s">3 个活跃会话 · 19 轮</div></div>
+            <div class="stat"><div class="k">全局软线 / 硬线</div><div class="v">$4.00 / $5.00</div><div class="s">来自 BudgetGuard 配置</div></div>
+            <div class="stat"><div class="k">最严重的会话档位</div><div class="v" style="color:var(--sem-run)">warning</div><div class="s">ok → warning → frozen（单向）</div></div>
           </div>
 
-          <div class="side-section" style="padding-left:0;margin-top:10px">按分身（含子树累计）<span class="ann">AgentSnapshot.usage · registry 沿父链累加</span></div>
+          <div class="side-section" style="padding-left:0;margin-top:10px">按会话<span class="ann gap">G10.3 session.list · G10.4 会话级预算</span></div>
           <div class="list">
-            <table class="tbl">
-              <thead>
-                <tr><th>分身</th><th>角色</th><th style="text-align:right">input</th><th style="text-align:right">output</th><th style="text-align:right">自身</th><th style="text-align:right">含子树</th></tr>
-              </thead>
-              <tbody>
-                <tr><td>Axon5 · 主控 <span class="tag mono">/0</span></td><td>Axon5</td><td class="num" style="text-align:right">182,400</td><td class="num" style="text-align:right">41,200</td><td class="num" style="text-align:right">$0.42</td><td class="num" style="text-align:right">$1.13</td></tr>
-                <tr><td style="padding-left:30px">架构师 #1 <span class="tag mono">/0/1</span></td><td>架构师</td><td class="num" style="text-align:right">96,100</td><td class="num" style="text-align:right">18,700</td><td class="num" style="text-align:right">$0.26</td><td class="num" style="text-align:right">$0.57</td></tr>
-                <tr><td style="padding-left:52px">后端实现 #2 <span class="tag mono">/0/1/2</span></td><td>后端实现</td><td class="num" style="text-align:right">120,800</td><td class="num" style="text-align:right">33,400</td><td class="num" style="text-align:right">$0.31</td><td class="num" style="text-align:right">$0.31</td></tr>
-                <tr><td style="padding-left:52px">测试工程师 #3 <span class="tag mono">/0/1/3</span></td><td>测试工程师</td><td class="num" style="text-align:right">—</td><td class="num" style="text-align:right">—</td><td class="num" style="text-align:right">$0.00</td><td class="num" style="text-align:right">$0.00</td></tr>
-                <tr><td style="padding-left:30px">文档 #4 <span class="tag mono">/0/4</span></td><td>文档</td><td class="num" style="text-align:right">14,200</td><td class="num" style="text-align:right">5,900</td><td class="num" style="text-align:right">$0.05</td><td class="num" style="text-align:right">$0.05</td></tr>
-                <tr><td style="padding-left:30px">数据迁移 #5 <span class="tag mono">/0/5</span></td><td>数据迁移</td><td class="num" style="text-align:right">21,700</td><td class="num" style="text-align:right">3,100</td><td class="num" style="text-align:right">$0.09</td><td class="num" style="text-align:right">$0.09</td></tr>
-              </tbody>
-            </table>
+            <a class="list-row" href="s2-usage.html" style="background:var(--bg-sunken)">
+              <span class="ava-stack"><span class="ava lead">主</span><span class="ava">架</span><span class="ava">后</span><span class="ava">测</span></span>
+              <div class="grow">
+                <div class="t1">支付回调幂等改造 <span class="tag">全栈小队</span> <span class="tag run">warning</span></div>
+                <div class="t2">6 成员 · 12 轮 · 其中协作开销 $0.66（58%）</div>
+              </div>
+              <span class="when">$1.13 / $1.50</span>
+              <i data-icon="chevR" class="i-14"></i>
+            </a>
+            <a class="list-row" href="s2-usage.html">
+              <span class="ava-stack"><span class="ava lead">主</span><span class="ava">后</span><span class="ava">测</span></span>
+              <div class="grow">
+                <div class="t1">把 orchestrator 的六工具补测 <span class="tag">测试双人</span></div>
+                <div class="t2">3 成员 · 5 轮 · 协作开销 $0.09</div>
+              </div>
+              <span class="when">$0.34 / $0.80</span>
+              <i data-icon="chevR" class="i-14"></i>
+            </a>
+            <a class="list-row" href="s2-usage.html">
+              <span class="ava"><i data-icon="spark" class="i-14"></i></span>
+              <div class="grow">
+                <div class="t1">查一下 bun 的 workspace 协议 <span class="tag">单兵</span></div>
+                <div class="t2">无协作开销——不组队的价值就在这一列</div>
+              </div>
+              <span class="when">$0.02</span>
+              <i data-icon="chevR" class="i-14"></i>
+            </a>
+            <a class="list-row" href="s7-sessions.html">
+              <div class="grow">
+                <div class="t1">已结束的 14 个会话</div>
+                <div class="t2">历史合计 · M5 落盘后才算得准</div>
+              </div>
+              <span class="when">$3.51</span>
+              <i data-icon="chevR" class="i-14"></i>
+            </a>
           </div>
 
-          <div class="side-section" style="padding-left:0;margin-top:22px">按协作动作<span class="ann gap">G5.2 usage 分片维度</span></div>
+          <div class="side-section" style="padding-left:0;margin-top:22px">成本构成（跨会话）<span class="ann gap">G5.2 usage 分片维度</span></div>
           <div class="grid2">
             <div class="list">
-              <div class="list-row"><div class="grow"><div class="t1">delegate</div><div class="t2">5 笔 · 平均 $0.05</div></div><span class="when">$0.24</span></div>
-              <div class="list-row"><div class="grow"><div class="t1">consult</div><div class="t2">4 笔 · 平均 $0.02</div></div><span class="when">$0.07</span></div>
-              <div class="list-row"><div class="grow"><div class="t1">handoff</div><div class="t2">2 笔</div></div><span class="when">$0.16</span></div>
-              <div class="list-row"><div class="grow"><div class="t1">fork</div><div class="t2">1 笔 · context: all</div></div><span class="when">$0.19</span></div>
+              <div class="list-row"><div class="grow"><div class="t1">团队会话</div><div class="t2">2 个 · 其中协作开销 $0.75</div></div><span class="when">$1.47</span></div>
+              <div class="list-row"><div class="grow"><div class="t1">单兵会话</div><div class="t2">1 个 · 无协作开销</div></div><span class="when">$0.02</span></div>
+              <div class="list-row"><div class="grow"><div class="t1">单兵/团队均价</div><div class="t2">平均每个团队会话 $0.74，单兵 $0.02</div></div><span class="when">37×</span></div>
             </div>
             <div class="card" style="margin:0">
               <div class="card-head"><i data-icon="alert" class="i-16"></i><span class="name">MU / M6 前的显示纪律</span></div>
@@ -89,6 +110,13 @@
           <div class="prow sub"><span class="sdot done"></span><span>ok</span><span class="val">未过软线</span></div>
           <div class="prow sub"><span class="sdot run"></span><span>warning</span><span class="val">过软线，仍可跑</span></div>
           <div class="prow sub"><span class="sdot err"></span><span>frozen</span><span class="val">停新轮次，终态</span></div>
+        </div>
+        <div class="panel">
+          <div class="panel-title"><span>三层限额</span></div>
+          <div class="prow"><i data-icon="wallet" class="i-14"></i><span>全局</span><span class="val">$5.00 / 日</span></div>
+          <div class="prow"><i data-icon="users" class="i-14"></i><span>团队默认</span><span class="val">各队自定</span></div>
+          <div class="prow"><i data-icon="folder" class="i-14"></i><span>单会话</span><span class="val">继承团队，可下调</span></div>
+          <div class="hint" style="padding:2px 10px 8px">取更严者生效。当前内核只有全局一层。<span class="ann gap">G10.4</span></div>
         </div>
         <div class="panel">
           <div class="panel-title"><span>最近成本事件</span></div>

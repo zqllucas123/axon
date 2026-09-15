@@ -59,7 +59,7 @@
               <div class="tc-head">
                 <span class="ava-stack"><span class="ava lead">主</span><span class="ava">架</span><span class="ava">文</span></span>
                 <span class="spacer" style="flex:1"></span>
-                <span class="tag ok">read-only</span>
+                <span class="tag ok">全员只读</span>
               </div>
               <div class="tc-name">评审小队</div>
               <div class="tc-desc">只读团队：读码、评审、出文档，全员禁止写盘。</div>
@@ -86,7 +86,7 @@
                     <div class="t1">Axon5 · 主控 <span class="tag">lead</span> <span class="tag info">fork: all</span></div>
                     <div class="t2">类型 Axon5 · 负责拆解与收口，是会话的根节点；唯一默认带全上下文的类型。</div>
                   </div>
-                  <span class="tag">11 工具</span><span class="tag">full-auto</span>
+                  <span class="tag">11 工具</span><span class="tag">always_ask</span>
                   <button class="btn sm ghost">编辑</button>
                 </div>
                 <div class="list-row">
@@ -95,7 +95,7 @@
                     <div class="t1">架构师 #A <span class="tag">类型 架构师</span></div>
                     <div class="t2">定方案、不写码；可 consult / delegate，禁止写盘。</div>
                   </div>
-                  <span class="tag">8 工具</span><span class="tag">read-only</span>
+                  <span class="tag">8 工具</span><span class="tag">always_ask</span>
                   <button class="btn sm ghost">编辑</button>
                 </div>
                 <div class="list-row">
@@ -104,7 +104,7 @@
                     <div class="t1">后端实现 #B <span class="tag">类型 后端实现</span> <span class="tag">覆写：模型 sonnet</span></div>
                     <div class="t2">写码 + 跑测试；破坏性命令需人批。Agent 级覆写只能<b>减能</b>，不能突破类型白名单。</div>
                   </div>
-                  <span class="tag">6 工具</span><span class="tag">write-confirm</span>
+                  <span class="tag">6 工具</span><span class="tag">always_ask</span>
                   <button class="btn sm ghost">编辑</button>
                 </div>
                 <div class="list-row">
@@ -113,7 +113,7 @@
                     <div class="t1">测试工程师 #C <span class="tag">类型 测试工程师</span></div>
                     <div class="t2">只跑测试与读代码，不改实现文件。</div>
                   </div>
-                  <span class="tag">5 工具</span><span class="tag">write-confirm</span>
+                  <span class="tag">5 工具</span><span class="tag">auto</span>
                   <button class="btn sm ghost">编辑</button>
                 </div>
                 <div class="list-row" style="color:var(--text-dim)">
@@ -172,27 +172,27 @@
               <span class="sdot done"></span>
               <div class="grow"><div class="t1">Axon5 <span class="tag">内置</span> <span class="tag info">fork: all</span></div>
                 <div class="t2">唯一默认带全上下文的类型；六编排工具全开，只当 lead 用。</div></div>
-              <span class="tag">11 工具</span><span class="tag">full-auto</span><span class="when">被 3 个团队引用</span>
+              <span class="tag">11 工具</span><span class="tag">always_ask</span><span class="when">被 3 个团队引用</span>
             </div>
             <div class="list-row">
               <span class="sdot done"></span>
               <div class="grow"><div class="t1">架构师 <span class="tag">内置</span></div><div class="t2">只读 + consult/delegate；不许写盘。</div></div>
-              <span class="tag">8 工具</span><span class="tag">read-only</span><span class="when">2 个团队</span>
+              <span class="tag">8 工具</span><span class="tag">always_ask</span><span class="when">2 个团队</span>
             </div>
             <div class="list-row">
               <span class="sdot done"></span>
               <div class="grow"><div class="t1">后端实现 <span class="tag">用户</span> <span class="tag">已覆盖内置</span></div><div class="t2">写码 + 跑测试；破坏性命令需人批。</div></div>
-              <span class="tag">6 工具</span><span class="tag">write-confirm</span><span class="when">2 个团队</span>
+              <span class="tag">6 工具</span><span class="tag">always_ask</span><span class="when">2 个团队</span>
             </div>
             <div class="list-row">
               <span class="sdot done"></span>
               <div class="grow"><div class="t1">测试工程师 <span class="tag">用户</span></div><div class="t2">只跑测试与读代码，不改实现文件。</div></div>
-              <span class="tag">5 工具</span><span class="tag">write-confirm</span><span class="when">2 个团队</span>
+              <span class="tag">5 工具</span><span class="tag">auto</span><span class="when">2 个团队</span>
             </div>
             <div class="list-row">
               <span class="sdot err"></span>
               <div class="grow"><div class="t1">数据迁移 <span class="tag">用户</span> <span class="tag err">配置错</span></div>
-                <div class="t2">~/.axon/roles/migrator.json：approval 取值 "auto" 不在枚举内（read-only / write-confirm / full-auto）。引用它的团队无法开会话。</div></div>
+                <div class="t2">~/.axon/roles/migrator.json：approval 取值 "yolo" 不在枚举内。引用它的团队无法开会话。<span class="ann gap">枚举以 packages/protocol/src/agent.ts:162 为准，本屏 chip 已改用代码值（always_ask / auto / full_access），见 docs/ux/03-设置界面设计.md §7 D-1</span></div></div>
               <span class="tag">6 工具</span><span class="tag err">invalid</span><span class="when">0 个团队</span>
             </div>
           </div>
