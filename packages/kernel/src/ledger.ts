@@ -58,6 +58,13 @@ export interface LedgerOptions {
   maxRecords?: number;
   /** 随机后缀生成器；测试里注入常量以获得确定性 id。 */
   suffix?: () => string;
+  /**
+   * 每次账目变动后的回调（M5 切片 3 的落盘挂点）。
+   *
+   * 只在**真的发生变动**时触发（幂等命中、重复 settle 不触发）；拿到的是副本。
+   * 约定：落盘实现自己把失败变成 issue，不从回调里往外抛（SessionPersistence 即如此）。
+   */
+  onChange?: (record: LedgerRecord) => void;
 }
 
 const ZERO_USAGE: UsageTotals = { inputTokens: 0, outputTokens: 0, costUsd: 0 };
@@ -87,6 +94,7 @@ export class Ledger {
   private readonly now: () => number;
   private readonly maxRecords: number;
   private readonly suffix: () => string;
+  private readonly onChange: ((record: LedgerRecord) => void) | undefined;
   private seq = 0;
   /** 因超出上限被丢弃的最旧记录数，UI 可提示「更早的记录已截断」。 */
   private droppedCount = 0;
@@ -95,6 +103,33 @@ export class Ledger {
     this.now = options.now ?? (() => Date.now());
     this.maxRecords = options.maxRecords ?? LEDGER_MAX_RECORDS;
     this.suffix = options.suffix ?? (() => Math.random().toString(36).slice(2, 8));
+    this.onChange = options.onChange;
+  }
+
+  /**
+   * 从落盘记录装载（M5 切片 3）。
+   *
+   * 三件事：记录进 Map（保持传入顺序 = 磁盘上的首次出现序，last-wins 已由读侧完成）；
+   * 重建 `byToolCall` 幂等索引（否则重启后模型重试会再落一笔同源账）；
+   * 把 `seq` 推到已用最大序号之后（否则新账目会与旧 id 撞号）。
+   *
+   * `usageBaselines` 刻意不重建：它是**进程内的**「上次观测」，跨重启没有意义，
+   * 而错灌一个旧基线会让 settle 的增量算出负数（被钳成 0，于是归因永远是 0）。
+   */
+  load(records: readonly LedgerRecord[]): void {
+    for (const r of records) {
+      if (this.records.has(r.id)) continue;
+      this.records.set(r.id, structuredClone(r));
+      this.byToolCall.set(r.origin.toolCallId, r.id);
+      const m = /^L(\d+)-/.exec(r.id);
+      if (m?.[1]) this.seq = Math.max(this.seq, Number(m[1]));
+    }
+    this.evictIfNeeded();
+  }
+
+  /** 变动通知（见 LedgerOptions.onChange）。 */
+  private notify(record: LedgerRecord): void {
+    this.onChange?.(structuredClone(record));
   }
 
   get dropped(): number {
@@ -148,6 +183,7 @@ export class Ledger {
     this.byToolCall.set(spec.origin.toolCallId, id);
     if (spec.usageBaseline) this.usageBaselines.set(id, { ...spec.usageBaseline });
     this.evictIfNeeded();
+    if (this.records.has(id)) this.notify(record);
     return structuredClone(record);
   }
 
@@ -181,6 +217,7 @@ export class Ledger {
     }
     if (spec.summary !== undefined) record.summary = truncateSummary(spec.summary);
     this.usageBaselines.delete(id);
+    this.notify(record);
     return structuredClone(record);
   }
 
@@ -198,6 +235,7 @@ export class Ledger {
     record.adoptedAt = this.now();
     record.adoptedBy = by;
     if (note !== undefined) record.adoptedNote = note;
+    this.notify(record);
     return structuredClone(record);
   }
 
@@ -209,6 +247,7 @@ export class Ledger {
     const record = this.records.get(id);
     if (!record) return null;
     record.adoptedNote = note;
+    this.notify(record);
     return structuredClone(record);
   }
 

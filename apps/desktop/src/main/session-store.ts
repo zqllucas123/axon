@@ -9,6 +9,10 @@
  * 为什么 rollup 不放在 host 里：会话汇总的字段会被三个屏消费（S0 最近用过、
  * S1 会话总览、S2 会话条），它一旦长在宿主内部，就只能通过 IPC 事件整块传出，
  * 测试与 UI 都失去了「自己造一份原料算一遍」的能力。纯函数则可以穷举。
+ *
+ * M5 起**没有条数上限**（R9）：磁盘是全景，内存也应当是全景 —— 淘汰是单机内存
+ * 时代的产物，留着会让用户的会话「自己消失」。返回多少条由 `list(query.limit)`
+ * 决定（缺省 50）。
  */
 
 import {
@@ -37,27 +41,54 @@ const ZERO_USAGE: UsageTotals = { inputTokens: 0, outputTokens: 0, costUsd: 0 };
 
 export interface SessionStoreOptions {
   now?: () => number;
-  /** 条数上限：超出丢最旧的（内存态；M5 落盘后改为分页）。 */
-  maxRecords?: number;
+  /** 初始记录 —— 启动装载（M5 §4.5）。 */
+  records?: readonly SessionRecord[];
+  /**
+   * 记录变动回调（M5 落盘挂点）：create / update / remove 各触发一次。
+   *
+   * 与 `Ledger.onChange` 同款约定：落盘实现自己把失败变成 issue，不往外抛。
+   * 挂在这里而不是宿主里，是为了让「哪些命令要落盘」这件事只有一处答案。
+   */
+  onChange?: (event: SessionStoreChange) => void;
+}
+
+export interface SessionStoreChange {
+  kind: 'create' | 'update' | 'remove';
+  record: SessionRecord;
 }
 
 export class SessionStore {
   private readonly records = new Map<string, SessionRecord>();
   private readonly now: () => number;
-  private readonly maxRecords: number;
+  private readonly onChange: ((event: SessionStoreChange) => void) | undefined;
 
   constructor(options: SessionStoreOptions = {}) {
     this.now = options.now ?? (() => Date.now());
-    this.maxRecords = options.maxRecords ?? 200;
+    this.onChange = options.onChange;
+    if (options.records) this.load(options.records);
   }
 
   get size(): number {
     return this.records.size;
   }
 
+  /**
+   * 装入启动时扫到的记录（M5 切片 3）。
+   *
+   * 幂等：同 id 不覆盖（先到的赢 —— 与 `Ledger.load` 同一约定）。
+   * **不触发 onChange**：装载是「把磁盘上的东西搬进内存」，再落一次盘
+   * 会在每次启动时把所有 session.json 重写一遍（既无意义，也把
+   * 「文件被外部改坏」的现场覆盖掉）。
+   */
+  load(records: readonly SessionRecord[]): void {
+    for (const r of records) {
+      if (!this.records.has(r.id)) this.records.set(r.id, { ...r });
+    }
+  }
+
   create(record: SessionRecord): SessionRecord {
     this.records.set(record.id, { ...record });
-    this.evictIfNeeded();
+    this.onChange?.({ kind: 'create', record: { ...record } });
     return { ...record };
   }
 
@@ -93,6 +124,7 @@ export class SessionStore {
       (r as unknown as Record<string, unknown>)[k] = v;
     }
     r.updatedAt = this.now();
+    this.onChange?.({ kind: 'update', record: { ...r } });
     return { ...r };
   }
 
@@ -100,23 +132,8 @@ export class SessionStore {
     const r = this.records.get(id);
     if (!r) return undefined;
     this.records.delete(id);
+    this.onChange?.({ kind: 'remove', record: { ...r } });
     return { ...r };
-  }
-
-  /** 超出上限时丢最旧（不是最久没更新的 —— 会话一旦丢了就不该再回来找）。 */
-  private evictIfNeeded(): void {
-    while (this.records.size > this.maxRecords) {
-      let oldestId: string | undefined;
-      let oldestAt = Number.POSITIVE_INFINITY;
-      for (const r of this.records.values()) {
-        if (r.createdAt < oldestAt) {
-          oldestAt = r.createdAt;
-          oldestId = r.id;
-        }
-      }
-      if (!oldestId) break;
-      this.records.delete(oldestId);
-    }
   }
 }
 

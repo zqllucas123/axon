@@ -335,3 +335,128 @@ describe('truncateSummary', () => {
     expect(truncateSummary('abcdefghijk', 5)).toBe('abcde…');
   });
 });
+
+// ─────────────────────────────────────────────────────────────
+// M5 切片 3：load / onChange
+// ─────────────────────────────────────────────────────────────
+
+const REC = (over: Record<string, unknown> = {}) => ({
+  version: LEDGER_SCHEMA_VERSION,
+  id: 'L00000007-a',
+  sessionId: 's1',
+  action: 'delegate' as const,
+  from: '/s1',
+  to: '/s1/dev-1',
+  origin: { tool: 'agent', toolCallId: 'call_old' },
+  mention: 'mention://agent-session/dev-1',
+  adoption: 'pending' as const,
+  status: 'open' as const,
+  at: 1,
+  ...over,
+});
+
+describe('Ledger.load（M5）', () => {
+  test('装载后可查；byToolCall 幂等键重建（同 toolCallId 不再落第二笔）', () => {
+    const ledger = makeLedger();
+    ledger.load([REC(), REC({ id: 'L00000009-b', origin: { tool: 'agent', toolCallId: 'call_2' } })]);
+
+    expect(ledger.size).toBe(2);
+    expect(ledger.get('L00000007-a')?.status).toBe('open');
+
+    const again = ledger.record({
+      action: 'delegate',
+      from: '/s1',
+      to: '/s1/dev-1',
+      origin: { tool: 'agent', toolCallId: 'call_old' },
+    });
+    expect(again.id).toBe('L00000007-a');
+    expect(ledger.size).toBe(2);
+  });
+
+  test('seq 续到已用最大序号之后（新账目不与旧 id 撞号）', () => {
+    const ledger = makeLedger();
+    ledger.load([REC()]);
+    const fresh = ledger.record({
+      action: 'consult',
+      from: '/s1',
+      to: '/s1/dev-2',
+      origin: { tool: 'agent', toolCallId: 'call_new' },
+    });
+    expect(fresh.id.startsWith('L00000008-')).toBe(true);
+  });
+
+  test('重复 id 不被覆盖（先到先得；last-wins 是读侧的活）', () => {
+    const ledger = makeLedger();
+    ledger.load([REC()]);
+    ledger.load([REC({ status: 'settled', settledAt: 99 })]);
+    expect(ledger.get('L00000007-a')?.status).toBe('open');
+    expect(ledger.size).toBe(1);
+  });
+
+  test('装载的 open 记录可被结算（重启结算走的就是这条路，usage 留空）', () => {
+    const ledger = makeLedger();
+    ledger.load([REC()]);
+    const settled = ledger.settle('L00000007-a', { summary: '应用重启，未及结算' });
+    expect(settled?.status).toBe('settled');
+    expect(settled?.summary).toBe('应用重启，未及结算');
+    expect(settled?.usage).toBeUndefined();
+  });
+});
+
+describe('Ledger.onChange（M5 落盘挂点）', () => {
+  test('record / settle / adopt / adoptNote 各触发一次，拿到的是副本', () => {
+    const seen: string[] = [];
+    const ledger = new Ledger({
+      now: () => 1_000,
+      suffix: () => 'x',
+      onChange: (r) => seen.push(`${r.id}|${r.status}|${r.adoption}`),
+    });
+    const rec = ledger.record({
+      action: 'delegate',
+      from: '/s1',
+      to: '/s1/dev-1',
+      origin: { tool: 'agent', toolCallId: 'c1' },
+    });
+    ledger.settle(rec.id, { summary: '做完' });
+    ledger.adopt(rec.id, 'adopted', { kind: 'human' });
+    ledger.adoptNote(rec.id, '补一句');
+
+    expect(seen).toEqual([
+      `${rec.id}|open|pending`,
+      `${rec.id}|settled|pending`,
+      `${rec.id}|settled|adopted`,
+      `${rec.id}|settled|adopted`,
+    ]);
+    expect(ledger.get(rec.id)?.adoption).toBe('adopted');
+  });
+
+  test('幂等命中与重复 settle 不触发（否则重启后重放会写一堆假历史）', () => {
+    let calls = 0;
+    const ledger = new Ledger({
+      suffix: () => 'x',
+      onChange: () => {
+        calls += 1;
+      },
+    });
+    const rec = ledger.record({
+      action: 'delegate',
+      from: '/s1',
+      to: '/s1/dev-1',
+      origin: { tool: 'agent', toolCallId: 'c1' },
+    });
+    expect(calls).toBe(1);
+
+    ledger.record({
+      action: 'delegate',
+      from: '/s1',
+      to: '/s1/dev-1',
+      origin: { tool: 'agent', toolCallId: 'c1' },
+    });
+    expect(calls).toBe(1);
+
+    ledger.settle(rec.id);
+    expect(calls).toBe(2);
+    ledger.settle(rec.id);
+    expect(calls).toBe(2);
+  });
+});

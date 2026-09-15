@@ -107,14 +107,62 @@ describe('SessionStore · CRUD 与副本纪律', () => {
     expect(store.size).toBe(0);
   });
 
-  it('超出 maxRecords 丢**最旧**的（不是最久没更新的）', () => {
-    const store = new SessionStore({ maxRecords: 2 });
-    store.create(record('s1', { createdAt: 100 }));
-    store.create(record('s2', { createdAt: 200 }));
-    store.create(record('s3', { createdAt: 300 }));
+  it('M5 起不再淘汰：会话不会「自己消失」（返回条数由 list.limit 决定）', () => {
+    const store = new SessionStore();
+    for (let i = 1; i <= 250; i += 1) store.create(record(`s${i}`, { createdAt: i }));
 
-    expect(store.has('s1')).toBe(false);
-    expect(store.list().map((r) => r.id)).toEqual(['s3', 's2']);
+    expect(store.size).toBe(250);
+    expect(store.has('s1')).toBe(true);
+    expect(store.list().length).toBe(50); // 缺省 50（R9）
+    expect(store.list({ limit: 3 }).map((r) => r.id)).toEqual(['s250', 's249', 's248']);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────
+// M5 切片 3：装载与落盘回调
+// ─────────────────────────────────────────────────────────────
+
+describe('SessionStore · 装载与 onChange（M5）', () => {
+  it('构造时注入 records（启动装载）；同 id 不覆盖', () => {
+    const store = new SessionStore({
+      records: [record('s1', { title: '磁盘上的' }), record('s2')],
+    });
+    expect(store.size).toBe(2);
+    store.load([record('s1', { title: '后来的' })]);
+    expect(store.get('s1')?.title).toBe('磁盘上的');
+  });
+
+  it('load() 不触发 onChange（否则每次启动都会重写全部 session.json）', () => {
+    const events: string[] = [];
+    const store = new SessionStore({ onChange: (e) => events.push(e.kind) });
+    store.load([record('s1')]);
+    expect(events).toEqual([]);
+  });
+
+  it('create / update / remove 各触发一次，带记录副本', () => {
+    const events: { kind: string; id: string; title: string }[] = [];
+    const store = new SessionStore({
+      now: () => 9_000,
+      onChange: (e) => events.push({ kind: e.kind, id: e.record.id, title: e.record.title }),
+    });
+    store.create(record('s1', { title: 'A' }));
+    store.update('s1', { title: 'B' });
+    store.remove('s1');
+
+    expect(events).toEqual([
+      { kind: 'create', id: 's1', title: 'A' },
+      { kind: 'update', id: 's1', title: 'B' },
+      { kind: 'remove', id: 's1', title: 'B' },
+    ]);
+    expect(store.size).toBe(0);
+  });
+
+  it('update 未命中不触发（没有记录就没有落盘）', () => {
+    let calls = 0;
+    const store = new SessionStore({ onChange: () => { calls += 1; } });
+    store.update('ghost', { title: 'x' });
+    store.remove('ghost');
+    expect(calls).toBe(0);
   });
 });
 
