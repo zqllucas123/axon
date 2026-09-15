@@ -17,6 +17,7 @@
  * session.json 走原子写（tmp + rename）；**不做 fsync**（显式取舍）。
  */
 
+import { readFileSync, readdirSync } from 'node:fs';
 import { appendFile, mkdir, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises';
 import { basename, dirname, join, relative } from 'node:path';
 import {
@@ -55,12 +56,15 @@ export type WriteResult = { ok: true } | { ok: false; error: string };
 
 export interface SessionPersistenceIO {
   readFile(path: string): Promise<string>;
+  /** 同步读（懒加载走它，见 `loadSessionSync`）。 */
+  readFileSync(path: string): string;
   writeFile(path: string, data: string): Promise<void>;
   appendFile(path: string, data: string): Promise<void>;
   rename(from: string, to: string): Promise<void>;
   mkdir(dir: string): Promise<void>;
   /** 目录不存在时 reject（调用方按 ENOENT 判定「没有」）。 */
   readdir(dir: string): Promise<string[]>;
+  readdirSync(dir: string): string[];
   rm(path: string, options: { recursive: boolean; force: boolean }): Promise<void>;
 }
 
@@ -82,6 +86,13 @@ export interface SessionListItem {
   rollup?: SessionRollup;
 }
 
+/** 三种文件的原始文本（装载的中间形态：先读齐、再解析）。 */
+interface SessionTexts {
+  session?: string;
+  agents: { name: string; text: string }[];
+  ledger?: string;
+}
+
 /** 一个会话的全部落盘内容（懒加载时读一次）。 */
 export interface LoadedSession {
   record: SessionRecord;
@@ -92,11 +103,13 @@ export interface LoadedSession {
 
 const fsIO: SessionPersistenceIO = {
   readFile: (p) => readFile(p, 'utf8'),
+  readFileSync: (p) => readFileSync(p, 'utf8'),
   writeFile: (p, data) => writeFile(p, data, 'utf8'),
   appendFile: (p, data) => appendFile(p, data, 'utf8'),
   rename: (from, to) => rename(from, to),
   mkdir: (dir) => mkdir(dir, { recursive: true }).then(() => undefined),
   readdir: (dir) => readdir(dir),
+  readdirSync: (dir) => readdirSync(dir),
   rm: (p, o) => rm(p, o),
 };
 
@@ -253,9 +266,31 @@ export class SessionPersistence {
    */
   async loadSession(record: SessionRecord): Promise<LoadedSession> {
     const paths = this.pathsOf(record);
+    return this.assembleSession(record, paths, await this.readTexts(paths, record.id));
+  }
+
+  /**
+   * 同步装载（懒加载：用户点开哪个会话才读哪个会话）。
+   *
+   * 为什么必须是同步：`host.getSession()` / `queryLedger()` 都是同步 API，
+   * 而懒加载要在它们返回之前把树与账本装进内存 —— 否则「点开会话」的第一帧
+   * 是空树（§4.5 的图：`session.get` 触发 `ensureSessionLoaded`）。读的只是
+   * 这一个会话的几个小文件，M5 明确接受这一次同步读（§六 R4）。
+   */
+  loadSessionSync(record: SessionRecord): LoadedSession {
+    const paths = this.pathsOf(record);
+    return this.assembleSession(record, paths, this.readTextsSync(paths, record.id));
+  }
+
+  /** 装载的解析与容错（同步/异步两条路径共用同一套逻辑，行为不会漂移）。 */
+  private assembleSession(
+    record: SessionRecord,
+    paths: SessionPaths,
+    texts: SessionTexts,
+  ): LoadedSession {
     const out: LoadedSession = { record, agents: [], ledger: [] };
 
-    const sessionText = await this.readFileOrIssue(paths.sessionFile, record.id);
+    const sessionText = texts.session;
     if (sessionText !== undefined) {
       const parsed = parseSessionFile(sessionText, {
         at: this.now(),
@@ -269,21 +304,8 @@ export class SessionPersistence {
       }
     }
 
-    let names: string[];
-    try {
-      names = await this.io.readdir(paths.agentsDir);
-    } catch (err) {
-      if (!isNotFound(err)) {
-        this.pushIssue('unreadable-dir', paths.agentsDir, `读 agents 目录失败：${errText(err)}`, record.id);
-      }
-      names = [];
-    }
-
-    for (const name of names.sort()) {
-      if (!isTranscriptFileName(name)) continue;
+    for (const { name, text } of texts.agents) {
       const file = join(paths.agentsDir, name);
-      const text = await this.readFileOrIssue(file, record.id);
-      if (text === undefined) continue;
       const parsed = parseTranscriptFile(text, {
         at: this.now(),
         sessionId: record.id,
@@ -302,7 +324,7 @@ export class SessionPersistence {
       out.agents.push(parsed);
     }
 
-    const ledgerText = await this.readFileOrIssue(paths.ledgerFile, record.id);
+    const ledgerText = texts.ledger;
     if (ledgerText !== undefined) {
       const parsed = parseLedgerFile(ledgerText, {
         at: this.now(),
@@ -314,6 +336,66 @@ export class SessionPersistence {
     }
 
     return out;
+  }
+
+  /** 三种文件的原始文本（`undefined` = 文件不存在，不是错误）。 */
+  private async readTexts(paths: SessionPaths, sessionId: string): Promise<SessionTexts> {
+    const texts: SessionTexts = { agents: [] };
+    const sessionText = await this.readFileOrIssue(paths.sessionFile, sessionId);
+    if (sessionText !== undefined) texts.session = sessionText;
+    const ledgerText = await this.readFileOrIssue(paths.ledgerFile, sessionId);
+    if (ledgerText !== undefined) texts.ledger = ledgerText;
+    for (const name of await this.listTranscripts(paths, sessionId)) {
+      const text = await this.readFileOrIssue(join(paths.agentsDir, name), sessionId);
+      if (text !== undefined) texts.agents.push({ name, text });
+    }
+    return texts;
+  }
+
+  private readTextsSync(paths: SessionPaths, sessionId: string): SessionTexts {
+    const texts: SessionTexts = { agents: [] };
+    const sessionText = this.readFileOrIssueSync(paths.sessionFile, sessionId);
+    if (sessionText !== undefined) texts.session = sessionText;
+    const ledgerText = this.readFileOrIssueSync(paths.ledgerFile, sessionId);
+    if (ledgerText !== undefined) texts.ledger = ledgerText;
+    for (const name of this.listTranscriptsSync(paths, sessionId)) {
+      const text = this.readFileOrIssueSync(join(paths.agentsDir, name), sessionId);
+      if (text !== undefined) texts.agents.push({ name, text });
+    }
+    return texts;
+  }
+
+  /** 目录里的 transcript 文件名（排序固定，恢复顺序不随机）。 */
+  private async listTranscripts(paths: SessionPaths, sessionId: string): Promise<string[]> {
+    try {
+      return (await this.io.readdir(paths.agentsDir)).filter(isTranscriptFileName).sort();
+    } catch (err) {
+      if (!isNotFound(err)) {
+        this.pushIssue('unreadable-dir', paths.agentsDir, `读 agents 目录失败：${errText(err)}`, sessionId);
+      }
+      return [];
+    }
+  }
+
+  private listTranscriptsSync(paths: SessionPaths, sessionId: string): string[] {
+    try {
+      return this.io.readdirSync(paths.agentsDir).filter(isTranscriptFileName).sort();
+    } catch (err) {
+      if (!isNotFound(err)) {
+        this.pushIssue('unreadable-dir', paths.agentsDir, `读 agents 目录失败：${errText(err)}`, sessionId);
+      }
+      return [];
+    }
+  }
+
+  private readFileOrIssueSync(path: string, sessionId: string): string | undefined {
+    try {
+      return this.io.readFileSync(path);
+    } catch (err) {
+      if (isNotFound(err)) return undefined;
+      this.pushIssue('unreadable-dir', path, `读文件失败：${errText(err)}`, sessionId);
+      return undefined;
+    }
   }
 
   private async readFileOrIssue(path: string, sessionId: string): Promise<string | undefined> {

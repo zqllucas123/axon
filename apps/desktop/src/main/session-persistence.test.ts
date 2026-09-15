@@ -483,3 +483,57 @@ describe('SessionPersistence · 落盘形状', () => {
     expect(raw.record).toEqual(rec);
   });
 });
+
+// ─────────────────────────────────────────────────────────────
+// 同步装载（懒加载：host.getSession / queryLedger 是同步 API）
+// ─────────────────────────────────────────────────────────────
+
+describe('session-persistence · loadSessionSync', () => {
+  it('与异步装载同结果：header / 消息 / 状态 / 账本逐项一致', async () => {
+    const root = await tempRoot();
+    const p = new SessionPersistence({ root });
+    const rec = record();
+    const h = header('/s1abc-def0');
+    await p.createSession(rec, [h]);
+    await p.appendMessage(rec, h.path, MSG, 1_758_000_002_000);
+    await p.appendState(rec, h.path, { at: 1_758_000_003_000, status: 'done' });
+    await p.writeLedgerHeader(rec);
+    await p.flush();
+
+    const asyncLoaded = await p.loadSession(rec);
+    const syncLoaded = p.loadSessionSync(rec);
+    expect(syncLoaded.record).toEqual(asyncLoaded.record);
+    expect(syncLoaded.agents.map((a) => a.header?.path)).toEqual(
+      asyncLoaded.agents.map((a) => a.header?.path),
+    );
+    expect(syncLoaded.agents[0]?.messages).toEqual(asyncLoaded.agents[0]?.messages);
+    expect(syncLoaded.agents[0]?.states).toEqual(asyncLoaded.agents[0]?.states);
+    expect(syncLoaded.ledger).toEqual(asyncLoaded.ledger);
+    expect(p.issues()).toEqual([]);
+  });
+
+  it('会话目录还不存在：返回空壳，不报错也不记 issue（新会话尚未落盘）', async () => {
+    const root = await tempRoot();
+    const p = new SessionPersistence({ root });
+    const loaded = p.loadSessionSync(record({ id: 'sghost000-0000' }));
+    expect(loaded.agents).toEqual([]);
+    expect(loaded.ledger).toEqual([]);
+    expect(p.issues()).toEqual([]);
+  });
+
+  it('坏行照旧容错：同步路径的 issue 与异步路径一致（同一套解析）', async () => {
+    const root = await tempRoot();
+    const p = new SessionPersistence({ root });
+    const rec = record();
+    await p.createSession(rec, [header('/s1abc-def0')]);
+    await p.flush();
+    // 手工往 transcript 里插一行垃圾（模拟外部改坏）
+    const file = join(sessionPaths(root, rec.cwd, rec.id).agentsDir, 's1abc-def0.jsonl');
+    await writeFile(file, (await readFile(file, 'utf8')) + '{ 这不是 JSON\n', 'utf8');
+
+    const p2 = new SessionPersistence({ root });
+    const syncLoaded = p2.loadSessionSync(rec);
+    expect(kinds(p2.issues())).toContain('corrupt-line');
+    expect(syncLoaded.agents[0]?.header?.path).toBe('/s1abc-def0'); // 坏行不影响好行
+  });
+});
