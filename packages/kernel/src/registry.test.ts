@@ -13,7 +13,8 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { sessionRootPath } from '@axon/protocol';
+import { sessionRootPath, type AgentSnapshot } from '@axon/protocol';
+import type { AxonEngine } from './engine.ts';
 import { AgentRegistry, type RegisterSpec } from './registry.ts';
 
 /**
@@ -397,5 +398,79 @@ describe('AgentRegistry —— 快照隔离', () => {
     add({ role: 'a', displayName: 'A' });
     expect(registry.list().length).toBe(3);
     expect(registry.listOf('s1').length).toBe(2);
+  });
+});
+
+describe('AgentRegistry —— restoreNodes（M5 落盘恢复）', () => {
+  const ZERO = { inputTokens: 0, outputTokens: 0, costUsd: 0 };
+  const snap = (path: string, over: Partial<AgentSnapshot> = {}): AgentSnapshot => ({
+    path,
+    role: 'dev',
+    displayName: 'D',
+    status: 'idle',
+    children: [],
+    createdAt: 1,
+    updatedAt: 1,
+    usage: { ...ZERO },
+    sessionId: 's1',
+    ...over,
+  });
+  const fresh = () => new AgentRegistry({ now: () => 1_000 });
+
+  it('按深度重建（乱序也能建起来），并保留 children', () => {
+    const r = fresh();
+    const root = snap('/s1', { role: 'root', children: ['/s1/dev-1'] });
+    const child = snap('/s1/dev-1', { parent: '/s1' });
+    const res = r.restoreNodes([child, root]); // 故意乱序
+
+    expect(res.restored).toEqual(['/s1', '/s1/dev-1']);
+    expect(res.skipped).toEqual([]);
+    expect(r.snapshot('/s1/dev-1')?.parent).toBe('/s1');
+    expect(r.snapshot('/s1')?.children).toEqual(['/s1/dev-1']);
+    expect(r.depthOf('/s1/dev-1')).toBe(1);
+  });
+
+  it('序号重建：恢复后新成员不会与旧路径重名', () => {
+    const r = fresh();
+    r.restoreNodes([
+      snap('/s1', { role: 'root' }),
+      snap('/s1/dev-3', { parent: '/s1', role: 'dev' }),
+    ]);
+    const next = r.register({ parent: '/s1', role: 'dev', displayName: 'D2' });
+    expect(next.path).toBe('/s1/dev-4');
+  });
+
+  it('父缺失 → 跳过并报出来（不把孤儿挂到会话根上）', () => {
+    const r = fresh();
+    const res = r.restoreNodes([
+      snap('/s1', { role: 'root' }),
+      snap('/s1/dev-1', { parent: '/s1/dev-9' }),
+    ]);
+    expect(res.restored).toEqual(['/s1']);
+    expect(res.skipped).toEqual(['/s1/dev-1']);
+    expect(r.has('/s1/dev-1')).toBe(false);
+  });
+
+  it('悬空 children 被清理并报出来（磁盘树与内存树不一致要能解释）', () => {
+    const r = fresh();
+    const res = r.restoreNodes([
+      snap('/s1', { role: 'root', children: ['/s1/dev-1', '/s1/gone-2'] }),
+      snap('/s1/dev-1', { parent: '/s1' }),
+    ]);
+    expect(res.dangling).toEqual(['/s1/gone-2']);
+    expect(r.snapshot('/s1')?.children).toEqual(['/s1/dev-1']);
+  });
+
+  it('重复路径跳过；引擎按 engines 注入（懒加载时才有实例）', () => {
+    const r = fresh();
+    const engine = { kind: 'fake' } as unknown as AxonEngine;
+    const res = r.restoreNodes([snap('/s1', { role: 'root' })], {
+      engines: new Map([['/s1', engine]]),
+    });
+    expect(res.restored).toEqual(['/s1']);
+    expect(r.get('/s1')?.engine).toBe(engine);
+
+    const again = r.restoreNodes([snap('/s1', { role: 'root' })]);
+    expect(again.skipped).toEqual(['/s1']);
   });
 });
