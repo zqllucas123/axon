@@ -23,6 +23,7 @@
     "dev": "bun run build:desktop && env -u ELECTRON_RUN_AS_NODE electron apps/desktop/dist/main.mjs",
     "verify-lazy": "bun run scripts/verify-lazy-loading.mjs",
     "ui-smoke": "bun run build:desktop && bun scripts/ui-smoke.mjs",
+    "ui-shot": "bun run build:desktop && bun scripts/ui-shot.mjs",
     "example:real": "bun run examples/real-model-spike.ts",
     "example:orchestration": "bun run examples/real-orchestration-spike.ts"
   },

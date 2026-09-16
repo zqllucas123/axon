@@ -64,3 +64,35 @@ function cleanup(code) {
   if (proc) proc.kill('SIGKILL');
   process.exit(code);
 }
+
+try {
+  const send = await connect();
+  for (let i = 0; i < 40; i++) {
+    if (await evalJs(`typeof window.axon?.invoke === 'function'`)) break;
+    await sleep(250);
+  }
+  await sleep(900); // 首屏拉取（storage/session/role/team/budget）的往返
+  console.log('✓ 桥接可用');
+
+  if (initJs) {
+    console.log('  … 跑 init');
+    await evalJs(initJs);
+    await sleep(1500);
+  }
+
+  await mkdir(outDir, { recursive: true });
+  for (const item of shots) {
+    const [name, hook] = item.split('=');
+    await evalJs(`document.querySelector('[data-smoke="${hook}"]')?.click()`);
+    await sleep(700);
+    const r = await send('Page.captureScreenshot', { format: 'png' });
+    const file = join(outDir, `${name}.png`);
+    await writeFile(file, Buffer.from(r.data, 'base64'));
+    console.log(`  📷 ${file}`);
+  }
+  console.log(`\n✓ 截图完成 → ${outDir}`);
+  cleanup(0);
+} catch (err) {
+  console.error('✗ 截图失败:', err?.message ?? err);
+  cleanup(1);
+}
