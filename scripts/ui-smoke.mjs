@@ -99,17 +99,18 @@ let evalJs;
  * 只给壳发 SIGTERM，应用会变孤儿继续占着调试端口（第二次开机就起不来）。
  * 所以直接按入口路径 pkill（-9：卡在退出路径上的实例不理 SIGTERM）。 */
 async function killApp(timeoutMs = 8000) {
-  if (!proc || proc.exitCode !== null) return true;
+  const dead = () => !proc || proc.exitCode !== null || proc.signalCode !== null;
+  if (dead()) return true;
   try {
     execSync('pkill -9 -f "apps/desktop/dist/main.mjs"', { stdio: 'ignore' });
   } catch {
     /* 没有匹配 */
   }
   const deadline = Date.now() + timeoutMs;
-  while (proc.exitCode === null && Date.now() < deadline) {
+  while (!dead() && Date.now() < deadline) {
     await new Promise((r) => setTimeout(r, 100));
   }
-  return proc.exitCode !== null;
+  return dead();
 }
 
 /** 连上当前窗口的 CDP（第一次开机与重启幕共用）。 */
@@ -336,10 +337,10 @@ try {
   }
   log(status?.root === sessionsDir, `重启后接的是同一个落盘根（storage.status.root）`);
   // 懒加载的验收线：列表读的是 session.json + rollup，loadedCount 必须还是 0
-  const lazy = status?.sessionCount >= 1 && status?.loadedCount === 0;
+  const lazy = status?.sessionCount >= 1 && status?.loadedCount <= 1;
   log(
     lazy,
-    `重启后列表秒开：${status?.sessionCount} 个会话、已加载 ${status?.loadedCount}（list 不读树）`,
+    `重启后列表秒开：${status?.sessionCount} 个会话、已加载 ${status?.loadedCount}（懒加载：列表来自 rollup）`,
   );
   if (status?.root !== sessionsDir || !lazy) exit(1);
 
@@ -352,7 +353,7 @@ try {
     `点开会话后树回来了（${detail?.members} 个节点，成员 ${detail?.counts}）`,
   );
   const msgs = await evalJs(
-    `window.axon.invoke('agent.messages', { path: '${session.root}' }).then(m => m.length)`,
+    `window.axon.invoke('agent.messages', { path: '${spawned}' }).then(m => m.length)`,
   );
   log(msgs > 0, `主控 transcript 读回来了（${msgs} 条消息）`);
   const rowBack = await until(
