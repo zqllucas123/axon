@@ -48,6 +48,8 @@ export function S3Teams(): ReactElement {
   );
 
   return (
+    <div className="body">
+      <section className="canvas">
     <div className="page page-wide">
       <div className="page-head">
         <h1>团队管理</h1>
@@ -156,6 +158,8 @@ export function S3Teams(): ReactElement {
       <div className="hint" style={{ marginTop: 18 }}>
         类型编辑与团队成员编辑在切片 8 落地（复用旧 RoleEditor 能力，样式重做）。
       </div>
+    </div>
+      </section>
     </div>
   );
 }

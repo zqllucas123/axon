@@ -19,6 +19,8 @@ export function S1Workbench(): ReactElement {
   const costTotal = sessions.reduce((n, s) => n + (s.usage.costUsd ?? 0), 0);
 
   return (
+    <div className="body">
+      <section className="canvas">
     <div className="page page-wide">
       <div className="page-head">
         <h1>会话总览</h1>
@@ -111,6 +113,8 @@ export function S1Workbench(): ReactElement {
           </div>
         </>
       ) : null}
+    </div>
+      </section>
     </div>
   );
 }

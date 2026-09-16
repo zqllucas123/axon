@@ -7,7 +7,6 @@ import type { ReactElement } from 'react';
 import { useApp } from '../state/store.tsx';
 import { Sidebar } from './Sidebar.tsx';
 import { Topbar } from './Topbar.tsx';
-import { Inspector } from './Inspector.tsx';
 import { S0NewSession } from './S0NewSession.tsx';
 import { S1Workbench } from './S1Workbench.tsx';
 import { S2Session } from './S2Session.tsx';
@@ -54,14 +53,10 @@ export function Shell(): ReactElement {
       <div className="main">
         <Topbar />
         <ErrorBar />
-        <div className="body">
-          <div className="col">
-            <div className="canvas">
-              <Screen />
-            </div>
-          </div>
-          <Inspector />
-        </div>
+        {/* 主区以下由各屏自己排（原型就是这么分的）：S0/S2 是 `.body > .col + .inspector`，
+            S1/S3 是 `.body > .canvas + .inspector`，S2 还在 body 之上多一条 session-bar。
+            外壳硬套一层 .col/.canvas 会逼各屏往外抠，反而失真。 */}
+        <Screen />
       </div>
     </div>
   );

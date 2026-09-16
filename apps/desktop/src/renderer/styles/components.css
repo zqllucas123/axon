@@ -628,3 +628,21 @@ table.tbl td.num { font-family: var(--font-mono); color: var(--text); }
 .inp.w-md { width: 210px; }
 .inp.w-sm { width: 78px; text-align: right; }
 .inp::placeholder { color: var(--text-dim); }
+
+/* 实现新增：原型把输入面写成占位 div（`.composer .ph`），实现里必须是真 <textarea>。
+   值取自 .ph（fs-15 / line-height 1.6 / min-height 46 / dim 占位色），补上控件自身的
+   outline/resize 归零 —— 不这么做就会出现浏览器默认的聚焦蓝框与右下角拖拽角。 */
+.composer textarea {
+  display: block;
+  width: 100%;
+  min-height: 46px;
+  border: 0;
+  background: none;
+  outline: none;
+  resize: none;
+  font-family: var(--font);
+  font-size: var(--fs-15);
+  line-height: 1.6;
+  color: var(--text);
+}
+.composer textarea::placeholder { color: var(--text-dim); }
