@@ -30,6 +30,7 @@ import type {
   ConfigSnapshot,
   CreateSessionPayload,
   LedgerRecord,
+  MessageLike,
   PendingRequest,
   RoleEntry,
   RoleIssue,
@@ -39,6 +40,14 @@ import type {
   TeamIssue,
 } from '@axon/protocol';
 import type { Screen, SessionView } from './types.ts';
+import {
+  itemsFromMessage,
+  replayStream,
+  toolArgsLine,
+  toolResultText,
+  turnActivity,
+  type StreamItem,
+} from './selectors.ts';
 
 /** 预算告警现场（`budget.get` 只给一次快照，跃迁要靠事件）。 */
 export interface BudgetAlert {
@@ -67,6 +76,11 @@ export interface StoreValue {
   teams: { entries: TeamEntry[]; issues: TeamIssue[] };
   pending: PendingRequest[];
   ledger: LedgerRecord[];
+  /**
+   * 每个成员的消息流（切片 3）：`agent.messages` 回放 + 事件增量都落在这一份缓存。
+   * 键是 AgentPath —— 成员是会话内的自然切片，切焦点不重拉。
+   */
+  streams: Record<AgentPath, StreamItem[]>;
   budget: BudgetSnapshot | null;
   budgetAlert: BudgetAlert | null;
   config: ConfigSnapshot | null;
@@ -119,6 +133,7 @@ export function AppProvider({ children }: { children: ReactNode }): ReactElement
   const [teams, setTeams] = useState<StoreValue['teams']>({ entries: [], issues: [] });
   const [pending, setPending] = useState<PendingRequest[]>([]);
   const [ledger, setLedger] = useState<LedgerRecord[]>([]);
+  const [streams, setStreams] = useState<Record<AgentPath, StreamItem[]>>({});
   const [budget, setBudget] = useState<BudgetSnapshot | null>(null);
   const [budgetAlert, setBudgetAlert] = useState<BudgetAlert | null>(null);
   const [config, setConfig] = useState<ConfigSnapshot | null>(null);
@@ -141,6 +156,24 @@ export function AppProvider({ children }: { children: ReactNode }): ReactElement
       return null;
     }
   }, []);
+
+  const streamsRef = useRef(streams);
+  streamsRef.current = streams;
+
+  /**
+   * 消息流懒加载：**只在焦点切换 / 建会话时**拉一次 `agent.messages`，之后靠事件增量。
+   * 与 `session.get` 同理 —— 列表渲染不得触发读史（MU-2 §5.3 反面纪律）。
+   * 已缓存就返回，切焦点回来不重拉。
+   */
+  const loadMessages = useCallback(
+    async (path: AgentPath): Promise<void> => {
+      if (streamsRef.current[path]) return;
+      const msgs = await call(() => window.axon.invoke('agent.messages', { path }));
+      if (!msgs) return;
+      setStreams((prev) => (prev[path] ? prev : { ...prev, [path]: replayStream(msgs) }));
+    },
+    [call],
+  );
 
   // ── 拉取（一次性） ──
   useEffect(() => {
@@ -173,6 +206,36 @@ export function AppProvider({ children }: { children: ReactNode }): ReactElement
   useEffect(() => {
     const offs: Array<() => void> = [];
     const sub = window.axon.subscribe.bind(window.axon);
+
+    // ─ 消息流的三个写入口（回放走 loadMessages / 打开会话；增量全走这里）──
+    const pushItem = (path: AgentPath, item: StreamItem) =>
+      setStreams((prev) => ({ ...prev, [path]: [...(prev[path] ?? []), item] }));
+
+    const upsertItem = (path: AgentPath, item: StreamItem) =>
+      setStreams((prev) => {
+        const list = prev[path] ?? [];
+        const i = list.findIndex((x) => x.id === item.id);
+        if (i < 0) return { ...prev, [path]: [...list, item] };
+        const next = [...list];
+        next[i] = item;
+        return { ...prev, [path]: next };
+      });
+
+    const patchTool = (
+      path: AgentPath,
+      callId: string,
+      patch: Partial<Extract<StreamItem, { kind: 'tool' }>>,
+    ) =>
+      setStreams((prev) => {
+        const list = prev[path];
+        if (!list) return prev;
+        const i = list.findIndex((x) => x.kind === 'tool' && x.callId === callId);
+        const cur = i < 0 ? undefined : list[i];
+        if (i < 0 || !cur || cur.kind !== 'tool') return prev;
+        const next = [...list];
+        next[i] = { ...cur, ...patch };
+        return { ...prev, [path]: next };
+      });
 
     const upsertSession = (summary: SessionSummary) =>
       setSessions((prev) => {
@@ -207,6 +270,11 @@ export function AppProvider({ children }: { children: ReactNode }): ReactElement
         setAgents((prev) => {
           const next = { ...prev };
           for (const p of paths) delete next[p];
+          return next;
+        });
+        setStreams((prev) => {
+          const next: Record<AgentPath, StreamItem[]> = {};
+          for (const [p, list] of Object.entries(prev)) if (!paths.includes(p)) next[p] = list;
           return next;
         });
         if (sessionIdRef.current === removed) {
@@ -257,10 +325,17 @@ export function AppProvider({ children }: { children: ReactNode }): ReactElement
             },
           };
         });
+        // 只有失败带原因时才进流；成功/空闲是噪声。错误卡是一次性事件件，不随重渲染回放。
+        if (status === 'failed' && err) pushItem(path, { kind: 'error', id: `err-${Date.now()}`, text: err });
       }),
     );
     offs.push(
       sub('agent.removed', ({ paths }) => {
+        setStreams((prev) => {
+          const next: Record<AgentPath, StreamItem[]> = {};
+          for (const [p, list] of Object.entries(prev)) if (!paths.includes(p)) next[p] = list;
+          return next;
+        });
         setAgents((prev) => {
           const next = { ...prev };
           for (const p of paths) delete next[p];
@@ -273,6 +348,54 @@ export function AppProvider({ children }: { children: ReactNode }): ReactElement
           }
           return next;
         });
+      }),
+    );
+
+    // ── 消息流增量（MU-2 §5.2：占位 → 整块替换 → 工具两态 → 回合收尾）──
+    offs.push(
+      sub('agent.message.start', ({ messageId }, meta) => {
+        if (!meta.source) return;
+        upsertItem(meta.source, { kind: 'assistant', id: messageId, text: '', pending: true });
+      }),
+    );
+    offs.push(
+      sub('agent.message.end', ({ messageId, message }, meta) => {
+        // toolResult 是独立消息：它的结果已经并进工具卡，再渲染一条就出双份。
+        if (!meta.source || message.role === 'toolResult') return;
+        const path = meta.source;
+        const items = itemsFromMessage(message, messageId);
+        setStreams((prev) => {
+          const list = prev[path] ?? [];
+          const i = list.findIndex((x) => x.id === messageId);
+          const next = i < 0 ? [...list, ...items] : [...list.slice(0, i), ...items, ...list.slice(i + 1)];
+          return { ...prev, [path]: next };
+        });
+      }),
+    );
+    offs.push(
+      sub('agent.tool.start', ({ callId, tool, args }, meta) => {
+        if (!meta.source) return;
+        upsertItem(meta.source, {
+          kind: 'tool',
+          id: `tool-${callId}`,
+          callId,
+          name: tool,
+          args: toolArgsLine(args),
+          state: 'running',
+          result: '',
+        });
+      }),
+    );
+    offs.push(
+      sub('agent.tool.end', ({ callId, ok, result, error: err }, meta) => {
+        if (!meta.source) return;
+        patchTool(meta.source, callId, { state: ok ? 'ok' : 'err', result: toolResultText(result, err) });
+      }),
+    );
+    offs.push(
+      sub('agent.turn.end', ({ usage }, meta) => {
+        if (!meta.source) return;
+        pushItem(meta.source, turnActivity(usage, `turn-${Date.now()}`));
       }),
     );
 
@@ -385,8 +508,10 @@ export function AppProvider({ children }: { children: ReactNode }): ReactElement
       setFocusPath(known ? known.rootPath : (s?.rootPath ?? null));
       // 懒加载纪律：**只有这里**允许触发 session.get（读树）。
       if (!known) void loadDetail(id);
+      const root = known ? known.rootPath : (s?.rootPath ?? null);
+      if (root) void loadMessages(root);
     },
-    [details, loadDetail, sessions],
+    [details, loadDetail, loadMessages, sessions],
   );
 
   const createSession = useCallback(
@@ -399,9 +524,10 @@ export function AppProvider({ children }: { children: ReactNode }): ReactElement
       setScreen('s2');
       setSessionViewState('chat');
       void loadDetail(s.record.id);
+      void loadMessages(s.rootPath);
       return s;
     },
-    [call, loadDetail],
+    [call, loadDetail, loadMessages],
   );
 
   const removeSession = useCallback(
@@ -487,6 +613,7 @@ export function AppProvider({ children }: { children: ReactNode }): ReactElement
     teams,
     pending,
     ledger,
+    streams,
     budget,
     budgetAlert,
     config,
@@ -502,7 +629,10 @@ export function AppProvider({ children }: { children: ReactNode }): ReactElement
     removeSession,
     renameSession,
     setSessionView: setSessionViewState,
-    setFocus: setFocusPath,
+    setFocus: (path) => {
+      setFocusPath(path);
+      void loadMessages(path);
+    },
     prompt,
     interrupt,
     respondApproval,

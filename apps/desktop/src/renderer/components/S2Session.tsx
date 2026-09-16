@@ -10,6 +10,7 @@ import { useApp } from '../state/store.tsx';
 import { VIEW_LABEL } from '../state/selectors.ts';
 import { Icon } from '../icons.tsx';
 import { Inspector } from './Inspector.tsx';
+import { MessageStream } from './MessageStream.tsx';
 import type { SessionView } from '../state/types.ts';
 
 export function S2Session(): ReactElement {
@@ -105,12 +106,7 @@ export function S2Session(): ReactElement {
       {sessionView === 'chat' ? (
         <>
           <section className="canvas">
-          <div className="stream">
-            <div className="empty">
-              <span className="k">这个会话还没有消息</span>
-              下面的输入区会把任务发给当前焦点分身（顶栏右侧 tag 显示是谁）。消息流在切片 3 落地。
-            </div>
-          </div>
+            <MessageStream />
           </section>
           <div className="composer-wrap">
             <div className="composer">
