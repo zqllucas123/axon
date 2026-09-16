@@ -159,18 +159,32 @@ export function AppProvider({ children }: { children: ReactNode }): ReactElement
 
   const streamsRef = useRef(streams);
   streamsRef.current = streams;
+  /** 已回放过的路径：回放只做一次（之后全靠事件增量），切焦点回来不重拉。 */
+  const replayedRef = useRef<Set<AgentPath>>(new Set());
 
   /**
    * 消息流懒加载：**只在焦点切换 / 建会话时**拉一次 `agent.messages`，之后靠事件增量。
    * 与 `session.get` 同理 —— 列表渲染不得触发读史（MU-2 §5.3 反面纪律）。
-   * 已缓存就返回，切焦点回来不重拉。
+   *
+   * 合并口径：回放在前（它是权威历史，**用户消息不发事件**，只有回放能补上），
+   * 已有的事件增量按 `streamKey` 去重后接在后面。所以即使会话在打开前就跑过一轮，
+   * 点开时也能把历史补齐而不是丢开头。
    */
   const loadMessages = useCallback(
     async (path: AgentPath): Promise<void> => {
-      if (streamsRef.current[path]) return;
+      if (replayedRef.current.has(path)) return;
+      replayedRef.current.add(path); // 先占位，避免并发进来拉两遍
       const msgs = await call(() => window.axon.invoke('agent.messages', { path }));
-      if (!msgs) return;
-      setStreams((prev) => (prev[path] ? prev : { ...prev, [path]: replayStream(msgs) }));
+      if (!msgs) {
+        replayedRef.current.delete(path); // 失败要能重试
+        return;
+      }
+      setStreams((prev) => {
+        const history = replayStream(msgs);
+        const seen = new Set(history.map(streamKey));
+        const live = (prev[path] ?? []).filter((i) => !seen.has(streamKey(i)));
+        return { ...prev, [path]: [...history, ...live] };
+      });
     },
     [call],
   );
@@ -353,20 +367,29 @@ export function AppProvider({ children }: { children: ReactNode }): ReactElement
 
     // ── 消息流增量（MU-2 §5.2：占位 → 整块替换 → 工具两态 → 回合收尾）──
     offs.push(
-      sub('agent.message.start', ({ messageId }, meta) => {
+      sub('agent.message.start', (_payload, meta) => {
         if (!meta.source) return;
-        upsertItem(meta.source, { kind: 'assistant', id: messageId, text: '', pending: true });
+        pushItem(meta.source, { kind: 'assistant', id: nextStreamId('pending'), text: '', pending: true });
       }),
     );
     offs.push(
-      sub('agent.message.end', ({ messageId, message }, meta) => {
+      sub('agent.message.end', ({ message }, meta) => {
         // toolResult 是独立消息：它的结果已经并进工具卡，再渲染一条就出双份。
         if (!meta.source || message.role === 'toolResult') return;
         const path = meta.source;
-        const items = itemsFromMessage(message, messageId);
+        const items = itemsFromMessage(message, nextStreamId('msg'));
         setStreams((prev) => {
           const list = prev[path] ?? [];
-          const i = list.findIndex((x) => x.id === messageId);
+          // 收口该成员**最后一个** pending 占位：start/end 成对，但协议不给消息 id
+          // （见 nextStreamId 的注释），只能按「最近的未完成占位」配对。
+          let i = -1;
+          for (let k = list.length - 1; k >= 0; k--) {
+            const it = list[k];
+            if (it && it.kind === 'assistant' && it.pending) {
+              i = k;
+              break;
+            }
+          }
           const next = i < 0 ? [...list, ...items] : [...list.slice(0, i), ...items, ...list.slice(i + 1)];
           return { ...prev, [path]: next };
         });
@@ -644,4 +667,38 @@ export function AppProvider({ children }: { children: ReactNode }): ReactElement
   };
 
   return <StoreContext.Provider value={value}>{children}</StoreContext.Provider>;
+}
+
+// ─────────────────────────────────────────────────────────────
+// 会话流的两个小工具（切片 3）
+//
+// 为什么定义在这里而不是从 selectors 导入：`messageId` 在协议里其实是 **agent 路径**
+// （`host.ts:1963`：`this.emit('agent.message.start', { messageId: path }, path)`），
+// 同一个成员的所有消息拿到的是同一个值。拿它当条目 id，后一条消息就会把前一条
+// **就地覆盖**（实测：用户气泡被助手正文吃掉）。所以渲染层自己发号。
+// ─────────────────────────────────────────────────────────────
+
+let streamSeq = 0;
+
+/** 会话流条目的发号器（回放用 `m<i>`，增量用这个，两套编号靠 `streamKey` 合并）。 */
+function nextStreamId(prefix: string): string {
+  streamSeq += 1;
+  return `${prefix}-${streamSeq}`;
+}
+
+/**
+ * 会话流条目的去重键 —— **回放 vs 事件增量**合并时判「这条是不是已经有了」。
+ *
+ * 不能用条目 id：回放用的是 `m<i>` 序号，增量是自己发的号，两边对不上。
+ * 用内容键才稳：工具卡按 `callId`（唯一且两边一致），文本按 kind+正文。
+ */
+function streamKey(item: StreamItem): string {
+  switch (item.kind) {
+    case 'tool':
+      return `tool:${item.callId}`;
+    case 'turn':
+      return `turn:${item.id}`;
+    default:
+      return `${item.kind}:${item.text}`;
+  }
 }

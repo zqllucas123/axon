@@ -655,3 +655,8 @@ table.tbl td.num { font-family: var(--font-mono); color: var(--text); }
 .btn:disabled { opacity: 0.45; cursor: not-allowed; }
 .btn:disabled:hover { background: var(--bg-sunken); }
 .btn.primary:disabled, .btn.primary:disabled:hover { background: var(--accent); border-color: var(--accent); color: #fff; }
+
+/* 实现新增：助手消息「已收到 start、还没 end」的占位态（不接流式，见台账 B-1）。
+   原型没有这一态（它画的是流式中），但真实事件序一定会有一段空窗，不给颜色就会
+   看起来像正文丢了。 */
+.assistant.pending { color: var(--text-dim); }
