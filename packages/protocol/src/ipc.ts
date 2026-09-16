@@ -32,6 +32,7 @@ import type {
   SessionDetail,
   SessionListQuery,
   SessionSummary,
+  StorageIssue,
 } from './session.ts';
 import type { TeamDefinition, TeamEntry, TeamIssue } from './team.ts';
 
@@ -102,6 +103,21 @@ export interface SpawnAgentPayload {
 }
 
 export interface CommandMap {
+  /**
+   * 存储实况（M5 §4.9）：根目录 / 会话数 / 已懒加载数 / issue 清单。
+   *
+   * 为什么单独一条命令：S7 恢复屏与 S8「会话与账本」要能说清「东西在哪、
+   * 有没有坏文件」；**不发事件**（渲染层不该对启动顺序做假设）。
+   */
+  'storage.status': {
+    payload: Record<string, never>;
+    result: {
+      root: string;
+      sessionCount: number;
+      loadedCount: number;
+      issues: StorageIssue[];
+    };
+  };
   'agent.spawn': { payload: SpawnAgentPayload; result: AgentSnapshot };
   'agent.list': { payload: Record<string, never>; result: AgentSnapshot[] };
   'agent.get': { payload: { path: AgentPath }; result: AgentSnapshot | null };

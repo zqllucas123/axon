@@ -246,6 +246,13 @@ export interface SummaryInput {
   team?: TeamDefinition;
   /** 并入会话的临时成员数（adhoc 里由「存为团队」之外的方式加的）。 */
   tempCount?: number;
+  /**
+   * 懒加载：未装树的会话直接用落盘的计数（§4.5 —— 列表永不触发加载）。
+   * 有则覆盖按成员算出来的那几个字段（members/running/parked/suspended/ledger）。
+   */
+  countsFromRollup?: Partial<SessionCounts>;
+  /** 懒加载：未装树的会话，用量也只剩落盘那一份（列表的用量列要用）。 */
+  usageFromRollup?: UsageTotals;
 }
 
 /**
@@ -273,8 +280,9 @@ export function buildSessionSummary(input: SummaryInput): SessionSummary {
     if (m.waitingOn && m.waitingOn.length > 0) counts.suspended += 1;
     else counts.parked += 1;
   }
+  if (input.countsFromRollup) Object.assign(counts, input.countsFromRollup);
 
-  const usage = members.find((m) => m.path === input.rootPath)?.usage ?? { ...ZERO_USAGE };
+  const usage = input.usageFromRollup ?? members.find((m) => m.path === input.rootPath)?.usage ?? { ...ZERO_USAGE };
   const budget = computeEffectiveBudget(
     {
       global: input.globalBudget,

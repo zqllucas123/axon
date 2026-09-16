@@ -71,8 +71,10 @@ import {
   type SessionExecutor,
   type SessionListQuery,
   type SessionRecord,
+  type SessionRollup,
   type SessionSummary,
   type SpawnAgentPayload,
+  type StorageIssue,
   type TeamDefinition,
   type TeamEntry,
   type TeamIssue,
@@ -84,6 +86,7 @@ import {
   Ledger,
   createAxonEngine,
   forkMessages,
+  repairMessages,
   fromMessageLike,
   intersectTools,
   type AgentEvent,
@@ -96,7 +99,7 @@ import {
   type OrchestrationDriver,
 } from './orchestrator.ts';
 import { ApprovalBroker, DEFAULT_APPROVAL_TIMEOUT_MS } from './approval.ts';
-import { ENGINE_ROLE } from './roles.ts';
+import { ENGINE_ROLE, LEAD_ROLE } from './roles.ts';
 import { arbiterIneligibleReason, resolveArbiter } from './adoption.ts';
 import {
   SessionStore,
@@ -105,8 +108,8 @@ import {
   titleFromPrompt,
   type SessionStoreChange,
 } from './session-store.ts';
-import { SessionPersistence } from './session-persistence.ts';
-import type { TranscriptHeader } from './session-files.ts';
+import { SessionPersistence, type SessionListItem } from './session-persistence.ts';
+import type { ParsedTranscript, TranscriptHeader } from './session-files.ts';
 import {
   adhocTasks,
   adhocTeam,
@@ -162,8 +165,13 @@ export interface HostOptions {
    * 属于接线层（index.ts 读 `AXON_SESSIONS_DIR`），不属于宿主。
    */
   persistence?: SessionPersistence;
-  /** 启动装载的会话记录（M5 §4.5）。缺省 = 空表。 */
-  records?: readonly SessionRecord[];
+  /**
+   * 启动装载的会话（M5 §4.5）：**记录 + 汇总**，都不读树。
+   *
+   * 带 rollup 进来是懒加载的前提：`session.list` 永不触发加载，列表里的
+   * 成员数/用量就只剩落盘时写下的那一份可用（§4.5）。
+   */
+  records?: readonly SessionListItem[];
 }
 
 /** 可被 `config.patch` 热改的运行期参数。 */
@@ -180,6 +188,30 @@ const DEFAULT_IDLE_TIMEOUT_MS = 5 * 60_000;
 
 /** 预算档位的严重度排序（只往更差的方向报，回退时不播事件）。 */
 const TIER_RANK: Record<BudgetTier, number> = { ok: 0, warning: 1, frozen: 2 };
+
+/**
+ * 路径深度（`/<s>` = 1，`/<s>/dev-1` = 2）。
+ *
+ * 恢复引擎时要「父先于子」，用的就是它（restoreNodes 内部另有一份 depthOf）。
+ */
+function depthOf(path: AgentPath): number {
+  return path.split('/').filter(Boolean).length;
+}
+
+/** 消息里带的用量之和（重启后没有 state 行时的兜底口径）。 */
+function usageOfMessages(messages: readonly MessageLike[]): UsageTotals {
+  let inputTokens = 0;
+  let outputTokens = 0;
+  let costUsd = 0;
+  for (const message of messages) {
+    const usage = (message as { usage?: Partial<UsageTotals> }).usage;
+    if (!usage) continue;
+    inputTokens += usage.inputTokens ?? 0;
+    outputTokens += usage.outputTokens ?? 0;
+    costUsd += usage.costUsd ?? 0;
+  }
+  return { inputTokens, outputTokens, costUsd };
+}
 
 export class AxonHost {
   private readonly registry: AgentRegistry;
@@ -224,6 +256,10 @@ export class AxonHost {
   private readonly ledger: Ledger;
   /** 会话落盘（缺省 undefined = 纯内存，见 HostOptions.persistence）。 */
   private readonly persistence: SessionPersistence | undefined;
+  /** 已懒加载的会话（§4.5：用到哪个装哪个；`session.list` 永不触发）。 */
+  private readonly loaded = new Set<string>();
+  /** 未加载会话的汇总缓存（来自 session.json 的 rollup）。 */
+  private readonly sessionRollups = new Map<string, SessionRollup>();
   private readonly approvals: ApprovalBroker;
   private adoptionPolicy: AdoptionPolicy;
   private adoptionPolicyAt: number;
@@ -238,8 +274,12 @@ export class AxonHost {
 
   constructor(options: HostOptions) {
     this.persistence = options.persistence;
+    // 启动装载：记录进 store、汇总进缓存，**都不读树**（§4.5 的第一段）。
+    for (const item of options.records ?? []) {
+      if (item.rollup) this.sessionRollups.set(item.record.id, item.rollup);
+    }
     this.sessions = new SessionStore({
-      ...(options.records ? { records: options.records } : {}),
+      ...(options.records ? { records: options.records.map((item) => item.record) } : {}),
       onChange: (event) => this.onSessionChanged(event),
     });
     this.ledger = new Ledger({ onChange: (entry) => this.onLedgerChanged(entry) });
@@ -251,6 +291,12 @@ export class AxonHost {
       maxDepth: options.maxDepth ?? 2,
     });
     this.budget = new BudgetGuard(options.budget ?? { hardUsd: 0 });
+    // 全局线要接着上次算：不把已花的钱种子化，重启就等于把预算重置了。
+    const restoredSpend = [...this.sessionRollups.values()].reduce(
+      (sum, rollup) => sum + rollup.usage.costUsd,
+      0,
+    );
+    if (restoredSpend > 0) this.budget.record(restoredSpend);
     this.idleTimeoutMs = options.idleTimeoutMs ?? DEFAULT_IDLE_TIMEOUT_MS;
     this.runtime = {
       globalBudget: {
@@ -349,6 +395,8 @@ export class AxonHost {
   }
 
   messagesOf(path: AgentPath): MessageLike[] {
+    const sessionId = sessionIdOfPath(path);
+    if (sessionId !== undefined) this.ensureSessionLoaded(sessionId);
     return this.registry.get(path)?.engine?.messages() ?? [];
   }
 
@@ -398,6 +446,8 @@ export class AxonHost {
   // ── M4：协作账本 ───────────────────────────────
 
   queryLedger(query: LedgerQuery) {
+    // 账本在内存里：带 sessionId 查就是「用到了这个会话」（§4.5）。
+    if (query.sessionId !== undefined) this.ensureSessionLoaded(query.sessionId);
     return this.ledger.query(query);
   }
 
@@ -696,6 +746,9 @@ export class AxonHost {
   private summaryOf(sessionId: string): SessionSummary | undefined {
     const record = this.sessions.get(sessionId);
     if (!record) return undefined;
+    // 懒加载：没装进内存的会话**不读树**（§4.5「session.list 永不触发加载」），
+    // 摘要只用记录 + 落盘的 rollup。
+    if (!this.loaded.has(sessionId)) return this.rollupSummaryOf(record);
     const rootPath = sessionRootPath(sessionId);
     const members = this.registry.listOf(sessionId);
     const root = members.find((m) => m.path === rootPath);
@@ -726,6 +779,8 @@ export class AxonHost {
   }
 
   getSession(sessionId: string): SessionDetail | null {
+    // 懒加载触发点（§4.5）：用户点开哪个会话，才读哪个会话的树。
+    this.ensureSessionLoaded(sessionId);
     const summary = this.summaryOf(sessionId);
     if (!summary) return null;
     return { ...summary, members: this.registry.listOf(sessionId) };
@@ -780,6 +835,8 @@ export class AxonHost {
     const record = this.sessions.get(payload.sessionId);
     if (!record) throw new Error(`会话不存在: ${payload.sessionId}`);
     const sessionId = record.id;
+    // 升级要往树上加人：冷会话必须先加载（§4.5）。
+    this.ensureSessionLoaded(sessionId);
     const rootPath = sessionRootPath(sessionId);
 
     const node = this.registry.get(rootPath);
@@ -856,6 +913,236 @@ export class AxonHost {
     this.emit('session.changed', { summary });
   }
 
+  // ── M5：懒加载与恢复（§4.5 / §4.6）─────────────────────────
+
+  /**
+   * 懒加载：把一个冷会话从磁盘装进内存（树 + 引擎 + 账本 + 用量/状态）。
+   *
+   * 幂等；**只在被用到时才读树**（§4.5：`session.list` 永不触发加载）。
+   * 触发点：`getSession` / `messagesOf` / `prompt` / `spawn` /
+   * `escalateSession` / `queryLedger({sessionId})`。
+   */
+  ensureSessionLoaded(sessionId: string): void {
+    if (this.loaded.has(sessionId)) return;
+    const record = this.sessions.get(sessionId);
+    if (!record) return;
+    // 先标记再装：装载过程中若有人再来要，不该递归装第二遍（幂等的落点）。
+    this.loaded.add(sessionId);
+    const p = this.persistence;
+    if (!p) return;
+
+    const loaded = p.loadSessionSync(record);
+    if (loaded.rollup) this.sessionRollups.set(sessionId, loaded.rollup);
+    const agents = loaded.agents.filter(
+      (a): a is ParsedTranscript & { header: TranscriptHeader } => a.header !== undefined,
+    );
+
+    const snapshots = agents.map((agent) => this.restoredSnapshot(record, agent));
+    // 恢复 = 搬真相，不是重建：不补状态机、不发新序号、不自动认亲（restoreNodes）。
+    const result = this.registry.restoreNodes(snapshots);
+    if (record.maxConcurrent !== undefined) {
+      this.registry.setSessionLimit(sessionId, record.maxConcurrent);
+    }
+    // 账本：先装进内存，再按决策 2A 结算重启时仍 open 的账目。
+    this.ledger.load(loaded.ledger);
+    this.settleOpenOnRestore(sessionId);
+    this.restoreEngines(record, agents);
+
+    // §4.6：重启前在跑的成员降为空闲，必须留痕（R7：别让用户以为任务已完成）。
+    //
+    // 三种「非终态」在状态机上只有两个值：running 与 waiting。§4.6 表里的
+    // 「suspended（父在等后代）」是 waiting 的一种（waitingOn 非空），重启后
+    // 等待边全部丢弃，所以这里一并降级。
+    const interrupted = agents.filter((a) => {
+      const status = a.states.at(-1)?.status;
+      return status === 'running' || status === 'waiting';
+    });
+    for (const agent of interrupted) {
+      this.persistNote(agent.header.path, '应用重启：运行中被中断，已降为空闲');
+    }
+    if (interrupted.length > 0) this.markInterruptedAt(sessionId);
+    // 父的 transcript 丢了 ⇒ 整棵子树跳过（宁可少几个人，也不把孤儿挂到会话根上）。
+    for (const path of result.skipped) {
+      this.persistNote(sessionRootPath(sessionId), `恢复时跳过 ${path}：父缺失或重复`);
+    }
+  }
+
+  /** transcript 还原成一个节点（状态按 §4.6 降级；用量取最后一条 state 行）。 */
+  private restoredSnapshot(
+    record: SessionRecord,
+    agent: ParsedTranscript & { header: TranscriptHeader },
+  ): AgentSnapshot {
+    const header = agent.header;
+    const isRoot = header.parent === undefined;
+    // 升级过的会话：磁盘上的根仍是 engine 身份（升级只追加 note，不重写 header）。
+    // 恢复时按 record 校正 —— 否则重启后「主控」拿着单兵工具表，编排全废。
+    const escalated = isRoot && record.executor !== 'engine' && header.role !== LEAD_ROLE.name;
+    const last = agent.states.at(-1);
+    const lastStatus = last?.status;
+    // parked(waiting) / suspended(waiting + waitingOn) / running 一律降为空闲（§4.6）。
+    const status: AgentStatus =
+      lastStatus === 'running' || lastStatus === 'waiting' ? 'idle' : (lastStatus ?? 'idle');
+    return {
+      path: header.path,
+      role: escalated ? LEAD_ROLE.name : header.role,
+      displayName: escalated ? LEAD_ROLE.displayName : header.displayName,
+      status,
+      ...(header.parent !== undefined ? { parent: header.parent } : {}),
+      children: [], // restoreNodes 按 parent 重建
+      createdAt: header.createdAt,
+      updatedAt: last?.at ?? header.createdAt,
+      usage: last?.usage ?? usageOfMessages(agent.messages),
+      ...(last?.lastError !== undefined && last.lastError !== null
+        ? { lastError: last.lastError }
+        : {}),
+      sessionId: record.id,
+      ...(header.forkMode !== undefined ? { forkMode: header.forkMode } : {}),
+    };
+  }
+
+  /**
+   * 引擎重灌：按角色 + 读回来的消息重新实例化（§4.5）。
+   *
+   * 消息过 `repairMessages`（与 fork 路径同一道修复）：悬空的 toolCall 灌回去
+   * 会让模型重新调用、或让 provider 直接报错（R12）。
+   */
+  private restoreEngines(
+    record: SessionRecord,
+    agents: readonly (ParsedTranscript & { header: TranscriptHeader })[],
+  ): void {
+    const sessionId = record.id;
+    const rootPath = sessionRootPath(sessionId);
+    const msgs = new Map(agents.map((a) => [a.header.path, repairMessages(a.messages)]));
+    const nodes = [...this.registry.listOf(sessionId)].sort(
+      (a, b) => depthOf(a.path) - depthOf(b.path),
+    );
+
+    // 第一遍：解析角色与有效工具（父先于子 —— 浅到深就是父子序），攒出 roster。
+    const allowedByPath = new Map<AgentPath, string[] | undefined>();
+    const plans = new Map<AgentPath, MemberPlan>();
+    for (const snap of nodes) {
+      const isRoot = snap.path === rootPath;
+      const role = isRoot
+        ? this.roleDefOf(snap.role, snap.role === LEAD_ROLE.name ? LEAD_ROLE : ENGINE_ROLE)
+        : this.roleDefOf(snap.role, {
+            name: snap.role,
+            displayName: snap.displayName,
+            description: '',
+            instructions: `你是 ${snap.displayName}。`,
+            tools: [],
+            approval: this.runtime.defaultApproval,
+          });
+      const allowed = intersectTools(
+        snap.parent !== undefined ? allowedByPath.get(snap.parent) : undefined,
+        role.tools,
+      );
+      allowedByPath.set(snap.path, allowed);
+      plans.set(snap.path, {
+        name: snap.displayName,
+        role,
+        displayName: snap.displayName,
+        lead: isRoot,
+      });
+    }
+
+    // 第二遍：装配引擎（根走 buildRootEngine，成员与 spawn 同一套裁剪）。
+    const entries = [...plans.entries()].map(([path, plan]) => ({ plan, path }));
+    for (const snap of nodes) {
+      const plan = plans.get(snap.path);
+      if (!plan) continue;
+      const messages = msgs.get(snap.path) ?? [];
+      if (snap.path === rootPath) {
+        const roster = nodes.length > 1 ? rosterPrompt(sessionId, entries) : undefined;
+        this.buildRootEngine(rootPath, sessionId, plan, {
+          orchestration: record.executor !== 'engine',
+          messages,
+          ...(roster !== undefined ? { systemPromptExtra: roster } : {}),
+        });
+        continue;
+      }
+      const allowSet = allowedByPath.get(snap.path);
+      const allow = allowSet !== undefined ? new Set(allowSet) : undefined;
+      const engine = createAxonEngine({
+        systemPrompt: plan.role.instructions,
+        model: this.modelSource.model,
+        streamFn: this.modelSource.streamFn,
+        messages: fromMessageLike(messages),
+        // 与 spawn 同一套：白名单 ∩ 父级 —— 重启后工具表必须一模一样
+        tools: this.toolsFor(snap.path, allow) as never,
+        sessionId,
+        onBeforeTool: async (name, args) => {
+          if (allow && !allow.has(name)) {
+            return { allow: false, reason: `角色 ${plan.role.name} 未获授权使用 ${name}` };
+          }
+          return this.approvals.gate(snap.path, name, args);
+        },
+      });
+      this.registry.attachEngine(snap.path, engine);
+      this.wire(snap.path, engine);
+    }
+  }
+
+  private roleDefOf(name: string, fallback: RoleDefinition): RoleDefinition {
+    return this.roles.get(name)?.role ?? fallback;
+  }
+
+  /** 决策 2A：重启时仍 open 的账目结算掉，summary 写明「未及结算」。 */
+  private settleOpenOnRestore(sessionId: string): void {
+    const open = this.ledger.query({ sessionId }).records.filter((r) => r.status === 'open');
+    for (const record of open) this.ledger.settle(record.id, { summary: '应用重启，未及结算' });
+  }
+
+  /** rollup.interruptedAt：给 MU-2 的「恢复自上次运行」提示留证据（R7）。 */
+  private markInterruptedAt(sessionId: string): void {
+    const p = this.persistence;
+    const record = this.sessions.get(sessionId);
+    const summary = this.summaryOf(sessionId);
+    if (!p || !record || !summary) return;
+    const at = Date.now();
+    p.scheduleRollup(record, {
+      at,
+      usage: summary.usage,
+      counts: summary.counts,
+      status: summary.status,
+      interruptedAt: at,
+    });
+  }
+
+  /** 未加载会话的摘要：只用 record + rollup，**不读树**（§4.5）。 */
+  private rollupSummaryOf(record: SessionRecord): SessionSummary {
+    const rollup = this.sessionRollups.get(record.id);
+    const team = record.teamId !== undefined ? this.teams.get(record.teamId)?.team : undefined;
+    return buildSessionSummary({
+      record,
+      rootPath: sessionRootPath(record.id),
+      status: rollup?.status ?? 'idle',
+      members: [],
+      ledgerCount: rollup?.counts.ledger ?? 0,
+      pending: [],
+      globalBudget: this.runtime.globalBudget,
+      ...(team?.budget !== undefined ? { teamBudget: team.budget } : {}),
+      ...(team !== undefined ? { team } : {}),
+      tempCount: 0,
+      ...(rollup ? { countsFromRollup: rollup.counts, usageFromRollup: rollup.usage } : {}),
+    });
+  }
+
+  /** 存储实况（`storage.status`，§4.9）。 */
+  storageStatus(): {
+    root: string;
+    sessionCount: number;
+    loadedCount: number;
+    issues: StorageIssue[];
+  } {
+    const p = this.persistence;
+    return {
+      root: p ? p.root : '',
+      sessionCount: this.sessions.size,
+      loadedCount: this.loaded.size,
+      issues: p ? p.issues() : [],
+    };
+  }
+
   // ── M5：落盘（写入点 = 状态变更点，§4.4）──────────────────
 
   /**
@@ -866,9 +1153,18 @@ export class AxonHost {
    * 不需要每个 call site 记得各写一遍。
    */
   private onSessionChanged(event: SessionStoreChange): void {
+    const record = event.record;
+    // 「已加载 / 汇总缓存」这两个账本**与落盘无关**：本进程里造的会话天然在
+    // 内存里，而删掉的会话必须把缓存一起清掉（否则列表会拿旧汇总显示幽灵行）。
+    // 所以这两句要放在 `if (!p) return` 之前 —— 落在后面的话，纯内存宿主
+    // （测试、冒烟）里的每个会话都会被当成「未加载」，摘要全走落盘兜底（踩过）。
+    if (event.kind === 'create') this.loaded.add(record.id);
+    if (event.kind === 'remove') {
+      this.loaded.delete(record.id);
+      this.sessionRollups.delete(record.id);
+    }
     const p = this.persistence;
     if (!p) return;
-    const record = event.record;
     if (event.kind === 'create') {
       // 此刻树已经建好（createRoot + 成员都注册完了），header 一次性写全。
       const headers = this.registry.listOf(record.id).map((snap) => this.headerOf(snap));
@@ -1159,6 +1455,12 @@ export class AxonHost {
    */
   spawn(payload: SpawnAgentPayload): AgentSnapshot {
     this.budget.assertCanStart('分身');
+    // 冷会话首次用到：先把树装进来，否则下面 resolveParent 会以「父不存在」
+    // 拒绝 —— 而这里「父不存在」其实只是「还没加载」（§4.5）。
+    const hinted =
+      payload.sessionId ??
+      (payload.parent !== undefined ? sessionIdOfPath(payload.parent) : undefined);
+    if (hinted !== undefined) this.ensureSessionLoaded(hinted);
 
     const entry = this.roles.get(payload.role);
     if (!entry) throw new Error(`角色不存在: ${payload.role}`);
@@ -1804,6 +2106,10 @@ export class AxonHost {
       }
       case 'session.remove':
         return this.removeSession((payload as { sessionId: string }).sessionId) as never;
+
+      //  M5：存储实况（§4.9）──
+      case 'storage.status':
+        return this.storageStatus() as never;
 
       default:
         throw new Error(`未实现的命令: ${String(command)}`);
