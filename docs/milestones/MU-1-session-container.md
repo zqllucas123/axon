@@ -444,7 +444,7 @@ leaf tool 触发 → broker.gate → resolveDelegation 命中祖先
 - **问题③（生产路径叶子工具为空）**：审批门对最终用户不可达；`read`/`write`/`bash` 等真工具 + 沙箱策略独立立项（M6 前）
 - **MU-2**：渲染主干（S0/S2-solo/S2/S1/S3）+ 浅色令牌落地 + 六元件会话流
 - **MU-3**：S5 收件箱 / S6 预算 / S8 设置窗（消费本里程碑的 `config.get` 与 `PendingRequest.sessionId`）
-- **M5**：会话/树/消息/账本落盘（目录布局见 §4.3；S7 屏据此细化）
+- **M5**：✅ **已完成**（2026-09-16，`docs/milestones/M5-tree-persistence.md`）—— 会话/树/消息/账本落盘 + 懒加载恢复 + `storage.status`（目录布局见 §4.3）；S7 屏的数据面已就绪，屏本身留给 MU-2
 
 ---
 

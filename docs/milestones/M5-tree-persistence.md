@@ -457,3 +457,20 @@ host.prompt(path, text)
 - **会话导入/导出、跨机器迁移**：不做；`session.json` 自包含 + transcript 相对路径的设计为将来留了门。
 - **S7 会话恢复屏的交互形态**（哪些会话显示「可恢复」、是否自动恢复）属 MU-2/MU-3 的 UI 决策；M5 只保证数据面（列表 + `storage.status` + `rollup.interruptedAt`）。
 - **G11.11 的 UI 落地**（设置页「会话与账本」行）属 MU-3。
+
+---
+
+## 十二、设计 vs 实测（收口记录，2026-09-16）
+
+设计阶段没料到、真盘上抓出来的东西（每条都有测试或冒烟检查钉住）：
+
+1. **escalate 不重写 header ⇒ 恢复要按 record 校正根身份**。写点表（§4.4）规定升级只追加 note，磁盘上根的身份仍是 `engine`，而 `record.executor` 已是 `team/adhoc`；不校正则重启后「主控」拿着单兵工具表，编排工具全丢（`host.restart.test.ts`「重启后主控仍拿得到编排工具」钉住）。
+2. **`budgetSnapshot().spentUsd` 冷启动显示 $0**。它只取 `registry.totalUsage()`，而懒加载下启动时 registry 里一个节点都没有，钱却记在种子化后的闸门里；改成 `max(registry 总用量, 种子化已花)`。
+3. **`registry.sessionIdOf(path)` 在节点被摘掉后返回 `undefined`**：删成员时算不出会话 id ⇒ transcript 不删、重启后成员「复活」。落盘入口改走纯路径解析 `sessionIdOfPath`。
+4. **`createSession` 要同步入队每一笔写 + rollup 粘性**：否则「建完立刻 flush」漏 `session.json`，那笔迟到的 `saveRecord`（不带 rollup）还会把汇总缓存冲掉（列表上的成员数/用量瞬间变 0）。
+5. **删除/隔离也要进 `flush()` 的等待集合**（`track()` + `inflight`），否则退出时最后一笔删除会丢。
+6. **退出路径不能被 flush 挂住**：`will-quit` 里 `flush()` 一旦不返回，应用就关不掉；加 3s 上限（可用性优先于最后一笔写）。
+7. **冒烟基建两坑**（不是产品代码，但会让验收假红）：`node_modules/.bin/electron` 只是 cli.js 壳，只给它 SIGTERM 会留下孤儿占着调试端口 ⇒ 下一次冒烟「等不到 CDP 页面目标」；被信号杀掉的子进程 `exitCode` 恒为 `null`（信号记在 `signalCode`）⇒ 等待循环永远等不到「已退出」。
+8. **懒加载判据要精确到位**：`session.list` 不触发加载只能在内核级断言（`host.restart.test.ts` 的 `loadedCount === 0`）；应用级冒烟里渲染壳冷启动会自己选中一个会话（那次 `session.get` 是「用户动作」的替身），故判据写成「已加载 ≤ 1 且列表带回落盘摘要」。
+
+**测试规模**：M5 交付后 **515 例 / 24 文件**全绿（M4 收口 429 例 → +86）；`guard`/`typecheck`/`build:desktop`/`verify-lazy`/`ui-smoke` 全绿，冒烟新增「重启恢复」幕 6 项检查。
