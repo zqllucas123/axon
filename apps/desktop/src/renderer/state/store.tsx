@@ -112,6 +112,12 @@ export interface StoreValue {
   escalate: (sessionId: string, teamId: string) => Promise<boolean>;
   saveRole: (role: RoleEntry['role']) => Promise<{ accepted: boolean; errors: RoleIssue[] }>;
   saveTeam: (team: TeamEntry['team']) => Promise<{ accepted: boolean; errors: TeamIssue[] }>;
+  /** 删除团队档（`team.delete` → 主进程 emit teams.changed，列表自动重绘）。 */
+  deleteTeam: (name: string) => Promise<boolean>;
+  /** 删除 Agent 类型（`role.delete`）。 */
+  deleteRole: (name: string) => Promise<boolean>;
+  /** 用系统文件管理器打开配置目录（role.openDir / team.openDir）。 */
+  openConfigDir: (kind: 'roles' | 'teams') => Promise<void>;
   dismissError: () => void;
 }
 
@@ -679,6 +685,30 @@ export function AppProvider({ children }: { children: ReactNode }): ReactElement
     [call],
   );
 
+  const deleteTeam = useCallback(
+    async (name: string): Promise<boolean> => {
+      const res = await call(() => window.axon.invoke('team.delete', { name }));
+      return res?.deleted === true;
+    },
+    [call],
+  );
+
+  const deleteRole = useCallback(
+    async (name: string): Promise<boolean> => {
+      const res = await call(() => window.axon.invoke('role.delete', { name }));
+      return res?.deleted === true;
+    },
+    [call],
+  );
+
+  /** 打开配置目录：失败已被 call 记进 error，这里不追加提示。 */
+  const openConfigDir = useCallback(
+    async (kind: 'roles' | 'teams'): Promise<void> => {
+      await call(() => window.axon.invoke(kind === 'roles' ? 'role.openDir' : 'team.openDir', {}));
+    },
+    [call],
+  );
+
   const value: StoreValue = {
     storage,
     sessions,
@@ -717,6 +747,9 @@ export function AppProvider({ children }: { children: ReactNode }): ReactElement
     escalate,
     saveRole,
     saveTeam,
+    deleteTeam,
+    deleteRole,
+    openConfigDir,
     dismissError: () => setError(null),
   };
 

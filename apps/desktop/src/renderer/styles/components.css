@@ -674,3 +674,5 @@ table.tbl td.num { font-family: var(--font-mono); color: var(--text); }
 /* 可点击的统计卡（实现新增：原型里 stat 是 <a>，本实现同一形状但发意图而非跳页） */
 button.stat { display: block; width: 100%; text-align: left; cursor: pointer; }
 button.stat:hover { border-color: var(--line-strong); background: var(--bg-sunken); }
+/* 多行输入（实现新增：.inp 是为单行 input 定的高；textarea 要走自适应高度） */
+textarea.inp-area { height: auto; padding: 8px 10px; line-height: 1.6; resize: vertical; }
