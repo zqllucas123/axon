@@ -329,6 +329,16 @@ export class AxonHost {
 
   /** 释放全部计时器（测试与退出时用）。 */
   dispose(): void {
+    // §4.6：挂起的审批/提问只活在内存里（§4.7 明确不落盘），重启后必然消失。
+    // 退出时按「拒绝」结算并留一笔痕 —— 否则用户重启回来只看到一个莫名卡住的
+    // 会话，收件箱里的待办则无声蒸发。respond 是幂等的，重复退出也安全。
+    for (const pending of this.approvals.list()) {
+      if (pending.state !== 'pending') continue;
+      if (this.loaded.has(pending.sessionId)) {
+        this.persistNote(pending.origin, '应用退出：挂起的审批/提问未决，已按拒绝结算');
+      }
+      this.approvals.respond(pending.requestId, false, '应用退出，未决请求已拒绝');
+    }
     for (const t of this.idleTimers.values()) clearTimeout(t);
     this.idleTimers.clear();
     this.approvals.dispose();

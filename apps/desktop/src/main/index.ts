@@ -38,6 +38,7 @@ import {
   type ModelSource,
 } from '@axon/kernel';
 import { AxonHost } from './host.ts';
+import { SessionPersistence } from './session-persistence.ts';
 import { ALL_ROLES } from './roles.ts';
 import { BUILTIN_TEAMS } from './teams.ts';
 import { RoleBridge } from './role-bridge.ts';
@@ -84,6 +85,7 @@ const EFFECTIVE_ROLES = SMOKE
 
 let win: BrowserWindow | null = null;
 let host: AxonHost | null = null;
+let storage: SessionPersistence | undefined;
 let roleBridge: RoleBridge | null = null;
 let teamBridge: TeamBridge | null = null;
 let configStore: ConfigStore | null = null;
@@ -281,9 +283,19 @@ async function createHost(config: AxonConfig): Promise<AxonHost> {
   // echo 工具，否则 HITL 门根本无从触发——编排工具按决策 D5 是豁免的。
   // 工具进了 universe 还不够：还得进角色白名单，否则会被白名单先拦
   // （白名单优先于 HITL：未获授权的工具不该拿去烦人）。
+  // 会话落盘根（M5 §4.4）：只有接线层知道「东西写哪儿」——宿主拿到的只是一个实例。
+  // 冒烟/测试用 AXON_SESSIONS_DIR 指到临时目录，别把垃圾写进用户的 home。
+  const root = process.env.AXON_SESSIONS_DIR || join(homedir(), '.axon', 'sessions');
+  storage = new SessionPersistence({ root });
+  // 启动装载只读 session.json（§4.5）：树与账本等用户点开哪个会话再读哪个。
+  const records = await storage.listRecords();
+  console.log(`[desktop] sessions: ${root}（装载 ${records.length} 个会话记录）`);
+
   return new AxonHost({
     modelSource,
     roles: EFFECTIVE_ROLES,
+    persistence: storage,
+    records,
     ...(budget ? { budget } : {}),
     // 运行期参数全部来自配置文件（设置界面改的就是这些；applyConfig 走同一条路）。
     ...(config.maxConcurrent !== undefined ? { maxConcurrent: config.maxConcurrent } : {}),
@@ -464,10 +476,24 @@ app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit();
 });
 
-app.on('will-quit', () => {
+/**
+ * 退出：先把内存里的最后一笔写收口（M5 §五「崩溃点表」要求正常退出不丢数据）。
+ *
+ * will-quit 是同步的而 flush 是异步的 ⇒ 先 preventDefault 一次，收口完再 quit
+ * （`quitting` 卫兵挡住第二次进入，否则死循环）。
+ */
+let quitting = false;
+app.on('will-quit', (event) => {
+  if (quitting) return;
+  event.preventDefault();
+  quitting = true;
   roleBridge?.dispose();
   teamBridge?.dispose();
   for (const t of sessionChangedTimers.values()) clearTimeout(t);
   sessionChangedTimers.clear();
   pendingSessionEvents.clear();
+  // 顺序固定：dispose 会把挂起的审批结算为拒绝（这些 note 也要落盘）⇒ 再 flush。
+  host?.dispose();
+  const flushed = storage ? storage.flush() : Promise.resolve();
+  void flushed.finally(() => app.quit());
 });
