@@ -588,6 +588,9 @@ export class SessionPersistence {
     const file = join(paths.agentsDir, transcriptFileName(path));
     return this.enqueue(file, async () => {
       try {
+        // 自建目录：append 与建会话的 mkdir **不是同一条队列**（文件不同），
+        // 先到的消息行可能赶在 `agents/` 建好之前（真盘慢时必现）。
+        await this.io.mkdir(paths.agentsDir);
         await this.io.appendFile(file, line);
         return { ok: true as const };
       } catch (err) {
@@ -615,6 +618,9 @@ export class SessionPersistence {
     const paths = this.pathsOf(record);
     return this.enqueue(paths.ledgerFile, async () => {
       try {
+        // 同上：账本记录可能早于 `writeLedgerHeader` 落盘（建会话是 fire-and-forget，
+        // 首轮对话里的 delegate 完全可能先到），所以自己建目录，别指望别人先建。
+        await this.io.mkdir(paths.sessionDir);
         await this.io.appendFile(paths.ledgerFile, encodeLedgerLine({ type: 'record', record: entry }));
         return { ok: true as const };
       } catch (err) {

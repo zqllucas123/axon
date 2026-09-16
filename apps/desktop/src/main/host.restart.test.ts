@@ -78,8 +78,19 @@ function delegatingRoutes() {
 }
 
 const roots: string[] = [];
+/** 收尾前先把待写落盘：写入是异步的，`rm` 与它们抢同一个目录就会 ENOTEMPTY。 */
+const boots: SessionPersistence[] = [];
 afterEach(async () => {
-  await Promise.all(roots.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
+  const ps = boots.splice(0);
+  await Promise.all(ps.map((p) => p.flush().catch(() => undefined)));
+  // rollup 走定时器：给一拍让「最后一笔」排队，再收一次口
+  await new Promise((r) => setTimeout(r, 25));
+  await Promise.all(ps.map((p) => p.flush().catch(() => undefined)));
+  await Promise.all(
+    roots.splice(0).map((dir) =>
+      rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 10 }),
+    ),
+  );
 });
 
 interface Booted {
@@ -91,6 +102,7 @@ interface Booted {
 /** 起一个宿主；`records` 非空 = 这次是「重启后的第二次开机」。 */
 async function boot(root: string, records?: SessionListItem[]): Promise<Booted> {
   const persistence = new SessionPersistence({ root, rollupIntervalMs: 1 });
+  boots.push(persistence);
   const src = await createFauxSource();
   const modelSource: ModelSource = scriptedSource(
     src,
@@ -254,12 +266,6 @@ describe('重启 · 内容恢复', () => {
 
     const second = await boot(root, items);
     const detail = second.host.getSession(solo.record.id);
-    // eslint-disable-next-line no-console
-    console.log('DEBUG', JSON.stringify({
-      diskExecutor: items[0]?.record.executor,
-      storeExecutor: detail?.record.executor,
-      roles: detail?.members.map((m) => `${m.path}=${m.role}`),
-    }));
     expect(second.host.get(solo.rootPath)?.role).toBe('lead'); // 按 record.executor 校正
     expect(detail?.members.length).toBe(3);
     expect(second.host.orchestrationToolsFor(solo.rootPath).length).toBeGreaterThan(0);

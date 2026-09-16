@@ -81,8 +81,15 @@ interface Harness {
 }
 
 const roots: string[] = [];
+/** 收尾前先把待写落盘：写入是异步的，`rm` 与它们抢同一个目录就会 ENOTEMPTY。 */
+const persistences: SessionPersistence[] = [];
 afterEach(async () => {
-  await Promise.all(roots.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
+  await Promise.all(persistences.splice(0).map((p) => p.flush().catch(() => undefined)));
+  await Promise.all(
+    roots.splice(0).map((dir) =>
+      rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 10 }),
+    ),
+  );
 });
 
 async function harness(
@@ -103,6 +110,7 @@ async function harness(
         }
       : {}),
   });
+  persistences.push(persistence);
   const src = await createFauxSource();
   const modelSource: ModelSource = scriptedSource(
     src,

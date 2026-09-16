@@ -1180,11 +1180,12 @@ export class AxonHost {
     if (event.kind === 'create') {
       // 此刻树已经建好（createRoot + 成员都注册完了），header 一次性写全。
       const headers = this.registry.listOf(record.id).map((snap) => this.headerOf(snap));
-      void (async () => {
-        await p.createSession(record, headers);
-        await p.writeLedgerHeader(record);
-        this.scheduleRollup(record.id);
-      })();
+      // 三笔写要**同步入队**：await 之后才入队的话，`flush()` 取等待快照在前、
+      // 尾巴漏在后 —— 收尾时才落地（删目录测试里就是 ENOTEMPTY 的温床）。
+      // 顺序不用愁：header 与记录共用 ledger 队列，先入队的先落。
+      void p.createSession(record, headers);
+      void p.writeLedgerHeader(record);
+      this.scheduleRollup(record.id);
       return;
     }
     if (event.kind === 'remove') {

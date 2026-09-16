@@ -27,6 +27,7 @@ import {
   parseLedgerFile,
   parseSessionFile,
   sessionPaths,
+  transcriptFileName,
   type TranscriptHeader,
 } from './session-files.ts';
 
@@ -559,6 +560,39 @@ describe('session-persistence · loadSessionSync', () => {
     expect(syncLoaded.agents[0]?.states).toEqual(asyncLoaded.agents[0]?.states);
     expect(syncLoaded.ledger).toEqual(asyncLoaded.ledger);
     expect(p.issues()).toEqual([]);
+  });
+
+  it('会话目录还不存在时 append 也不丢：写路径自建目录（不赌别人先建）', async () => {
+    const root = await tempRoot();
+    const p = new SessionPersistence({ root });
+    const rec = record();
+    // 故意不先 createSession / writeLedgerHeader：建会话是 fire-and-forget，
+    // 首轮对话里的 delegate 完全可能先到（真盘慢时几乎必现）。
+    const led = await p.appendLedger(rec, {
+      version: 1,
+      id: 'l-race',
+      sessionId: rec.id,
+      action: 'delegate',
+      from: `/${rec.id}`,
+      to: `/${rec.id}/dev-1`,
+      origin: { tool: 'agent', toolCallId: 'tc-1' },
+      mention: 'mention://agent-session/dev-1',
+      adoption: 'not_applicable',
+      status: 'open',
+      at: 1,
+    });
+    expect(led.ok).toBe(true);
+    const msg = await p.appendMessage(rec, `/${rec.id}`, MSG, 1);
+    expect(msg.ok).toBe(true);
+    expect(p.issues().map((i) => `${i.kind}:${i.path}`)).toEqual([]);
+
+    const paths = sessionPaths(root, rec.cwd, rec.id);
+    expect(parseLedgerFile(await readFile(paths.ledgerFile, 'utf8')).records.map((r) => r.action)).toEqual([
+      'delegate',
+    ]);
+    expect(
+      await readFile(join(paths.agentsDir, transcriptFileName(`/${rec.id}`)), 'utf8'),
+    ).toContain('开始吧');
   });
 
   it('会话目录还不存在：返回空壳，不报错也不记 issue（新会话尚未落盘）', async () => {
