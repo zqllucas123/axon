@@ -39,7 +39,12 @@ export function Chips(): ReactElement {
     spend.limitedBy === 'team' ? '受团队预算限制' : spend.limitedBy === 'session' ? '受本会话预算限制' : undefined;
 
   const g = globalChips({ sessions, pending });
-  const pendingN = inSession ? sessionChips(current).pending : g.pendingAll;
+  // 会话屏的待批数取**实时值**（审批卡与 chip 必须同一口径，counts 会节流滞后一拍）。
+  const livePending =
+    inSession && current
+      ? pending.filter((p) => p.state === 'pending' && p.sessionId === current.record.id).length
+      : undefined;
+  const pendingN = inSession ? sessionChips(current, livePending).pending : g.pendingAll;
   const solo = inSession && current !== null && !current.team;
   const ledgerN = inSession ? (current?.counts.ledger ?? 0) : g.activeSessions;
 

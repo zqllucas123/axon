@@ -82,27 +82,36 @@ function Prose({ text }: { text: string }): ReactElement {
 }
 
 function ToolCard({ item }: { item: Extract<StreamItem, { kind: 'tool' }> }): ReactElement {
-  const { focusPath, interrupt } = useApp();
-  const done = item.state !== 'running';
+  const { focusPath, agents, interrupt } = useApp();
+  /**
+   * 回放时找不到 toolResult 的调用，要用**活快照**校正一次：如果这个成员此刻还在跑
+   * 或者还在等人批，那它就是「进行中」，不是「未记录结果」（实测：等审批的工具卡
+   * 被回放标成了「未记录结果」，看起来像丢了）。反之，成员已停就保持「未记录结果」——
+   * 不许编成功也不许编失败。
+   */
+  const agentStatus = focusPath ? agents[focusPath]?.status : undefined;
+  const state =
+    item.state === 'lost' && (agentStatus === 'running' || agentStatus === 'waiting') ? 'running' : item.state;
+  const done = state !== 'running';
   return (
-    <div className={item.state === 'err' ? 'card err' : 'card'} data-smoke="tool-card" data-tool={item.name}>
+    <div className={state === 'err' ? 'card err' : 'card'} data-smoke="tool-card" data-tool={item.name}>
       <div className="card-head">
         <Icon name={TOOL_ICONS[item.name] ?? 'terminal'} size={16} />
         <span className="name">{item.name}</span>
         {item.args ? <span className="path">{item.args}</span> : null}
         <span className="spacer" />
-        <span className={item.state === 'ok' ? 'tag ok' : item.state === 'err' ? 'tag err' : item.state === 'running' ? 'tag run' : 'tag'}>
-          {item.state === 'ok'
+        <span className={state === 'ok' ? 'tag ok' : state === 'err' ? 'tag err' : state === 'running' ? 'tag run' : 'tag'}>
+          {state === 'ok'
             ? `ok · ${lines(item.result)} 行`
-            : item.state === 'err'
+            : state === 'err'
               ? '失败'
-              : item.state === 'running'
+              : state === 'running'
                 ? 'running'
                 : '未记录结果'}
         </span>
       </div>
       {done && item.result ? <div className="card-body mono">{clip(item.result)}</div> : null}
-      {item.state === 'running' ? (
+      {state === 'running' ? (
         <div className="card-foot">
           <span className="spacer" />
           <button

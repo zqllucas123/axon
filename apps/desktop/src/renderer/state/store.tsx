@@ -182,7 +182,11 @@ export function AppProvider({ children }: { children: ReactNode }): ReactElement
       setStreams((prev) => {
         const history = replayStream(msgs);
         const seen = new Set(history.map(streamKey));
-        const live = (prev[path] ?? []).filter((i) => !seen.has(streamKey(i)));
+        // 回放是权威历史：未收口的 pending 占位一律丢掉（配对可能已经断了，
+        // 留着它会让历史末尾永远挂一条假的「正在生成」）。
+        const live = (prev[path] ?? []).filter(
+          (i) => !seen.has(streamKey(i)) && !(i.kind === 'assistant' && i.pending),
+        );
         return { ...prev, [path]: [...history, ...live] };
       });
     },
@@ -418,7 +422,15 @@ export function AppProvider({ children }: { children: ReactNode }): ReactElement
     offs.push(
       sub('agent.turn.end', ({ usage }, meta) => {
         if (!meta.source) return;
-        pushItem(meta.source, turnActivity(usage, `turn-${Date.now()}`));
+        const path = meta.source;
+        // 回合结束 = 不会再有 message.end 来收口：把残留的「正在生成」占位清掉，
+        // 否则它会以假「进行中」的形态留在流里（实测：助手正文前面挂了一条）。
+        setStreams((prev) => {
+          const list = prev[path];
+          if (!list) return prev;
+          const kept = list.filter((i) => !(i.kind === 'assistant' && i.pending));
+          return { ...prev, [path]: [...kept, turnActivity(usage, `turn-${Date.now()}`)] };
+        });
       }),
     );
 

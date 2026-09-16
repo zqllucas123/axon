@@ -119,7 +119,16 @@ export function globalChips(input: {
 }
 
 /** 会话屏 chip 的本会话口径（counts 由主进程算好，渲染层不重新累加）。 */
-export function sessionChips(s: SessionSummary | null): {
+export function sessionChips(
+  s: SessionSummary | null,
+  /**
+   * 实时待批数（来自 `pending` 缓存）。为什么不直接用 `s.counts.pending`：
+   * 那是主进程算好、随 `session.changed` **节流**下发的数字，会与屏幕上的审批卡
+   * 差一拍（实测：卡在等批，chip 却写「待批 0」）。有实时值就用实时值，
+   * counts 只当没有实时值时的兜底。
+   */
+  livePending?: number,
+): {
   pending: number;
   ledger: number;
   running: number;
@@ -127,7 +136,7 @@ export function sessionChips(s: SessionSummary | null): {
 } {
   if (!s) return { pending: 0, ledger: 0, running: 0, members: 0 };
   return {
-    pending: s.counts.pending,
+    pending: livePending ?? s.counts.pending,
     ledger: s.counts.ledger,
     running: s.counts.running,
     members: s.counts.members,
