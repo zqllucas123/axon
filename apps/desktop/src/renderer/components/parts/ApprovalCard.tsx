@@ -1,0 +1,122 @@
+/**
+ * 审批/提问卡 —— S2 会话流与 S5 收件箱**共用同一张卡**（MU-3 切片 2.5 从
+ * `MessageStream.tsx` 原样抽出）。
+ *
+ * 为什么必须共用而不是各画一张：同一条待办在两个屏上长得不一样，用户就会
+ * 怀疑那是两件事。UX `00-信息架构与屏幕清单.md` 的 I-* 意图表也是按「一条待办
+ * 一个处理动作」编号的。
+ *
+ * 两个 variant 只差外围信息，处理动作完全一致：
+ *  - `stream`（S2 流内，默认）：不显示会话名 —— 你已经在这个会话里了；
+ *  - `inbox`（S5 收件箱）：显示会话名与发起者，因为收件箱是跨会话的。
+ *
+ * 抽取时**不改任何外观与 data-smoke 钩子**（既有冒烟依赖 `approval-banner` /
+ * `approval-approve` / `approval-reject` / `question-answer` 四个钩子）。
+ */
+
+import { useState, type ReactElement } from 'react';
+import type { PendingRequest } from '@axon/protocol';
+import { useApp } from '../../state/store.tsx';
+import { Icon } from '../../icons.tsx';
+
+export type ApprovalVariant = 'stream' | 'inbox';
+
+/** 穿透链：origin → … → root → 你（`PendingRequest.chain` 是真实路径数组）。 */
+export function Chain({ chain }: { chain: string[] }): ReactElement {
+  const { agents } = useApp();
+  return (
+    <div className="chain" style={{ marginTop: 10 }}>
+      {chain.map((p) => (
+        <span key={p} style={{ display: 'contents' }}>
+          <span className="node">{agents[p]?.displayName ?? p}</span>
+          <span className="arr">→</span>
+        </span>
+      ))}
+      <span className="node you">你</span>
+    </div>
+  );
+}
+
+/** 提问卡尾（`question.respond`）：输入框 + 提交（Enter 提交）。 */
+function QuestionFoot({ request }: { request: PendingRequest }): ReactElement {
+  const { answerQuestion } = useApp();
+  const [answer, setAnswer] = useState('');
+  const submit = () => {
+    const t = answer.trim();
+    if (!t) return;
+    void answerQuestion(request.requestId, t);
+  };
+  return (
+    <div className="card-foot">
+      <input
+        className="inp"
+        value={answer}
+        placeholder="回答后回车提交…"
+        onChange={(e) => setAnswer(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') submit();
+        }}
+        style={{ flex: 1 }}
+      />
+      <button className="btn sm primary" data-smoke="question-answer" onClick={submit} disabled={!answer.trim()}>
+        <Icon name="check" size={14} />
+        提交
+      </button>
+    </div>
+  );
+}
+
+export function ApprovalCard({
+  request,
+  variant = 'stream',
+  /** 收件箱用：这条待办属于哪个会话（标题由调用方解，卡片不查 store 找会话）。 */
+  sessionTitle,
+  /** 收件箱用：点标题跳进该会话。 */
+  onOpenSession,
+}: {
+  request: PendingRequest;
+  variant?: ApprovalVariant;
+  sessionTitle?: string;
+  onOpenSession?: () => void;
+}): ReactElement {
+  const { respondApproval } = useApp();
+  const args = request.args ? JSON.stringify(request.args) : '';
+  const isQuestion = request.kind === 'question';
+  return (
+    <div className="card attn" data-smoke="approval-banner" data-request={request.requestId}>
+      <div className="card-head">
+        <Icon name={isQuestion ? 'help' : 'shield'} size={16} />
+        <span className="name">{isQuestion ? '需要你回答' : '需要你批准'}</span>
+        {request.tool ? (
+          <span className="path">{args ? `${request.tool} · ${args.slice(0, 80)}` : request.tool}</span>
+        ) : null}
+        <span className="spacer" />
+        {variant === 'inbox' && sessionTitle ? (
+          <button className="tag" onClick={onOpenSession} data-smoke="inbox-open-session">
+            {sessionTitle}
+          </button>
+        ) : null}
+        <span className="tag run">等待中</span>
+      </div>
+      <div className="card-body">
+        {request.message}
+        {request.chain.length > 1 ? <Chain chain={request.chain} /> : null}
+      </div>
+      {isQuestion ? (
+        <QuestionFoot request={request} />
+      ) : (
+        <div className="card-foot">
+          <span className="spacer" />
+          <button className="btn sm danger" data-smoke="approval-reject" onClick={() => void respondApproval(request.requestId, false)}>
+            <Icon name="x" size={14} />
+            拒绝
+          </button>
+          <button className="btn sm primary" data-smoke="approval-approve" onClick={() => void respondApproval(request.requestId, true)}>
+            <Icon name="check" size={14} />
+            批准一次
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}

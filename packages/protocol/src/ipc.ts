@@ -138,8 +138,6 @@ export interface CommandMap {
   };
   /** 删除用户角色文件；不存在视为已删除（幂等）。 */
   'role.delete': { payload: { name: string }; result: { deleted: boolean; errors: RoleIssue[] } };
-  /** 让操作系统开文件管理器定位到角色目录；只读便捷操作。 */
-  'role.openDir': { payload: Record<string, never>; result: { path: string } };
 
   /** 回应内核发起的审批请求。 */
   'approval.respond': {
@@ -197,7 +195,6 @@ export interface CommandMap {
     result: { accepted: boolean; errors: TeamIssue[] };
   };
   'team.delete': { payload: { name: string }; result: { deleted: boolean; errors: TeamIssue[] } };
-  'team.openDir': { payload: Record<string, never>; result: { path: string } };
 
   // ── MU-1：配置（S8 设置窗）──
 
@@ -210,7 +207,35 @@ export interface CommandMap {
     payload: { patch: ConfigPatch };
     result: { accepted: boolean; errors: ConfigIssue[]; config: ConfigSnapshot };
   };
+  /**
+   * 恢复出厂（S8 危险区）：把白名单内的字段删回缺省，**未知键原样保留**。
+   * 不等价于「逐个 `config.patch` 置 null」：那条路会被 env-locked 挡住（见 config-store.reset）。
+   */
+  'config.reset': {
+    payload: Record<string, never>;
+    result: { accepted: boolean; errors: ConfigIssue[]; config: ConfigSnapshot };
+  };
+
+  // ── MU-3：外壳类（系统文件管理器 / 窗口）──
+
+  /**
+   * 用系统文件管理器打开一个「已知位置」。
+   *
+   * 为什么是枚举而不是路径字符串：渲染进程零 Node，它**不应该能指定任意路径让
+   * 主进程去 open** —— 那等于把 `shell.openPath` 整个暴露给界面层。枚举把可达集
+   * 锁在主进程内（MU-3 E-3；前身是 MU-1/M2 的 `role.openDir`/`team.openDir`）。
+   * `config` 是单文件，用 `showItemInFolder` reveal；其余三个是目录。
+   */
+  'shell.openPath': {
+    payload: { kind: OpenPathKind };
+    result: { path: string };
+  };
+  /** 打开（或聚焦）设置窗。单例语义在主进程，渲染层只发意图。 */
+  'window.openSettings': { payload: Record<string, never>; result: { opened: true } };
 }
+
+/** `shell.openPath` 的可达集（主进程解成真路径）。 */
+export type OpenPathKind = 'roles' | 'teams' | 'config' | 'sessions';
 
 /**
  * 挂起中的待办（审批 / 提问）。

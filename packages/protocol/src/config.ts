@@ -91,6 +91,35 @@ export interface AxonConfig {
   defaultCwd?: string;
   /** 新建会话的缺省执行方式（S0 三张卡的默认选中项）。 */
   defaultExecutor?: SessionExecutor;
+  /** 界面偏好（MU-3 拍板 P-3：落在 config 而不是 localStorage，理由见 UiPreferences）。 */
+  ui?: UiPreferences;
+}
+
+/**
+ * 界面偏好（S8 「外观」 pane）。
+ *
+ * 为什么落在 `config.json` 而不是渲染层的 localStorage：MU-3 起有**两个窗口**
+ * （主窗 + 设置窗），设置窗改完主窗必须立刻跟着变。落配置后两窗靠
+ * `config.changed` 天然同步；localStorage 在 `file://` 下跨窗通知不可靠，必须再
+ * 自建一条广播通道 —— 等于把已有的事件总线再造一遍。
+ *
+ * 这五项**不影响安全边界**，是白名单里唯一的纯外观字段；它们不参与
+ * `HostOptions`，只由渲染层读。
+ */
+export interface UiPreferences {
+  /**
+   * 主题。MU-3 只实现 `light`（用户拍板 P-4：不做暗色换肤），
+   * `dark`/`system` 先占位且在设置页置灰，避免以后改枚举倒致旧配置失效。
+   */
+  theme?: 'light' | 'dark' | 'system';
+  /** 信息密度：紧凑把列表行高收紧，会话正文不受影响。 */
+  density?: 'comfortable' | 'compact';
+  /** 会话正文字号（px）；缺省 15。 */
+  fontSize?: number;
+  /** 减弱动态效果：跟随系统（prefers-reduced-motion）或始终减弱。 */
+  reduceMotion?: 'system' | 'always';
+  /** 显示协议数据标注（每项数据来自哪个事件/命令）。 */
+  annotations?: boolean;
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -156,8 +185,8 @@ export interface ConfigSnapshot {
  * 必须原样保留未知字段；反过来说，**不认识**的键也不能被写进来——否则
  * 一个拼错的字段会被静默吞掉，用户在设置界面点了保存却什么都没发生。
  *
- * UI 专有项（主题/密度/字号）刻意不在这一批：MU-2/MU-3 才定它们的落盘位置，
- * 现在放进白名单等于留一批没人读的死配置。
+ * UI 专有项（`ui.*`）**第二批加入**（MU-3 拍板 P-3）：它们在 MU-1 时刻意缓一缓，
+ * 理由是「没人读的死配置」；到 MU-3（S8 外观 pane + 主窗消费）才有了读侧。
  */
 export type ConfigPatchPath =
   | 'provider.baseUrl'
@@ -174,9 +203,14 @@ export type ConfigPatchPath =
   | 'approvalTimeoutMs'
   | 'defaultApproval'
   | 'defaultCwd'
-  | 'defaultExecutor';
+  | 'defaultExecutor'
+  | 'ui.theme'
+  | 'ui.density'
+  | 'ui.fontSize'
+  | 'ui.reduceMotion'
+  | 'ui.annotations';
 
-export type ConfigFieldKind = 'string' | 'number' | 'enum' | 'json';
+export type ConfigFieldKind = 'string' | 'number' | 'enum' | 'json' | 'boolean';
 
 export interface ConfigFieldSpec {
   path: ConfigPatchPath;
@@ -210,6 +244,12 @@ export const CONFIG_FIELD_SPECS: readonly ConfigFieldSpec[] = Object.freeze([
   { path: 'defaultApproval', kind: 'enum', values: ['always_ask', 'auto', 'full_access'], note: '角色未写审批档时的兜底' },
   { path: 'defaultCwd', kind: 'string', note: '新建会话的缺省工作目录' },
   { path: 'defaultExecutor', kind: 'enum', values: ['engine', 'team', 'adhoc'], note: '新建会话的缺省执行方式' },
+  // ui.*：S8 「外观」 pane。唯一一组不改变安全边界的字段，也是唯一一组不进 HostOptions 的字段。
+  { path: 'ui.theme', kind: 'enum', values: ['light', 'dark', 'system'], note: '界面主题；MU-3 只实现 light，dark/system 在设置页置灰' },
+  { path: 'ui.density', kind: 'enum', values: ['comfortable', 'compact'], note: '列表信息密度；会话正文不受影响' },
+  { path: 'ui.fontSize', kind: 'number', min: 12, max: 20, note: '会话正文字号（px）；缺省 15' },
+  { path: 'ui.reduceMotion', kind: 'enum', values: ['system', 'always'], note: '减弱动态效果：跟随系统 prefers-reduced-motion 或始终减弱' },
+  { path: 'ui.annotations', kind: 'boolean', note: '在界面上标出每项数据来自哪个协议事件/命令' },
 ]);
 
 const SPEC_BY_PATH = new Map<string, ConfigFieldSpec>(
@@ -276,4 +316,12 @@ export const CONFIG_DEFAULTS = {
   /** 审批超时缺省 = 5 分钟（与 approval.ts 的 DEFAULT_APPROVAL_TIMEOUT_MS 同值）。 */
   approvalTimeoutMs: 300_000,
   executor: 'engine' as SessionExecutor,
+  /** 界面偏好的缺省（`config.reset` 也回到这一组：实际上是把 `ui.*` 删干净）。 */
+  ui: Object.freeze({
+    theme: 'light',
+    density: 'comfortable',
+    fontSize: 15,
+    reduceMotion: 'system',
+    annotations: false,
+  }) as Readonly<Required<UiPreferences>>,
 } as const;

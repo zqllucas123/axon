@@ -24,6 +24,7 @@ import {
   type AgentPath,
   type CommandMap,
   type EventMap,
+  type OpenPathKind,
   type RequestEnvelope,
   type ResponseEnvelope,
 } from '@axon/protocol';
@@ -45,6 +46,8 @@ import { BUILTIN_TEAMS } from './teams.ts';
 import { RoleBridge } from './role-bridge.ts';
 import { TeamBridge } from './team-bridge.ts';
 import { ConfigStore } from './config-store.ts';
+import { openSettingsWindow, settingsWindow } from './windows.ts';
+import { installAppMenu } from './menu.ts';
 import {
   CONFIG_PATH,
   maskKey,
@@ -69,6 +72,23 @@ const ROLES_DIR = process.env.AXON_ROLES_DIR || join(homedir(), '.axon', 'roles'
  * （与 ROLES_DIR 同理：冒烟不该把真用户的团队库写脏）。
  */
 const TEAMS_DIR = process.env.AXON_TEAMS_DIR || join(homedir(), '.axon', 'teams');
+
+/**
+ * 会话落盘根。默认 ~/.axon/sessions；AXON_SESSIONS_DIR 供冒烟隔离。
+ * 提到模块级是因为 `shell.openPath` 的枚举要解它（MU-3 E-3）。
+ */
+const SESSIONS_DIR = process.env.AXON_SESSIONS_DIR || join(homedir(), '.axon', 'sessions');
+
+/**
+ * `shell.openPath` 枚举 → 真路径。写成函数是因为 CONFIG_PATH 受 AXON_CONFIG
+ * 影响，而 env 在测试里会被改 —— 延迟求值比模块加载时固化安全。
+ */
+const OPEN_PATHS: Record<OpenPathKind, () => string> = {
+  roles: () => ROLES_DIR,
+  teams: () => TEAMS_DIR,
+  sessions: () => SESSIONS_DIR,
+  config: () => CONFIG_PATH,
+};
 
 /** 冒烟模式：只由 ui-smoke 打开，生产路径完全不受影响。 */
 const SMOKE = !!process.env.AXON_SMOKE_SCRIPT;
@@ -106,16 +126,22 @@ function sendEvent<E extends keyof EventMap>(
   payload: EventMap[E],
   source?: AgentPath,
 ): void {
+  // 收件人：主窗 + 设置窗（MU-3）。设置窗要订 `config.changed` 才能在另一个窗口
+  // 改了配置后跟着更新 —— 双窗同步走的就是这条既有事件线，不另造广播通道。
+  const targets = [win, settingsWindow()].filter(
+    (w): w is BrowserWindow => w !== null && !w.isDestroyed(),
+  );
   // 窗口可能已关闭（退出时仍有在途事件），静默丢弃。
-  if (!win || win.isDestroyed()) return;
+  if (targets.length === 0) return;
   const sessionId = source !== undefined ? sessionIdOfPath(source) : undefined;
-  win.webContents.send(ipcEventChannel(event), {
+  const envelope = {
     event,
     payload,
     ...(source !== undefined ? { source } : {}),
     ...(sessionId !== undefined ? { sessionId } : {}),
     at: Date.now(),
-  });
+  };
+  for (const w of targets) w.webContents.send(ipcEventChannel(event), envelope);
 }
 
 function flushSessionChanged(sessionId: string): void {
@@ -286,7 +312,7 @@ async function createHost(config: AxonConfig): Promise<AxonHost> {
   // （白名单优先于 HITL：未获授权的工具不该拿去烦人）。
   // 会话落盘根（M5 §4.4）：只有接线层知道「东西写哪儿」——宿主拿到的只是一个实例。
   // 冒烟/测试用 AXON_SESSIONS_DIR 指到临时目录，别把垃圾写进用户的 home。
-  const root = process.env.AXON_SESSIONS_DIR || join(homedir(), '.axon', 'sessions');
+  const root = SESSIONS_DIR;
   storage = new SessionPersistence({ root });
   // 启动装载只读 session.json（§4.5）：树与账本等用户点开哪个会话再读哪个。
   const records = await storage.listRecords();
@@ -453,10 +479,6 @@ app.whenReady().then(async () => {
           );
           return { id: request.id, ok: true, result };
         }
-        if (request.command === 'role.openDir') {
-          await shell.openPath(ROLES_DIR);
-          return { id: request.id, ok: true, result: { path: ROLES_DIR } };
-        }
 
         // 团队层：同样走 Bridge（文件 IO），list 从 host 读实时表。
         if (request.command === 'team.list') {
@@ -474,10 +496,6 @@ app.whenReady().then(async () => {
           );
           return { id: request.id, ok: true, result };
         }
-        if (request.command === 'team.openDir') {
-          await shell.openPath(TEAMS_DIR);
-          return { id: request.id, ok: true, result: { path: TEAMS_DIR } };
-        }
 
         // 配置层：ConfigStore 是唯一真相（含未知字段保留与环境变量锁）。
         if (request.command === 'config.get') {
@@ -489,6 +507,28 @@ app.whenReady().then(async () => {
           );
           if (result.accepted) await applyConfigPatch();
           return { id: request.id, ok: true, result };
+        }
+        if (request.command === 'config.reset') {
+          const result = await configStore!.reset();
+          if (result.accepted) await applyConfigPatch();
+          return { id: request.id, ok: true, result };
+        }
+
+        // 外壳类（MU-3 E-3）：枚举 → 真路径的解析只在主进程做，
+        // 渲染层拿不到、也不该拿到任意路径的 open 能力。
+        if (request.command === 'shell.openPath') {
+          const kind = (request.payload as { kind: OpenPathKind }).kind;
+          const path = OPEN_PATHS[kind]();
+          // 配置是单文件：openPath 会用默认编辑器打开它，而用户点的是
+          // 「在访达中显示」—— 语义是定位，不是打开。
+          if (kind === 'config') shell.showItemInFolder(path);
+          else await shell.openPath(path);
+          return { id: request.id, ok: true, result: { path } };
+        }
+
+        if (request.command === 'window.openSettings') {
+          openSettingsWindow();
+          return { id: request.id, ok: true, result: { opened: true } };
         }
 
         const result = await host!.execute(
@@ -512,6 +552,8 @@ app.whenReady().then(async () => {
   );
 
   createWindow();
+  // 菜单在窗口之后装：「设置…」点下去要有东西可开（且此时 configStore 已就位）。
+  installAppMenu({ openSettings: () => openSettingsWindow() });
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();

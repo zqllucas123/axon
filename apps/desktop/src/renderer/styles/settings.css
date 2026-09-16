@@ -1,0 +1,70 @@
+/* ────────────────────────────────────────────────────────────
+ * settings.css —— S8 设置窗专属样式（MU-3）。
+ *
+ * 单独成文件而不是塞进 screens.css：设置窗是第二个 BrowserWindow，
+ * 它的布局（左导航 + 右内容，无顶栏无侧栏）与主窗五屏没有任何共享结构；
+ * 混在一起只会让主窗的屏样式越读越难分辨「这条是谁的」。
+ *
+ * 样式来源：docs/ux/mockups/assets/axon.css §11（.st-* 一族）。
+ * 注意原型里的 `.path` 与实现里的 `.card-head .path` 不是一回事，别直接抄选择器。
+ *
+ * 本文件在切片 2 只放骨架所需的最小一组；其余由 W-D 在切片 7 补齐。
+ * ──────────────────────────────────────────────────────────── */
+
+/* 窗体：左导航固定宽，右内容滚动。 */
+.st-win {
+  display: grid;
+  grid-template-columns: 180px 1fr;
+  height: 100vh;
+  background: var(--bg-canvas);
+}
+
+.st-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 12px 8px;
+  border-right: 1px solid var(--line);
+  background: var(--bg-sidebar);
+}
+
+.st-navitem {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  padding: 6px 10px;
+  border-radius: var(--r-xs);
+  font: inherit;
+  color: var(--text-secondary);
+  font-size: var(--fs-13);
+  cursor: pointer;
+}
+
+.st-navitem:hover {
+  background: var(--bg-hover);
+}
+
+.st-navitem.is-on {
+  background: var(--bg-active);
+  color: var(--text);
+  font-weight: 500;
+}
+
+.st-main {
+  overflow-y: auto;
+  padding: 16px 20px 32px;
+}
+
+/* 分节小标题（原型 .st-sec）。 */
+.st-sec {
+  font-size: var(--fs-12);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--text-muted);
+  margin: 18px 0 8px;
+}
+
+.st-pane > .st-sec:first-child {
+  margin-top: 0;
+}

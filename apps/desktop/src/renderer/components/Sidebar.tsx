@@ -12,24 +12,26 @@ import { useEffect, useState, type ReactElement } from 'react';
 import { useApp } from '../state/store.tsx';
 import { globalChips, sessionMeta, splitSessions, statusDot } from '../state/selectors.ts';
 import { Icon, type IconName } from '../icons.tsx';
+import type { Screen } from '../state/types.ts';
 import type { SessionSummary } from '@axon/protocol';
 
-/** MU-2 能到的三屏（顺序照抄原型：团队管理沉在倒数第二 —— 配置不是日常动线）。 */
-const NAV: Array<{ id: 's0' | 's1' | 's3'; icon: IconName; label: string }> = [
+/**
+ * 一级导航（顺序照抄原型：团队管理沉在后面 —— 配置不是日常动线）。
+ *
+ * MU-3 切片 2.5：S5/S6/S7 从「置灰占位」升为可点 —— 屏已经存在了。
+ * badge 只能取**真值**（原先写死的 '2' 是占位假数据，已删）。
+ */
+const NAV: Array<{ id: Screen; icon: IconName; label: string }> = [
   { id: 's0', icon: 'pen', label: '新建会话' },
   { id: 's1', icon: 'layers', label: '会话总览' },
+  { id: 's5', icon: 'inbox', label: '收件箱' },
+  { id: 's6', icon: 'wallet', label: '预算与用量' },
+  { id: 's7', icon: 'history', label: '会话恢复' },
   { id: 's3', icon: 'users', label: '团队管理' },
 ];
 
-/** MU-3 的三屏：**置灰显示而不是隐藏** —— 「收件箱有 2 条」这个信号要看得见。 */
-const NAV_LATER: Array<{ id: string; icon: IconName; label: string; badge?: string }> = [
-  { id: 's5', icon: 'inbox', label: '收件箱', badge: '2' },
-  { id: 's6', icon: 'wallet', label: '预算与用量' },
-  { id: 's7', icon: 'history', label: '会话恢复' },
-];
-
 export function Sidebar(): ReactElement {
-  const { screen, go, sessions, sessionId, openSession, pending } = useApp();
+  const { screen, go, sessions, sessionId, openSession, pending, openSettings, openPath } = useApp();
   const { active, recent } = splitSessions(sessions);
   const chips = globalChips({ sessions, pending });
   const [menuOpen, setMenuOpen] = useState(false);
@@ -92,13 +94,8 @@ export function Sidebar(): ReactElement {
           >
             <Icon name={n.icon} />
             <span>{n.label}</span>
-          </button>
-        ))}
-        {NAV_LATER.map((n) => (
-          <button key={n.id} className="nav-item" disabled title="MU-3 落地" style={{ opacity: 0.55 }}>
-            <Icon name={n.icon} />
-            <span>{n.label}</span>
-            {n.badge ? <span className="badge">{n.badge}</span> : null}
+            {/* 收件箱 badge 取实时待批数；为 0 就不显示（没事就不要制造红点）。 */}
+            {n.id === 's5' && chips.pendingAll > 0 ? <span className="badge">{chips.pendingAll}</span> : null}
           </button>
         ))}
       </nav>
@@ -133,16 +130,17 @@ export function Sidebar(): ReactElement {
 
       {menuOpen ? (
         <div className="menu menu-up" onClick={(e) => e.stopPropagation()}>
-          <span className="menu-item" style={{ opacity: 0.5 }} title="MU-3 设置窗">
+          {/* MU-3：两条死链接上真落点（设置窗单例 / shell.openPath）。 */}
+          <button className="menu-item" data-smoke="menu-settings" onClick={() => void openSettings()}>
             <Icon name="settings" size={16} />
             <span>设置…</span>
             <span className="mk">⌘,</span>
-          </span>
-          <span className="menu-item" style={{ opacity: 0.5 }}>
+          </button>
+          <button className="menu-item" data-smoke="menu-config-dir" onClick={() => void openPath('config')}>
             <Icon name="folder" size={16} />
-            <span>打开配置目录</span>
+            <span>在访达中显示配置</span>
             <span className="mk mono">~/.axon</span>
-          </span>
+          </button>
           <div className="menu-sep" />
           <span className="menu-item">
             <Icon name="help" size={16} />
@@ -165,9 +163,9 @@ export function Sidebar(): ReactElement {
           <Icon name="chevD" size={14} cls="caret" />
         </button>
         <span className="spacer" />
-        <span className="tag" title="跨会话待批（S5 收件箱在 MU-3）">
+        <button className="tag" title="跨会话待批 —— 点进收件箱" data-smoke="foot-pending" onClick={() => go('s5')}>
           待批 {chips.pendingAll}
-        </span>
+        </button>
       </div>
     </aside>
   );

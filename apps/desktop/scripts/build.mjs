@@ -91,9 +91,10 @@ await build({
   format: 'esm',
 });
 
-// 样式：四份按序拼成一份（tokens → base → components → screens），index.html 只挂一个 <link>。
+// 样式：五份按序拼成一份（tokens → base → components → screens → settings），index.html 只挂一个 <link>。
+// 新增 CSS 必须加进下面这张表，否则文件写了却不进产物（静默失效，MU-3 R-6）。
 // 不走 esbuild：CSS 不是它这一段的输入，cp 更直白，也不会被 minify 打乱逐值对齐。
-const cssFiles = ['tokens.css', 'base.css', 'components.css', 'screens.css'];
+const cssFiles = ['tokens.css', 'base.css', 'components.css', 'screens.css', 'settings.css'];
 const cssParts = [];
 for (const f of cssFiles) {
   cssParts.push(await readFile(join(appRoot, 'src/renderer/styles', f), 'utf8'));

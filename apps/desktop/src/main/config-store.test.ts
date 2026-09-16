@@ -288,3 +288,129 @@ describe('ConfigStore · patch 校验', () => {
     expect(raw.budgetUsd).toBe(1);
   });
 });
+// ────────────────────────────────────────────────────────────
+// MU-3：UI 偏好（E-2）与恢复出厂（E-4）
+// ─────────────────────────────────────────────────────────────
+
+describe('ConfigStore · ui.* 界面偏好（MU-3 E-2）', () => {
+  it('五个字段都能落盘，且读侧原样回来（不是密钥，不掩码）', async () => {
+    const { path } = await tempConfig({});
+    const s = store(path);
+    await s.load();
+    const res = await s.patch({
+      'ui.theme': 'light',
+      'ui.density': 'compact',
+      'ui.fontSize': 16,
+      'ui.reduceMotion': 'always',
+      'ui.annotations': true,
+    });
+    expect(res.accepted).toBe(true);
+    expect(res.errors).toEqual([]);
+    const raw = await readRaw(path);
+    expect(raw.ui).toEqual({
+      theme: 'light',
+      density: 'compact',
+      fontSize: 16,
+      reduceMotion: 'always',
+      annotations: true,
+    });
+    expect(res.config.config.ui?.density).toBe('compact');
+  });
+
+  it('非法枚举值 ⇒ 整批拒绝（同批合法字段也不落盘）', async () => {
+    const { path } = await tempConfig({ maxConcurrent: 3 });
+    const s = store(path);
+    await s.load();
+    const res = await s.patch({ 'ui.theme': 'neon', 'ui.density': 'compact' });
+    expect(res.accepted).toBe(false);
+    expect(res.errors[0]?.code).toBe('invalid-value');
+    const raw = await readRaw(path);
+    expect(raw.ui).toBeUndefined();
+    expect(raw.maxConcurrent).toBe(3);
+  });
+
+  it('annotations 必须是布尔；字符串 "true" 不算', async () => {
+    const { path } = await tempConfig({});
+    const s = store(path);
+    await s.load();
+    const res = await s.patch({ 'ui.annotations': 'true' as unknown as boolean });
+    expect(res.accepted).toBe(false);
+    expect(res.errors[0]).toMatchObject({ path: 'ui.annotations', code: 'invalid-type' });
+  });
+
+  it('fontSize 越界 ⇒ out-of-range（12~20）', async () => {
+    const { path } = await tempConfig({});
+    const s = store(path);
+    await s.load();
+    expect((await s.patch({ 'ui.fontSize': 9 })).errors[0]?.code).toBe('out-of-range');
+    expect((await s.patch({ 'ui.fontSize': 15 })).accepted).toBe(true);
+  });
+
+  it('置 null ⇒ 删掉该项，回到缺省（外观「重置这一项」）', async () => {
+    const { path } = await tempConfig({ ui: { density: 'compact', fontSize: 18 } });
+    const s = store(path);
+    await s.load();
+    const res = await s.patch({ 'ui.density': null });
+    expect(res.accepted).toBe(true);
+    const raw = await readRaw(path);
+    expect(raw.ui).toEqual({ fontSize: 18 });
+  });
+});
+
+describe('ConfigStore · reset 恢复出厂（MU-3 E-4）', () => {
+  it('清掉白名单字段，保留未知键', async () => {
+    const { path } = await tempConfig({
+      maxConcurrent: 9,
+      budgetUsd: 42,
+      provider: { baseUrl: 'https://gw/v1', apiKey: 'sk-abcdefgh', id: 'my-gw' },
+      ui: { density: 'compact' },
+      experimental: { foo: 1 },
+    });
+    const s = store(path);
+    await s.load();
+    const res = await s.reset();
+    expect(res.accepted).toBe(true);
+    const raw = await readRaw(path);
+    // 白名单内：全没了
+    expect(raw.maxConcurrent).toBeUndefined();
+    expect(raw.budgetUsd).toBeUndefined();
+    expect(raw.ui).toBeUndefined();
+    expect(raw.provider.baseUrl).toBeUndefined();
+    expect(raw.provider.apiKey).toBeUndefined();
+    // 白名单外：原样保留（用户手写物不得被一键吃掉）
+    expect(raw.provider.id).toBe('my-gw');
+    expect(raw.experimental).toEqual({ foo: 1 });
+    expect(res.config.config.provider?.apiKeySet).toBe(false);
+  });
+
+  it('容器被删空 ⇒ 连空壳一起删（别让下次读盘看起来「配过」）', async () => {
+    const { path } = await tempConfig({ provider: { baseUrl: 'https://gw/v1' }, ui: { fontSize: 18 } });
+    const s = store(path);
+    await s.load();
+    await s.reset();
+    const raw = await readRaw(path);
+    expect(raw).toEqual({});
+  });
+
+  it('env 锁定的字段照样被清（重置是对文件的操作，不是对运行时）', async () => {
+    const { path } = await tempConfig({ provider: { baseUrl: 'https://file/v1' }, maxConcurrent: 8 });
+    const s = store(path, { AXON_BASE_URL: 'https://env/v1' });
+    await s.load();
+    // 对照：patch 会被 env-locked 挡住
+    const patched = await s.patch({ 'provider.baseUrl': 'https://other/v1' });
+    expect(patched.errors[0]?.code).toBe('env-locked');
+    expect((await readRaw(path)).provider.baseUrl).toBe('https://file/v1');
+    // reset 则把它从文件里清掉
+    await s.reset();
+    expect(await readRaw(path)).toEqual({});
+  });
+
+  it('文件不存在时 reset 幂等（写出一个空配置，不抛）', async () => {
+    const { path } = await tempConfig();
+    const s = store(path);
+    await s.load();
+    const res = await s.reset();
+    expect(res.accepted).toBe(true);
+    expect(await readRaw(path)).toEqual({});
+  });
+});

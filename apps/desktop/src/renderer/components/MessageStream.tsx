@@ -15,11 +15,12 @@
  * L3 纪律：本组件只做「渲染 + 发意图」，任何状态判断都在 `state/selectors.ts`。
  */
 
-import { useState, type ReactElement } from 'react';
-import type { PendingRequest } from '@axon/protocol';
+import type { ReactElement } from 'react';
 import { useApp } from '../state/store.tsx';
 import { Icon, type IconName } from '../icons.tsx';
 import { inlineSegments, parseProse, type StreamItem } from '../state/selectors.ts';
+// 审批/提问卡与 S5 收件箱共用一张（MU-3 切片 2.5 抽到 parts/）。
+import { ApprovalCard } from './parts/ApprovalCard.tsx';
 
 /** 工具名 → 图标（对齐原型：read_file=file / bash=terminal / edit=pen…）。 */
 const TOOL_ICONS: Record<string, IconName> = {
@@ -124,89 +125,6 @@ function ToolCard({ item }: { item: Extract<StreamItem, { kind: 'tool' }> }): Re
           </button>
         </div>
       ) : null}
-    </div>
-  );
-}
-
-/** 穿透链：origin → … → root → 你（`PendingRequest.chain` 是真实路径数组）。 */
-function Chain({ chain }: { chain: string[] }): ReactElement {
-  const { agents } = useApp();
-  return (
-    <div className="chain" style={{ marginTop: 10 }}>
-      {chain.map((p) => (
-        <span key={p} style={{ display: 'contents' }}>
-          <span className="node">{agents[p]?.displayName ?? p}</span>
-          <span className="arr">→</span>
-        </span>
-      ))}
-      <span className="node you">你</span>
-    </div>
-  );
-}
-
-function ApprovalCard({ request }: { request: PendingRequest }): ReactElement {
-  const { respondApproval } = useApp();
-  const args = request.args ? JSON.stringify(request.args) : '';
-  const isQuestion = request.kind === 'question';
-  return (
-    <div className="card attn" data-smoke="approval-banner" data-request={request.requestId}>
-      <div className="card-head">
-        <Icon name={isQuestion ? 'help' : 'shield'} size={16} />
-        <span className="name">{isQuestion ? '需要你回答' : '需要你批准'}</span>
-        {request.tool ? (
-          <span className="path">{args ? `${request.tool} · ${args.slice(0, 80)}` : request.tool}</span>
-        ) : null}
-        <span className="spacer" />
-        <span className="tag run">等待中</span>
-      </div>
-      <div className="card-body">
-        {request.message}
-        {request.chain.length > 1 ? <Chain chain={request.chain} /> : null}
-      </div>
-      {isQuestion ? (
-        <QuestionFoot request={request} />
-      ) : (
-        <div className="card-foot">
-          <span className="spacer" />
-          <button className="btn sm danger" data-smoke="approval-reject" onClick={() => void respondApproval(request.requestId, false)}>
-            <Icon name="x" size={14} />
-            拒绝
-          </button>
-          <button className="btn sm primary" data-smoke="approval-approve" onClick={() => void respondApproval(request.requestId, true)}>
-            <Icon name="check" size={14} />
-            批准一次
-          </button>
-        </div>
-      )}
-    </div>
-  );
-}
-
-/** 提问卡（`question.respond`）：输入框 + 提交（Enter 提交）。 */
-function QuestionFoot({ request }: { request: PendingRequest }): ReactElement {
-  const { answerQuestion } = useApp();
-  const [answer, setAnswer] = useState('');
-  const submit = () => {
-    const t = answer.trim();
-    if (!t) return;
-    void answerQuestion(request.requestId, t);
-  };
-  return (
-    <div className="card-foot">
-      <input
-        className="inp"
-        value={answer}
-        placeholder="回答后回车提交…"
-        onChange={(e) => setAnswer(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter') submit();
-        }}
-        style={{ flex: 1 }}
-      />
-      <button className="btn sm primary" data-smoke="question-answer" onClick={submit} disabled={!answer.trim()}>
-        <Icon name="check" size={14} />
-        提交
-      </button>
     </div>
   );
 }

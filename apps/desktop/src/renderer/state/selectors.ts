@@ -388,3 +388,139 @@ export function inlineSegments(text: string): InlineSeg[] {
   });
   return out;
 }
+
+// ────────────────────────────────────────────────────────────
+// MU-3 切片 2.5：跨屏共用的格式化与口径
+//
+// 抽到这里的理由：S5/S6/S7 三屏由三个并行会话分别实现，如果各自再写一遍
+// `$${n.toFixed(2)}` 与「今天/昨天/9-14」，最后一定会出现三种钱与三种时间。
+// 口径是产品的一部分，不是各屏的实现细节。
+// （MU-2 遗留的 S1Workbench / S2Views / Chips / S3Teams 四份局部 money 在
+//   切片 8 死链核销时一并归并，此处先立唯一口径。）
+// ────────────────────────────────────────────────────────────
+
+/** 金额：默认两位小数；`digits=3` 给单回合成本那种小额用。 */
+export function money(n: number | undefined, digits = 2): string {
+  return `$${(n ?? 0).toFixed(digits)}`;
+}
+
+/** 粗粒度相对日期：「今天 / 昨天 / 9-14」（原型右栏口径）。 */
+export function relDay(at: number): string {
+  const d = new Date(at);
+  const today = new Date();
+  const same = (a: Date, b: Date) => a.toDateString() === b.toDateString();
+  if (same(d, today)) return '今天';
+  if (same(d, new Date(today.getTime() - 86_400_000))) return '昨天';
+  return `${d.getMonth() + 1}-${d.getDate()}`;
+}
+
+/** 时刻：「今天 14:03 / 昨天 14:03 / 9-14 14:03」—— 中断时刻、待办到达时刻共用。 */
+export function fmtTime(at: number): string {
+  const d = new Date(at);
+  const hh = String(d.getHours()).padStart(2, '0');
+  const mm = String(d.getMinutes()).padStart(2, '0');
+  return `${relDay(at)} ${hh}:${mm}`;
+}
+
+/**
+ * 相对时长：「刚刚 / 3 分钟前 / 2 小时前 / 3 天前」。
+ * 只在**有真实时间戳**时用（`MessageLike` 没有 at，别拿它编）。
+ */
+export function since(at: number, now = Date.now()): string {
+  const s = Math.max(0, Math.round((now - at) / 1000));
+  if (s < 60) return '刚刚';
+  if (s < 3600) return `${Math.floor(s / 60)} 分钟前`;
+  if (s < 86_400) return `${Math.floor(s / 3600)} 小时前`;
+  return `${Math.floor(s / 86_400)} 天前`;
+}
+
+// ── S5 收件箱口径 ──────────────────────────────────────────
+
+/**
+ * 待办分段（UX 02 §3.4）：**按紧迫度而不是按会话**。
+ * 会话只是分组键，「有人卡住等你」是跨会话的事实。
+ */
+export function splitPending(pending: PendingRequest[]): {
+  waiting: PendingRequest[];
+  resolved: PendingRequest[];
+} {
+  const byNew = [...pending].sort((a, b) => b.at - a.at);
+  return {
+    waiting: byNew.filter((p) => p.state === 'pending'),
+    // 注意：这份「已处理」只覆盖**本次运行期**（拍板 P-5）——
+    // ApprovalBroker 结算即 delete，协议没有 `pending.history`。
+    resolved: byNew.filter((p) => p.state !== 'pending'),
+  };
+}
+
+/**
+ * 一条待办卡住了几个人：穿透链上 origin 到 root 之间的全部节点。
+ * `chain` 是真实路径数组，长度即影响面，不需要再去树上查。
+ */
+export function blockedCount(request: PendingRequest): number {
+  return Math.max(1, request.chain.length);
+}
+
+// ── S6 预算与用量口径 ──────────────────────────────────────
+
+/**
+ * 按会话的花费排行（降序）。用 `SessionSummary.usage`，
+ * **绝不为了算用量去 `session.get`**（那会打穿 M5 懒加载，见 MU-3 R-7）。
+ */
+export function spendRanking(sessions: SessionSummary[]): SessionSummary[] {
+  return [...sessions].sort((a, b) => (b.usage.costUsd ?? 0) - (a.usage.costUsd ?? 0));
+}
+
+/** 全部会话里最严的档位（S6「最严会话档位」指标）。 */
+export function strictestTier(sessions: SessionSummary[]): {
+  tier: 'ok' | 'warning' | 'frozen';
+  session?: SessionSummary;
+} {
+  const rank = { ok: 0, warning: 1, frozen: 2 } as const;
+  let out: { tier: 'ok' | 'warning' | 'frozen'; session?: SessionSummary } = { tier: 'ok' };
+  for (const s of sessions) {
+    const t = s.budget.tier;
+    if (rank[t] > rank[out.tier]) out = { tier: t, session: s };
+  }
+  return out;
+}
+
+/** 用量合计（跨会话）。同上：只加 summary 里已有的数，不触发加载。 */
+export function totalUsage(sessions: SessionSummary[]): UsageTotals {
+  return sessions.reduce<UsageTotals>(
+    (acc, s) => ({
+      inputTokens: acc.inputTokens + (s.usage.inputTokens ?? 0),
+      outputTokens: acc.outputTokens + (s.usage.outputTokens ?? 0),
+      costUsd: acc.costUsd + (s.usage.costUsd ?? 0),
+    }),
+    { inputTokens: 0, outputTokens: 0, costUsd: 0 },
+  );
+}
+
+// ── S7 会话恢复口径 ────────────────────────────────────────
+
+/**
+ * 「上次中断」：只有**落盘 rollup 里带 interruptedAt** 才算（MU-3 E-1）。
+ * 当前正在跑的会话不算中断 —— 那是「运行中」，不是「上次没跑完」。
+ */
+export function interruptedAt(s: SessionSummary): number | undefined {
+  return s.rollup?.interruptedAt;
+}
+
+/** S7 分段：可恢复（有中断痕迹）/ 运行中 / 已结束。 */
+export function splitRecoverable(sessions: SessionSummary[]): {
+  recoverable: SessionSummary[];
+  active: SessionSummary[];
+  finished: SessionSummary[];
+} {
+  const byRecent = [...sessions].sort((a, b) => b.record.updatedAt - a.record.updatedAt);
+  const recoverable: SessionSummary[] = [];
+  const active: SessionSummary[] = [];
+  const finished: SessionSummary[] = [];
+  for (const s of byRecent) {
+    if (interruptedAt(s) !== undefined && !isTerminal(s.status)) recoverable.push(s);
+    else if (isTerminal(s.status)) finished.push(s);
+    else active.push(s);
+  }
+  return { recoverable, active, finished };
+}

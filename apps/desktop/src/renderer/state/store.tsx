@@ -23,14 +23,17 @@ import {
   type ReactElement,
   type ReactNode,
 } from 'react';
+import { sessionIdOfPath } from '@axon/protocol';
 import type {
   AgentPath,
   AgentSnapshot,
   BudgetSnapshot,
+  ConfigPatch,
   ConfigSnapshot,
   CreateSessionPayload,
   LedgerRecord,
   MessageLike,
+  OpenPathKind,
   PendingRequest,
   RoleEntry,
   RoleIssue,
@@ -116,8 +119,23 @@ export interface StoreValue {
   deleteTeam: (name: string) => Promise<boolean>;
   /** 删除 Agent 类型（`role.delete`）。 */
   deleteRole: (name: string) => Promise<boolean>;
-  /** 用系统文件管理器打开配置目录（role.openDir / team.openDir）。 */
-  openConfigDir: (kind: 'roles' | 'teams') => Promise<void>;
+  /** 用系统文件管理器打开一个已知位置（`shell.openPath`，MU-3 E-3）。 */
+  openPath: (kind: OpenPathKind) => Promise<void>;
+  /** 打开（或聚焦）设置窗（`window.openSettings`）。 */
+  openSettings: () => Promise<void>;
+  /**
+   * 改配置（`config.patch`）。主窗只用它改**界面偏好**（`ui.*`）；
+   * 完整的设置表单在设置窗（自带 SettingsStore）。
+   */
+  patchConfig: (patch: ConfigPatch) => Promise<boolean>;
+  /**
+   * 本次运行期内已处理的待办流水（S5 「已处理」段，拍板 P-5）。
+   *
+   * 为什么只能是「本次运行期」：`ApprovalBroker` 结算即 `pending.delete`，
+   * 协议没有 `pending.history`。写成派生值而不是新缓存，是为了让
+   * 「刷新后这段会清空」这件事在代码里一目了然，而不是看起来像史料。
+   */
+  resolvedFeed: PendingRequest[];
   dismissError: () => void;
 }
 
@@ -518,6 +536,61 @@ export function AppProvider({ children }: { children: ReactNode }): ReactElement
         );
       }),
     );
+    // 提问（MU-3）：与 approval.request 并列的第二类待办。
+    //
+    // 实情说明（写在这里而不是台账里，因为下一个读代码的人先到这）：
+    // 当前**全仓没有任何地方发 `question.request`**（只有 `question.respond` 命令与
+    // host 的应答通道），所以这条订阅在 v0.1 跑不到。先接上是因为：S5 收件箱
+    // 把两类待办当一件事处理，漏接就会在将来发出该事件的那天变成「卡住了但
+    // 收件箱看不到」—— 这是最难查的一类 bug。`question.respond` 已经存在，
+    // 意味着只差发侧一半。
+    offs.push(
+      sub('question.request', (p) => {
+        setPending((prev) =>
+          prev.some((x) => x.requestId === p.requestId)
+            ? prev
+            : [
+                ...prev,
+                {
+                  requestId: p.requestId,
+                  kind: 'question',
+                  // 事件只给 requestId + message（ipc.ts:329）：没有会话与发起者。
+                  // 当前会话是此刻唯一能说得出口的归属，没有则留空 —— 不编。
+                  sessionId: sessionIdRef.current ?? '',
+                  origin: '' as AgentPath,
+                  chain: [],
+                  message: p.message,
+                  at: Date.now(),
+                  state: 'pending',
+                },
+              ],
+        );
+      }),
+    );
+    // 代批留痕（MU-1 审批修②）：链上有 auto/full_access 祖先时审批不会到人面前，
+    // 但「谁替你批的」必须看得见。这条直接以 `state:'resolved'` 入 pending 表，
+    // 于是它天然落在 S5 的「已处理」段 —— 它不需要你做任何事，只是一条流水。
+    offs.push(
+      sub('approval.delegated', (p) => {
+        setPending((prev) => [
+          ...prev,
+          {
+            requestId: `delegated-${p.origin}-${p.tool}-${p.at}`,
+            kind: 'approval',
+            sessionId: sessionIdOfPath(p.origin) ?? '',
+            origin: p.origin,
+            chain: p.chain,
+            tool: p.tool,
+            approvalMode: p.mode,
+            message: `${p.approver} 代你批了 ${p.tool}（${p.mode}）`,
+            at: p.at,
+            state: 'resolved',
+            detail: { outcome: 'approved', delegated: true, approver: p.approver },
+          },
+        ]);
+      }),
+    );
+
     offs.push(
       sub('pending.resolved', ({ requestId, outcome }) => {
         setPending((prev) =>
@@ -701,10 +774,26 @@ export function AppProvider({ children }: { children: ReactNode }): ReactElement
     [call],
   );
 
-  /** 打开配置目录：失败已被 call 记进 error，这里不追加提示。 */
-  const openConfigDir = useCallback(
-    async (kind: 'roles' | 'teams'): Promise<void> => {
-      await call(() => window.axon.invoke(kind === 'roles' ? 'role.openDir' : 'team.openDir', {}));
+  /** 打开已知位置：失败已被 call 记进 error，这里不追加提示。 */
+  const openPath = useCallback(
+    async (kind: OpenPathKind): Promise<void> => {
+      await call(() => window.axon.invoke('shell.openPath', { kind }));
+    },
+    [call],
+  );
+
+  const openSettings = useCallback(async (): Promise<void> => {
+    await call(() => window.axon.invoke('window.openSettings', {}));
+  }, [call]);
+
+  /** 改配置：不做乐观更新 —— 主进程回的快照才是真相（字段可能被拒）。 */
+  const patchConfig = useCallback(
+    async (patch: ConfigPatch): Promise<boolean> => {
+      const res = await call(() => window.axon.invoke('config.patch', { patch }));
+      if (!res) return false;
+      setConfig(res.config);
+      if (!res.accepted && res.errors[0]) setError(res.errors[0].message);
+      return res.accepted;
     },
     [call],
   );
@@ -749,7 +838,11 @@ export function AppProvider({ children }: { children: ReactNode }): ReactElement
     saveTeam,
     deleteTeam,
     deleteRole,
-    openConfigDir,
+    openPath,
+    openSettings,
+    patchConfig,
+    // 派生（不存第二份真相）：已结算的待办就是 `pending` 里 state!=='pending' 那些。
+    resolvedFeed: pending.filter((p) => p.state !== 'pending'),
     dismissError: () => setError(null),
   };
 

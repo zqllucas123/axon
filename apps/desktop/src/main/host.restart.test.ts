@@ -308,6 +308,39 @@ describe('重启 · 恢复语义', () => {
     expect(rollup?.interruptedAt).toBeGreaterThan(0);
   });
 
+  it('rollup 透到 UI（MU-3 E-1）：未加载的 summary 就带 interruptedAt，加载后不丢', async () => {
+    const root = await tempRoot();
+    const first = await boot(root);
+    first.host.createSession({ title: '被中断的', executor: 'engine' });
+    // 同「全局预算」那例：先把建会话带起的异步写链收干、停掉宿主，
+    // 手写的汇总才不会被后到的 rollup 盖掉。
+    await first.persistence.flush();
+    await new Promise((r) => setTimeout(r, 30));
+    await first.persistence.flush();
+    first.host.dispose();
+    await new Promise((r) => setTimeout(r, 30));
+    await first.persistence.flush();
+    const item = (await first.persistence.listRecords())[0]!;
+    const interruptedAt = Date.now() - 60_000;
+    await first.persistence.saveRecord(item.record, {
+      at: Date.now(),
+      usage: { inputTokens: 10, outputTokens: 5, costUsd: 0.01 },
+      counts: { members: 2, running: 1, parked: 0, suspended: 0, ledger: 0, pending: 0 },
+      status: 'running',
+      interruptedAt,
+    });
+    const items = await first.persistence.listRecords();
+
+    const second = await boot(root, items);
+    // ① 未加载态（session.list 不读树）：摘要就要能说出「上次中断」
+    expect(second.host.storageStatus().loadedCount).toBe(0);
+    const listed = second.host.listSessions({}).find((s) => s.record.id === item.record.id);
+    expect(listed?.rollup?.interruptedAt).toBe(interruptedAt);
+    // ② 加载后仍在：那是历史事实，不因本次装载而消失
+    const detail = second.host.getSession(item.record.id);
+    expect(detail?.rollup?.interruptedAt).toBe(interruptedAt);
+  });
+
   it('账本 open → settled：summary 写明「应用重启，未及结算」（决策 2A）', async () => {
     const root = await tempRoot();
     const { sessionId, items } = await runThenQuit(root);

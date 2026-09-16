@@ -11,6 +11,9 @@ import { S0NewSession } from './S0NewSession.tsx';
 import { S1Workbench } from './S1Workbench.tsx';
 import { S2Session } from './S2Session.tsx';
 import { S3Teams } from './S3Teams.tsx';
+import { S5Inbox } from './S5Inbox.tsx';
+import { S6Budget } from './S6Budget.tsx';
+import { S7Sessions } from './S7Sessions.tsx';
 import { Icon } from '../icons.tsx';
 
 function Screen(): ReactElement {
@@ -22,6 +25,13 @@ function Screen(): ReactElement {
       return <S2Session />;
     case 's3':
       return <S3Teams />;
+    case 's5':
+      return <S5Inbox />;
+    case 's6':
+      return <S6Budget />;
+    case 's7':
+      return <S7Sessions />;
+    // 's0' 落在 default：它是启动屏，也是任何意外值的兼底。
     default:
       return <S0NewSession />;
   }

@@ -27,6 +27,7 @@ import {
   type SessionCounts,
   type SessionListQuery,
   type SessionRecord,
+  type SessionRollup,
   type SessionSummary,
   type SessionTeamRef,
   type TeamDefinition,
@@ -253,6 +254,11 @@ export interface SummaryInput {
   countsFromRollup?: Partial<SessionCounts>;
   /** 懒加载：未装树的会话，用量也只剩落盘那一份（列表的用量列要用）。 */
   usageFromRollup?: UsageTotals;
+  /**
+   * 上次退出落盘的汇总原件（MU-3 E-1）。原样透传给 UI 而不拆开：
+   * `interruptedAt` 是 S7「上次中断」的唯一来源，之前它落了盘却到不了界面。
+   */
+  rollup?: SessionRollup;
 }
 
 /**
@@ -309,5 +315,6 @@ export function buildSessionSummary(input: SummaryInput): SessionSummary {
     counts,
     usage,
     budget,
+    ...(input.rollup ? { rollup: input.rollup } : {}),
   };
 }

@@ -432,7 +432,7 @@ function TypeEditor({
 
 export function S3Teams(): ReactElement {
   const {
-    teams, roles, current, saveTeam, deleteTeam, saveRole, deleteRole, openConfigDir,
+    teams, roles, current, saveTeam, deleteTeam, saveRole, deleteRole, openPath,
   } = useApp();
   const [tab, setTab] = useState<Tab>('teams');
   /** 选中的团队名（详情区跟着它换）。 */
@@ -572,7 +572,7 @@ export function S3Teams(): ReactElement {
             <span className="spacer" />
             <button
               className="btn sm ghost"
-              onClick={() => void openConfigDir(tab === 'types' ? 'roles' : 'teams')}
+              onClick={() => void openPath(tab === 'types' ? 'roles' : 'teams')}
             >
               <Icon name="folder" size={14} />
               打开配置目录
@@ -771,7 +771,7 @@ export function S3Teams(): ReactElement {
                         删除团队
                       </button>
                       <span className="spacer" />
-                      <button className="btn sm" onClick={() => void openConfigDir('teams')}>
+                      <button className="btn sm" onClick={() => void openPath('teams')}>
                         打开目录
                       </button>
                       <button className="btn sm primary" onClick={() => void saveDraft()} disabled={busy} data-smoke="team-save">

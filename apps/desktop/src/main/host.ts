@@ -769,6 +769,7 @@ export class AxonHost {
     const team = record.teamId !== undefined ? this.teams.get(record.teamId)?.team : undefined;
     // 临时成员 = 树上实际有、团队定义里没有的那些（UX 02 §6 拍板：不算团队成员）。
     const tempCount = team ? Math.max(0, members.length - 1 - team.members.length) : 0;
+    const rollup = this.sessionRollups.get(sessionId);
     return buildSessionSummary({
       record,
       rootPath,
@@ -781,6 +782,9 @@ export class AxonHost {
       ...(team?.budget !== undefined ? { teamBudget: team.budget } : {}),
       ...(team !== undefined ? { team } : {}),
       tempCount,
+      // E-1：已装载的会话也带上 rollup —— S7 用它的 `interruptedAt` 说「上次中断」，
+      // 那是历史事实，不因为本次装载了就消失。
+      ...(rollup ? { rollup } : {}),
     });
   }
 
@@ -1135,7 +1139,7 @@ export class AxonHost {
       ...(team?.budget !== undefined ? { teamBudget: team.budget } : {}),
       ...(team !== undefined ? { team } : {}),
       tempCount: 0,
-      ...(rollup ? { countsFromRollup: rollup.counts, usageFromRollup: rollup.usage } : {}),
+      ...(rollup ? { countsFromRollup: rollup.counts, usageFromRollup: rollup.usage, rollup } : {}),
     });
   }
 

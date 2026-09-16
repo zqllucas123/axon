@@ -13,6 +13,7 @@
  */
 
 import {
+  CONFIG_PATCH_PATHS,
   ENV_OVERRIDE_SPECS,
   configFieldSpec,
   isConfigPatchPath,
@@ -107,6 +108,10 @@ function validateValue(path: string, value: unknown, raw: Record<string, unknown
         code: 'out-of-range',
         message: `${path} 必须在 ${spec.min ?? '-∞'} ~ ${spec.max ?? '+∞'} 之间，收到 ${value}`,
       });
+    }
+  } else if (spec.kind === 'boolean') {
+    if (typeof value !== 'boolean') {
+      issues.push({ path, code: 'invalid-type', message: `${path} 必须是 true / false` });
     }
   } else if (spec.kind === 'enum') {
     if (typeof value !== 'string' || !(spec.values ?? []).includes(value)) {
@@ -284,6 +289,39 @@ export class ConfigStore {
       return { accepted: false, errors, config: this.snapshot() };
     }
 
+    return this.commit(draft, errors);
+  }
+
+  /**
+   * 恢复出厂（`config.reset`，S8 危险区）—— 把**白名单内**的字段删回缺省。
+   *
+   * 为什么不能用 `patch` 逐个置 null 代替：那样会被 env-locked 挡住（被环境变量
+   * 覆盖的字段依旧留在文件里，用户看到的是「重置了但没重置干净」）。重置是
+   * 对**文件**的操作，env 覆盖是运行时的事，两件事不该耦在一起。
+   *
+   * 两条不变量：
+   *  - **未知键原样保留**（同 patch 的纪律；用户手写的东西不得被一键吃掉）；
+   *  - **不动角色目录与团队目录**（它们不在这个文件里，S8 文案也这么写）。
+   */
+  async reset(): Promise<{ accepted: boolean; errors: ConfigIssue[]; config: ConfigSnapshot }> {
+    const draft: Record<string, unknown> = structuredClone(this.raw);
+    for (const path of CONFIG_PATCH_PATHS) deletePath(draft, path);
+    // 删完叶子后别留下 `"ui": {}` 这种空壳：它会让下次读盘看起来「配过」。
+    // 但容器里还有未知键（如 provider.id）时必须保留容器本身。
+    for (const key of ['provider', 'ui']) {
+      const nested = draft[key];
+      if (typeof nested === 'object' && nested !== null && Object.keys(nested).length === 0) {
+        delete draft[key];
+      }
+    }
+    return this.commit(draft, []);
+  }
+
+  /** 原子落盘 + 接管内存真相。patch 与 reset 共用同一条写路径。 */
+  private async commit(
+    draft: Record<string, unknown>,
+    errors: ConfigIssue[],
+  ): Promise<{ accepted: boolean; errors: ConfigIssue[]; config: ConfigSnapshot }> {
     try {
       await this.io.mkdir(dirname(this.configPath));
       const payload = `${JSON.stringify(draft, null, 2)}\n`;

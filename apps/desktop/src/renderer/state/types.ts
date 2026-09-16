@@ -5,8 +5,12 @@
  * 渲染层只做「渲染 + 发意图」，导航是纯 UI 状态，不落盘、不入协议）。
  */
 
-/** 全局屏（ux 00 §2 的屏幕清单，MU-2 只落地这四屏；S5/S6/S7/S8 在 MU-3）。 */
-export type Screen = 's0' | 's1' | 's2' | 's3';
+/**
+ * 全局屏（ux 00 §2 的屏幕清单）。MU-2 落地 s0~s3，MU-3 补齐 s5/s6/s7；
+ * **S8（设置）不在这里** —— 它是独立窗口（拍板 P-2，见 `main/windows.ts`），
+ * 不占主窗的屏位。S4（调试台）已在 MU-2 退役，序号不再回收。
+ */
+export type Screen = 's0' | 's1' | 's2' | 's3' | 's5' | 's6' | 's7';
 
 /** 会话内视图（会话条 seg；ux 02 §3.6：随会话切换重建）。 */
 export type SessionView = 'chat' | 'ledger' | 'usage';

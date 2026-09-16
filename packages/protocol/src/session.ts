@@ -259,6 +259,12 @@ export interface SessionSummary {
   /** 本会话累计用量（含全部成员）。 */
   usage: UsageTotals;
   budget: SessionBudgetView;
+  /**
+   * 上次退出时落盘的汇总（M5 §4.6）。**只有从磁盘恢复的会话才有**：
+   * 它是 S7「上次中断」那行字的唯一来源 —— 运行中的会话看 `status` 就够了，
+   * 而已经退出的会话，`interruptedAt` 是「当时还有成员在跑」的唯一证据。
+   */
+  rollup?: SessionRollup;
 }
 
 /** `session.get` 的结果：摘要 + 本会话成员树（G10.3，右栏顶部面板的数据源）。 */
