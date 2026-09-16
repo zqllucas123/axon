@@ -314,6 +314,21 @@ S3 团队 tab：team.list → 卡片；点卡 → 详情（成员列表 + 策略
 
 **片间纪律**：每片收口跑 `bun run typecheck && bun run guard && bun run test`；每片一个语义 commit（`feat(renderer): …`）。**不进 `main`、不推远端**（等网络恢复由主线会话统一推送）。
 
+**完成记录（2026-09-16，九片全部落地）**：
+
+| 片 | commit | 落地要点 |
+|---|---|---|
+| 1a/1b/1c | `5625770` / `1c8b9d0` / `e255a26`+`8eb01bf`+`dbe06e2`+`4717fca` | 浅色令牌 + `styles/*` 四份 CSS + `icons.tsx` + 状态容器 + Shell/Sidebar/Topbar/Chips/Inspector 骨架 + 三屏骨架 |
+| 2 | `bf0034c`（+`099e962`） | S0 新建会话（三模式卡 + 团队卡片 + 屏自持右栏） |
+| 3 | `d772554`（+`98eea11`、`7f5d395`） | S2 消息流六元件；两处真 bug（条目 id 用 agent 路径互相覆盖 / 回放被增量挡住）；占位收口 + 工具卡状态校正 + 待批 chip 取实时值 |
+| 4/5/6 | `d5ebb68` | S2 右栏四面板 + S2-solo 与「叫人」浮层 + 会话内账本/用量两视图 |
+| 7 | `2347bee`（+`963e04b`） | S1 会话总览（活跃会话 + 分身列表 + 三张 stat + 团队/并发闸门右栏）；stat 块级化 + 可点进会话视图 |
+| 8 | `2d41e0b` | S3 团队管理三 tab + 团队详情编辑器 + Agent 类型编辑器；删旧 `RolePanel.tsx`/`RoleEditor.tsx` |
+| 9 | 本 commit（+ 落盘竞态修复） | 冒烟补幕（S0/S1/S3 + 懒加载反向断言 + 预算 chip）+ 文档同步 + 质量门；**附修 M5 落盘竞态**（见 §九 末尾） |
+
+附带的工具提交：`8dab438`+`7fdc9bd`+`ef9824f`（真窗口截图钩子 `AXON_SHOT_DIR`，逐值对齐的人眼验收）、`62d56dc`+`662f344`（base 层与真实表单控件字体归一）、`f8fb13a`（build.mjs 导入修正）。
+
+
 ---
 
 ## 八、测试策略
@@ -324,34 +339,40 @@ S3 团队 tab：team.list → 卡片；点卡 → 详情（成员列表 + 策略
    - 保留幕 1–8 与全部 `data-smoke` 钩子语义；
    - 新增：① S0 落地（三模式卡存在、默认 engine 选中）；② 建团队会话后 S2 出现会话条 + 右栏成员树（`member-row` ≥ 2）；③ S1 列表行数与会话数一致；④ S3 团队卡与 `team.list` 一致；
    - 新增**反向断言**：进 S1/左栏渲染后 `storage.status.loadedCount` 不增长。
-4. **契约/集成测试零改动**（本片不碰主进程）；`bun run test` 现有 **517 例**必须全绿。
+4. **契约/集成测试零改动**（本片不碰主进程）；`bun run test` 现有 **518 例**必须全绿。
 5. **`verify-lazy`**：`renderer.js` 不得出现 pi 包名与 `node:`/`require(`（本片新增文件都是浏览器安全的 React/CSS）。
 
 ---
 
 ## 九、验收标准
 
-- [ ] 应用启动落在 S0，三张模式卡可切换（默认「内置引擎」），团队卡片来自 `team.list`
-- [ ] 建会话（engine / team）后进 S2：会话条、右栏成员树、消息流三处数据同源且一致
-- [ ] 消息流六元件按 §4.6 处置落地（可实现四种 + 卡片四类）；缺口一律**整块不渲染**（无假数据）
-- [ ] 右栏三块按会话粒度重建；点成员切换焦点，顶栏 tag 与「当前成员」跟随
-- [ ] 单兵会话：账本 seg 置灰 + 「叫人」可用（escalate 后消息不丢）
-- [ ] S1 列表 = 会话数；三张 stat 与右栏口径一致；渲染列表**不触发**会话装载（`loadedCount` 不变）
-- [ ] S3 三 tab 可用；团队保存/删除落盘；类型编辑器可增删改（沿用 M2 能力）
-- [ ] 令牌逐值对齐：`--bg-sidebar #f2f1ee` / `--bg-canvas #fcfcfb` / `--line #e7e5e0` / `--accent #2b2a27`、半径 6/8/12/16/20、字阶 11…20；全局零 `box-shadow`
-- [ ] 冒烟 8 + 新增幕全绿；`guard` / `typecheck` / `test` / `build:desktop` / `verify-lazy` 全绿
-- [ ] `bun run dev` 手工过一遍：S0 → S2 → S1 → S3 → 重启后左栏正确
+- [x] 应用启动落在 S0，三张模式卡可切换（默认「内置引擎」），团队卡片来自 `team.list`
+- [x] 建会话（engine / team）后进 S2：会话条、右栏成员树、消息流三处数据同源且一致
+- [x] 消息流六元件按 §4.6 处置落地（可实现四种 + 卡片四类）；缺口一律**整块不渲染**（无假数据）
+- [x] 右栏三块按会话粒度重建；点成员切换焦点，顶栏 tag 与「当前成员」跟随
+- [x] 单兵会话：账本 seg 置灰 + 「叫人」可用（escalate 后消息不丢）
+- [x] S1 列表 = 会话数；三张 stat 与右栏口径一致；渲染列表**不触发**会话装载（`loadedCount` 不变）
+- [x] S3 三 tab 可用；团队保存/删除落盘；类型编辑器可增删改（沿用 M2 能力）
+- [x] 令牌逐值对齐：`--bg-sidebar #f2f1ee` / `--bg-canvas #fcfcfb` / `--line #e7e5e0` / `--accent #2b2a27`、半径 6/8/12/16/20、字阶 11…20；全局零 `box-shadow`
+- [x] 冒烟 8 + 新增幕全绿；`guard` / `typecheck` / `test` / `build:desktop` / `verify-lazy` 全绿
+- [x] `bun run dev` 手工过一遍：S0 → S2 → S1 → S3 → 重启后左栏正确
+
+**质量门实测（2026-09-16，收尾）**：`guard` 6 项全通过 / `typecheck` 双 tsc 0 错 / `test` **518 passed (24 files)** / `build:desktop` OK（`renderer.js` 324411 B，`main.mjs` 236420 B）/ `verify-lazy` ✓「provider 懒加载完好，内核未泄漏到渲染层」/ `ui-smoke` ✓ 全幕（含新增 S0/S1/S3 与懒加载反向断言 `loadedCount 1 → 1`）。
+
+**收尾期抓到并修掉一条主进程落盘竞态**（切片 9 复跑质量门时暴露）：`SessionPersistence.appendLedger` / `appendTranscript` 原先只 `appendFile` 不建目录，而建会话的 `mkdir` 与 append **不在同一条 per-file 队列**上 —— 真盘慢时首轮对话里的 `delegate` 会撞上还没建好的会话目录（ENOENT），记录被静默记进 `issues`（症状：`host.persistence.test.ts` / `host.restart.test.ts` 随机红 2~5 例，单跑不复现）。修法三条：① append 写路径**自建目录**（`mkdir` 幂等，失败才记 issue）；② `AxonHost` 建会话分支的三笔写改成**同步入队**（`flush()` 取等待快照之前就入队）；③ 两个真盘测试收尾先 `flush()` 再删目录、`rm` 带 `maxRetries`（写入是异步的，`rm` 抢目录就是 ENOTEMPTY）。回归：`session-persistence.test.ts` 新增「会话目录还不存在时 append 也不丢」1 例（517 → 518）。
 
 ---
 
 ## 十、文档同步（完工后）
 
-- `docs/ux/00-信息架构与屏幕清单.md` §7（MU 边界行：S0/S1/S2/S3 已落地 + 实测删减项）
-- `docs/ux/01-视觉设计语言与高保真原型.md` §5.3（令牌 → `styles/tokens.css`；组件对照表 → 本文件 §4.5）
-- `docs/ux/02-团队与会话模型.md` §7（MU 行补「MU-2 已落地 S0/S1/S2/S2-solo/S3」）
-- `docs/03-实施框架与里程碑.md` §1（MU 支线状态列 + 完成记录块 + 测试规模数字）
-- `docs/01-架构决策-方案B.md` §1（进度表渲染层行）
-- 本文件追加「§十二 设计 vs 实测」（实现期发现的原型/协议出入）
+**（2026-09-16 全部完成，随切片 9 一起提交）**
+
+- `docs/ux/00-信息架构与屏幕清单.md` §7（MU 边界行：S0/S1/S2/S3 已落地 + 实测删减项）→ ✅ 已更新
+- `docs/ux/01-视觉设计语言与高保真原型.md` §5.3（令牌 → `styles/tokens.css`；组件对照表 → 本文件 §4.5）→ ✅ 已更新
+- `docs/ux/02-团队与会话模型.md` §7（MU 行补「MU-2 已落地 S0/S1/S2/S2-solo/S3」）→ ✅ 已更新
+- `docs/03-实施框架与里程碑.md` §1（MU 支线状态列 + 完成记录块 + 测试规模数字）→ ✅ 已更新
+- `docs/01-架构决策-方案B.md` §1（进度表渲染层行）→ ✅ 已更新
+- 本文件追加「§十三 设计 vs 实测」（实现期发现的原型/协议出入）→ ✅ 已追加
 
 ---
 

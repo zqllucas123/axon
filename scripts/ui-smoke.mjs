@@ -154,6 +154,15 @@ async function connect() {
 try {
   await connect();
 
+  // 小工具：轮询一个表达式直到它真（DOM 是事件驱动的，必然有延迟）。
+  const until = async (expr, tries = 40) => {
+    for (let i = 0; i < tries; i++) {
+      if (await evalJs(expr)) return true;
+      await new Promise((r) => setTimeout(r, 250));
+    }
+    return false;
+  };
+
   // ── 1. 桥接 + 初始角色数（等 preload 挂桥，CDP evaluate 不保证页面就绪）
   let before;
   for (let i = 0; i < 40; i++) {
@@ -185,44 +194,23 @@ try {
   }
   log(true, '页面 invoke role.save 成功（preload→IPC→bridge→写盘）');
 
-  // ── 3. 等事件 → React 重渲染 → DOM 出现该角色
-  let found = false;
-  for (let i = 0; i < 40; i++) {
-    const names = await evalJs(
-      `[...document.querySelectorAll('.role .name')].map(el => el.textContent).join('|')`,
-    );
-    if (String(names).includes('冒烟角色')) {
-      found = true;
-      break;
-    }
-    await new Promise((r) => setTimeout(r, 250));
-  }
-  log(found, 'DOM 出现「冒烟角色」卡片（事件 → React 重渲染闭环）');
+  // ── 3. 等事件 → React 重渲染 → DOM 出现该类型
+  //     MU-2 起类型的编辑面在 S3「Agent 类型」tab（旧 RolePanel 已删）。
+  await evalJs(`document.querySelector('[data-smoke="nav-s3"]').click()`);
+  await evalJs(`document.querySelector('[data-smoke="tab-types"]').click()`);
+  const found = await until(
+    `!!document.querySelector('[data-smoke="type-row"][data-role="${roleName}"]')`,
+  );
+  log(found, 'S3 类型库出现新类型（role.save → roles.changed → React 重渲染闭环）');
+  if (!found) exit(1);
 
-  // ── 4. 清理：删除后 DOM 回落
+  // ─ 4. 清理：删除后 DOM 回落
   await evalJs(`window.axon.invoke('role.delete', { name: '${roleName}' })`);
-  let gone = false;
-  for (let i = 0; i < 20; i++) {
-    const names = await evalJs(
-      `[...document.querySelectorAll('.role .name')].map(el => el.textContent).join('|')`,
-    );
-    if (!String(names).includes('冒烟角色')) {
-      gone = true;
-      break;
-    }
-    await new Promise((r) => setTimeout(r, 250));
-  }
+  const gone = await until(
+    `!document.querySelector('[data-smoke="type-row"][data-role="${roleName}"]')`,
+  );
   log(gone, '删除后 DOM 回落（清理成功）');
-  if (!found || !gone) exit(1);
-
-  // 小工具：轮询一个表达式直到它真（DOM 是事件驱动的，必然有延迟）。
-  const until = async (expr, tries = 40) => {
-    for (let i = 0; i < tries; i++) {
-      if (await evalJs(expr)) return true;
-      await new Promise((r) => setTimeout(r, 250));
-    }
-    return false;
-  };
+  if (!gone) exit(1);
 
   // ── 4.5 会话容器（MU-1）：建会话 → 左栏出现会话行 → 树以会话根为根
   //     多根模型（§4.1）下没有「总是存在的 /root」，一切寻址从会话根出发。
@@ -240,14 +228,16 @@ try {
   // 所以这里显式把当前会话点到冒烟自己这个 —— 否则断言会跟着竞态飘。
   await until(`!!document.querySelector('[data-smoke="session-row"][data-session="${session.id}"]')`);
   await evalJs(`document.querySelector('[data-smoke="session-row"][data-session="${session.id}"]').click()`);
-  const sessionRow = await until(`!!document.querySelector('.session.sel[data-session="${session.id}"]')`);
+  const sessionRow = await until(
+    `!!document.querySelector('.sidebar [data-smoke="session-row"][data-session="${session.id}"].is-active')`,
+  );
   log(sessionRow, '左栏选中冒烟会话（session.created → React 重渲染 → 点击选中）');
   if (!sessionRow) exit(1);
 
   const rootNode = await until(
-    `[...document.querySelectorAll('.tree .node')].some(el => el.title.startsWith('${session.root} '))`,
+    `!!document.querySelector('.inspector [data-smoke="member-row"][data-path="${session.root}"]')`,
   );
-  log(rootNode, `Agent 树以会话根为根（${session.root}）`);
+  log(rootNode, `右栏成员树以会话根为根（${session.root}）`);
   if (!rootNode) exit(1);
 
   const spawned = await evalJs(
@@ -262,18 +252,26 @@ try {
   // ── 5. 协作账本（M4 / UX S4）：发一句话 → Agent 用 agent 工具派活
   //     → 落 delegate 账 → 子终态后结算 → 人点「采纳」。
   await evalJs(`window.axon.invoke('agent.prompt', { path: '${spawned}', text: '协作冒烟' })`);
-  const recorded = await until(`!!document.querySelector('[data-smoke="ledger-row"]')`);
-  log(recorded, '账本面板出现协作记录（ledger.recorded → React upsert）');
+  // 右栏迷你账本是 **participant 口径**（只列与当前成员相关的条目，MU-2 §4.6）——
+  // 先把焦点点回发起人，否则面板按会话根过滤，看得见会话却看不见这笔 delegate。
+  const focusRow = await until(
+    `!!document.querySelector('.inspector [data-smoke="member-row"][data-path="${spawned}"]')`,
+  );
+  await evalJs(
+    `document.querySelector('.inspector [data-smoke="member-row"][data-path="${spawned}"]')?.click()`,
+  );
+  const recorded = await until(`!!document.querySelector('.inspector [data-smoke="ledger-row"]')`);
+  log(recorded && focusRow, '右栏账本出现协作记录（ledger.recorded → React upsert，按当前成员过滤）');
   if (!recorded) exit(1);
 
   // 等结算：只有 settled + pending 的行才给「采纳」按钮
-  const adoptable = await until(`!!document.querySelector('[data-smoke="ledger-adopt"]')`);
+  const adoptable = await until(`!!document.querySelector('.inspector [data-smoke="ledger-adopt"]')`);
   log(adoptable, '子 Agent 终态后记录自动结算，出现「采纳」按钮（ledger.updated）');
   if (!adoptable) exit(1);
 
-  await evalJs(`document.querySelector('[data-smoke="ledger-adopt"]').click()`);
+  await evalJs(`document.querySelector('.inspector [data-smoke="ledger-adopt"]').click()`);
   const adopted = await until(
-    `!!document.querySelector('[data-smoke="ledger-row"][data-adoption="adopted"]')`,
+    `!!document.querySelector('.inspector [data-smoke="ledger-row"][data-adoption="adopted"]')`,
   );
   log(adopted, '点击「采纳」后记录转 adopted（ledger.adopt → 人工署名落账）');
   if (!adopted) exit(1);
@@ -291,28 +289,89 @@ try {
   log(cleared, '点「批准」后 banner 消失，工具放行（pending.resolved）');
   if (!cleared) exit(1);
 
-  // ── 7. 预算熔断（M3 切片 6）：含「烧钱」的 prompt×2 走完 warning → frozen
+  // ─ 7. 预算熔断（M3 切片 6 / MU-2 视觉）：含「烧钱」的 prompt×2 走完 warning → frozen。
+  //     MU-2 起冻结信号是**顶栏预算 chip 变色**（原型 shell.js:258 的 warn/danger 两档），
+  //     旧的 .budget 横幅随 SessionPanel 一起下线 —— 这里断言的是真窗口里的那一枚 chip。
   await evalJs(`window.axon.invoke('agent.prompt', { path: '${spawned}', text: '烧钱第一轮' })`);
-  let warned = false;
-  for (let i = 0; i < 40; i++) {
-    warned = await evalJs(`!!document.querySelector('.budget.warning')`);
-    if (warned) break;
-    await new Promise((r) => setTimeout(r, 250));
-  }
-  log(warned, '第一轮 prompt 后出现预算警告 banner（budget.warning → React 重渲染）');
+  const warned = await until(`!!document.querySelector('.status-chips .chip.warn')`);
+  log(warned, '第一轮后预算 chip 转 warn（budget.warning → React 重渲染）');
   if (!warned) exit(1);
 
   await evalJs(`window.axon.invoke('agent.prompt', { path: '${spawned}', text: '烧钱第二轮' })`);
-  let frozen = false;
-  for (let i = 0; i < 40; i++) {
-    frozen = await evalJs(
-      `!!document.querySelector('.budget.frozen') && document.querySelector('footer input')?.disabled === true`,
-    );
-    if (frozen) break;
-    await new Promise((r) => setTimeout(r, 250));
-  }
-  log(frozen, '第二轮 prompt 后预算冻结：banner 变红 + 输入框禁用（budget.frozen → React 重渲染）');
+  const frozen = await until(`!!document.querySelector('.status-chips .chip.danger')`);
+  log(frozen, '第二轮后预算 chip 转 danger（budget.frozen → 档位终态）');
   if (!frozen) exit(1);
+
+  // ── 7.5 MU-2 三屏（切片 7/8）：渲染 + 导航 + 懒加载反向断言
+  //     懒加载的验收线是「反面」的：列表/树渲染只许读内存缓存，绝不许补拉 session.get。
+  //     所以这里量 storage.status.loadedCount —— 进屏前后必须一模一样。
+  const loadedExpr = `window.axon.invoke('storage.status', {}).then(s => s.loadedCount)`;
+  const loadedBefore = await evalJs(loadedExpr);
+
+  await evalJs(`document.querySelector('[data-smoke="nav-s0"]').click()`);
+  const s0 = await until(
+    `!!document.querySelector('[data-smoke="session-task"]') &&
+     document.querySelectorAll('.mode-card').length === 3 &&
+     !!document.querySelector('[data-smoke="start-session"]')`,
+  );
+  log(s0, 'S0 新建会话屏渲染（任务输入 + 三种执行方式 + 出发）');
+  if (!s0) exit(1);
+
+  await evalJs(`document.querySelector('[data-smoke="nav-s1"]').click()`);
+  const s1row = await until(
+    `!!document.querySelector('.canvas [data-smoke="session-row"][data-session="${session.id}"]')`,
+  );
+  log(s1row, 'S1 会话总览列出该会话（只读 session.list 摘要）');
+  const s1members = await until(
+    `document.querySelectorAll('.canvas [data-smoke="member-row"]').length >= 2`,
+  );
+  log(s1members, 'S1 当前会话的分身列表（只渲染已加载的 details，缺了也不补拉）');
+  if (!s1row || !s1members) exit(1);
+
+  const loadedAfterS1 = await evalJs(loadedExpr);
+  log(
+    loadedAfterS1 === loadedBefore,
+    `进 S1 不触发读盘（loadedCount ${loadedBefore} → ${loadedAfterS1}）`,
+  );
+  if (loadedAfterS1 !== loadedBefore) exit(1);
+
+  await evalJs(`document.querySelector('[data-smoke="stat-ledger"]').click()`);
+  const toLedger = await until(
+    `!!document.querySelector('[data-smoke="view-ledger"]') &&
+     !!document.querySelector('[data-smoke="ledger-row"]')`,
+  );
+  log(toLedger, 'S1 统计卡「协作落账」→ S2 账本视图（发意图，不是 href）');
+  if (!toLedger) exit(1);
+
+  await evalJs(`document.querySelector('[data-smoke="nav-s3"]').click()`);
+  const s3cards = await until(`document.querySelectorAll('[data-smoke="team-card"]').length >= 3`);
+  log(s3cards, 'S3 团队 tab 列出团队卡（内置团队也在这张表里）');
+  if (!s3cards) exit(1);
+  await evalJs(`document.querySelector('[data-smoke="team-card"]').click()`);
+  const s3detail = await until(
+    `!!document.querySelector('[data-smoke="team-detail"]') &&
+     document.querySelectorAll('[data-smoke="team-detail"] [data-smoke="member-row"]').length >= 2`,
+  );
+  log(s3detail, '选中团队后出详情卡（成员行 + 编队/并发/预算表单）');
+  if (!s3detail) exit(1);
+  await evalJs(`document.querySelector('[data-smoke="tab-agents"]').click()`);
+  const s3agents = await until(`document.querySelectorAll('[data-smoke="agent-row"]').length >= 2`);
+  log(s3agents, 'Agent tab = 跨团队成员清单（拍板④：只读）');
+  if (!s3agents) exit(1);
+  await evalJs(`document.querySelector('[data-smoke="tab-types"]').click()`);
+  const s3types = await until(`document.querySelectorAll('[data-smoke="type-row"]').length >= 8`);
+  log(s3types, 'Agent 类型 tab 列出类型库（内置 + 用户，带被引用数）');
+  if (!s3types) exit(1);
+
+  const loadedAfterS3 = await evalJs(loadedExpr);
+  log(
+    loadedAfterS3 === loadedBefore,
+    `进 S3 三 tab 不触发读盘（loadedCount ${loadedBefore} → ${loadedAfterS3}）`,
+  );
+  if (loadedAfterS3 !== loadedBefore) exit(1);
+
+  // 回到会话屏：重启幕的「左栏重新列出会话」断言要在稳定态上跑。
+  await evalJs(`document.querySelector('[data-smoke="nav-s1"]').click()`);
 
   // ── 8. 重启恢复（M5 §4.5/§4.6）：同一个落盘根、第二次开机
   //     这一幕验的是「接线的形态」，单测（host.restart.test.ts）验的是语义：

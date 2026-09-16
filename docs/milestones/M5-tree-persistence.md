@@ -476,4 +476,4 @@ host.prompt(path, text)
 9. **汇总是「缓存路径」，一旦带上整份 record 就参与了真相的写入**（收尾时抓到的真 bug，随机红暴露）。`scheduleRollup` 抓一份 `record` 快照，而汇总延迟写（合并窗口 ≥500ms）；`saveRecord(pending.record, …)` 把整份**老 record** 写回 —— 「单兵升团队」把 `executor` 改成 `team` 后，一笔早先排下的汇总才落地，`executor` 退回 `engine`，重启后主控丢掉编排工具（测试里 `diskExecutor: "engine"` 看得见）。修法：汇总走**只写汇总**的 `saveRollup()`，在同一文件的队列里 read-modify-write、**以盘上的 record 为准**。教训：§4.4 那句「丢一次不会丢真相」只对汇总字段成立。
 10. **待写汇总不能只留一个槽**：`pendingRollup` 单槽时后一个会话的汇总会顶掉前一个（多会话并发只有最后一个落盘）⇒ 改 `Map<sessionId, …>`；另加**单调守卫**（盘上 rollup 的 `at` ≥ 待写值就跳过），否则老快照会把左栏的「刚升级成 3 人」显示回 1 人。
 
-**测试规模**：M5 交付后 **517 例 / 24 文件**全绿（M4 收口 429 例 → +88）；`guard`/`typecheck`/`build:desktop`/`verify-lazy`/`ui-smoke` 全绿，冒烟新增「重启恢复」幕 6 项检查。
+**测试规模**：M5 交付后 **517 例 / 24 文件**全绿（M4 收口 429 例 → +88；MU-2 收尾又补 1 例落盘竞态回归 → 518）；`guard`/`typecheck`/`build:desktop`/`verify-lazy`/`ui-smoke` 全绿，冒烟新增「重启恢复」幕 6 项检查。
