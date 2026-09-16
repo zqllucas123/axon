@@ -9,7 +9,7 @@
  *
  * 单测覆盖不了「每一环拼起来的形态」，只能真窗口验。M2 验收证据，M3+ 复用。
  */
-import { spawn } from 'node:child_process';
+import { execSync, spawn } from 'node:child_process';
 import { mkdtemp } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -76,7 +76,13 @@ function exit(code) {
   } catch {
     /* ignore */
   }
-  if (proc) proc.kill('SIGTERM');
+  // 按入口路径清场：只 kill 壳会留下孤儿 Electron（下一次冒烟会连到它身上，假绿）。
+  try {
+    execSync('pkill -9 -f "apps/desktop/dist/main.mjs"', { stdio: 'ignore' });
+  } catch {
+    /* ignore */
+  }
+  if (proc) proc.kill('SIGKILL');
   console.log(code === 0 ? '\n✓ UI 端到端冒烟通过' : '\n✗ UI 端到端冒烟失败');
   process.exit(code);
 }
@@ -86,6 +92,25 @@ let nextId = 1;
 let pending = new Map();
 /** 页面求值 —— connect() 每次重生（重启后是另一个页面目标，句柄全得换）。 */
 let evalJs;
+
+/** 杀掉当前应用（含 cli.js 壳拉起的 Electron 本体）并等它真退出。
+ *
+ * `node_modules/.bin/electron` 只是个壳，真正的 Electron 是它的子进程 ——
+ * 只给壳发 SIGTERM，应用会变孤儿继续占着调试端口（第二次开机就起不来）。
+ * 所以直接按入口路径 pkill（-9：卡在退出路径上的实例不理 SIGTERM）。 */
+async function killApp(timeoutMs = 8000) {
+  if (!proc || proc.exitCode !== null) return true;
+  try {
+    execSync('pkill -9 -f "apps/desktop/dist/main.mjs"', { stdio: 'ignore' });
+  } catch {
+    /* 没有匹配 */
+  }
+  const deadline = Date.now() + timeoutMs;
+  while (proc.exitCode === null && Date.now() < deadline) {
+    await new Promise((r) => setTimeout(r, 100));
+  }
+  return proc.exitCode !== null;
+}
 
 /** 连上当前窗口的 CDP（第一次开机与重启幕共用）。 */
 async function connect() {
@@ -293,14 +318,11 @@ try {
   //     index.ts 是否真的把根接上、listRecords 是否真的先读 session.json、
   //     窗口重开时左栏是否重新列出上次的会话。
   await new Promise((r) => setTimeout(r, 800)); // 让 500ms 的汇总窗口先收口
-  proc.kill('SIGTERM');
-  for (let i = 0; i < 50 && proc.exitCode === null; i++) {
-    await new Promise((r) => setTimeout(r, 100));
-  }
-  if (proc.exitCode === null) {
-    log(false, '第一次开机没能在 5s 内退出（SIGTERM 无效）');
-    exit(1);
-  }
+  // 硬杀：这一幕验的是「盘上的东西能不能装回来」，不是退出路径本身；
+  // graceful 的退出收口由 host.restart.test.ts + index.ts 的 will-quit flush 覆盖。
+  const quit = await killApp();
+  log(quit, '第一次开机已退出（第二次开机用同一个落盘根）');
+  if (!quit) exit(1);
   launchApp();
   await connect();
 
