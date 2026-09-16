@@ -6,7 +6,7 @@
  */
 
 import { useState, type ReactElement } from 'react';
-import { useApp } from '../state/store.ts';
+import { useApp } from '../state/store.tsx';
 import { splitSessions } from '../state/selectors.ts';
 import { Icon, type IconName } from '../icons.tsx';
 

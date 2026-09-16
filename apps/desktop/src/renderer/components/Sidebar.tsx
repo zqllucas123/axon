@@ -9,7 +9,7 @@
  */
 
 import { useEffect, useState, type ReactElement } from 'react';
-import { useApp } from '../state/store.ts';
+import { useApp } from '../state/store.tsx';
 import { globalChips, sessionMeta, splitSessions, statusDot } from '../state/selectors.ts';
 import { Icon, type IconName } from '../icons.tsx';
 import type { SessionSummary } from '@axon/protocol';

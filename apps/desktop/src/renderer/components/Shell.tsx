@@ -4,7 +4,7 @@
  */
 
 import type { ReactElement } from 'react';
-import { useApp } from '../state/store.ts';
+import { useApp } from '../state/store.tsx';
 import { Sidebar } from './Sidebar.tsx';
 import { Topbar } from './Topbar.tsx';
 import { Inspector } from './Inspector.tsx';

@@ -6,7 +6,7 @@
  */
 
 import type { ReactElement } from 'react';
-import { useApp } from '../state/store.ts';
+import { useApp } from '../state/store.tsx';
 import { Chips } from './Chips.tsx';
 
 export function Topbar(): ReactElement {

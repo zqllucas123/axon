@@ -6,7 +6,7 @@
  */
 
 import type { ReactElement } from 'react';
-import { useApp } from '../state/store.ts';
+import { useApp } from '../state/store.tsx';
 import { globalChips, sessionChips } from '../state/selectors.ts';
 import { Icon } from '../icons.tsx';
 

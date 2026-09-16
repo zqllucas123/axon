@@ -16,7 +16,7 @@
  * `verify-lazy` 这个 npm script 就是为了让这条规则**可验证而非口头约定**。
  */
 import { build } from 'esbuild';
-import { cp, mkdir, rm } from 'node:fs/promises';
+import { cp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -91,7 +91,7 @@ await build({
   format: 'esm',
 });
 
-// 样式：四份按序拼成一份（tokens → components → screens），index.html 只挂一个 <link>。
+// 样式：四份按序拼成一份（tokens → base → components → screens），index.html 只挂一个 <link>。
 // 不走 esbuild：CSS 不是它这一段的输入，cp 更直白，也不会被 minify 打乱逐值对齐。
 const cssFiles = ['tokens.css', 'base.css', 'components.css', 'screens.css'];
 const cssParts = [];

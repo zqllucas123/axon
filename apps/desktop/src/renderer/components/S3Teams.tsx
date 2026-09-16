@@ -7,7 +7,7 @@
  */
 
 import { useState, type ReactElement } from 'react';
-import { useApp } from '../state/store.ts';
+import { useApp } from '../state/store.tsx';
 import { Icon } from '../icons.tsx';
 import type { TeamDefinition } from '@axon/protocol';
 

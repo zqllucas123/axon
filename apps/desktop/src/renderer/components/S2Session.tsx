@@ -6,7 +6,7 @@
  */
 
 import { useState, type ReactElement } from 'react';
-import { useApp } from '../state/store.ts';
+import { useApp } from '../state/store.tsx';
 import { VIEW_LABEL } from '../state/selectors.ts';
 import { Icon } from '../icons.tsx';
 import type { SessionView } from '../state/types.ts';

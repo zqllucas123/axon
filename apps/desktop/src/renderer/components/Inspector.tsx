@@ -7,7 +7,7 @@
  */
 
 import type { ReactElement } from 'react';
-import { useApp } from '../state/store.ts';
+import { useApp } from '../state/store.tsx';
 import { buildMemberTree, leafOf, statusDot, type MemberNode } from '../state/selectors.ts';
 import { Icon } from '../icons.tsx';
 import type { AgentPath } from '@axon/protocol';
