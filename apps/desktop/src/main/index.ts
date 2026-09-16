@@ -494,6 +494,10 @@ app.on('will-quit', (event) => {
   pendingSessionEvents.clear();
   // 顺序固定：dispose 会把挂起的审批结算为拒绝（这些 note 也要落盘）⇒ 再 flush。
   host?.dispose();
-  const flushed = storage ? storage.flush() : Promise.resolve();
+  // 上限 3s：flush 卡住（磁盘故障、队列里有不肯结束的写）不能让应用关不掉 ——
+  // 退出路径的可用性优先于最后一笔写；`Promise.race` 不取消 flush，只是不再等。
+  const flushed = storage
+    ? Promise.race([storage.flush(), new Promise((r) => setTimeout(r, 3000))])
+    : Promise.resolve();
   void flushed.finally(() => app.quit());
 });
