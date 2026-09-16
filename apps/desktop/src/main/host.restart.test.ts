@@ -327,18 +327,26 @@ describe('重启 · 恢复语义', () => {
     const root = await tempRoot();
     const first = await boot(root);
     const solo = first.host.createSession({ title: '花钱的', executor: 'engine' });
+    // 建会话会带起一条异步链（createSession → 写账本头 → 排一次 rollup）。
+    // 先把这条链收干、把宿主停掉，再往盘上写这份「上次退出时的汇总」——
+    // 否则后到的写会把手写的汇总带走（踩过：同样的代码随机红）。
     await first.persistence.flush(); // 建会话的写是排队的，读盘前先收口
+    await new Promise((r) => setTimeout(r, 30)); // 等 1ms 的 rollup 定时器真的落地
+    await first.persistence.flush();
+    first.host.dispose(); // 之后没有谁再来调度 rollup，手写的那份才不会被盖
+    await new Promise((r) => setTimeout(r, 30));
+    await first.persistence.flush();
     const item = (await first.persistence.listRecords())[0]!;
-    // 手写一份「上次退出时已花 $1.25」的汇总（faux 的用量是 0，跑不出真钱）
+    // 手写一份「上次退出时已花 $1.25」的汇总（faux 的用量是 0，跑不出真钱）。
+    // saveRecord 是排队写，await 本身就等到落盘，不需要再 flush（再 flush 会把
+    // 可能残留的 pending rollup 写下去，反而盖掉这一份）。
     await first.persistence.saveRecord(item.record, {
       at: Date.now(),
       usage: { inputTokens: 1000, outputTokens: 500, costUsd: 1.25 },
       counts: { members: 1, running: 0, parked: 0, suspended: 0, ledger: 0, pending: 0 },
       status: 'idle',
     });
-    await first.persistence.flush();
     const items = await first.persistence.listRecords();
-    first.host.dispose();
 
     const second = await boot(root, items);
     // 冷启动：registry 里没有节点，全局已花只能来自种子化

@@ -137,7 +137,8 @@ export class SessionPersistence {
   private readonly issueList: StorageIssue[] = [];
   private sessionCountCache = 0;
   /** 待写的汇总缓存（合并到 window 之后落盘）。 */
-  private pendingRollup?: { record: SessionRecord; rollup: SessionRollup };
+  /** 待写的汇总缓存：**按会话分槽**（单槽会让多会话互相覆盖，只留最后一个）。 */
+  private readonly pendingRollups = new Map<string, { record: SessionRecord; rollup: SessionRollup }>();
   private rollupTimer?: ReturnType<typeof setTimeout>;
   private lastRollupAt = 0;
 
@@ -469,7 +470,7 @@ export class SessionPersistence {
    * 用途是列表显示，**丢一次不会丢真相**。
    */
   scheduleRollup(record: SessionRecord, rollup: SessionRollup): void {
-    this.pendingRollup = { record, rollup };
+    this.pendingRollups.set(record.id, { record, rollup });
     const wait = this.rollupIntervalMs - (this.now() - this.lastRollupAt);
     if (wait <= 0) {
       void this.writePendingRollup();
@@ -485,11 +486,46 @@ export class SessionPersistence {
   }
 
   private async writePendingRollup(): Promise<void> {
-    const pending = this.pendingRollup;
-    if (!pending) return;
-    this.pendingRollup = undefined;
+    if (this.pendingRollups.size === 0) return;
+    const pending = [...this.pendingRollups.values()];
+    this.pendingRollups.clear();
     this.lastRollupAt = this.now();
-    await this.saveRecord(pending.record, pending.rollup);
+    for (const entry of pending) await this.saveRollup(entry.record, entry.rollup);
+  }
+
+  /**
+   * 只更新汇总缓存 —— **以盘上的 record 为准**（read-modify-write，在同一文件的
+   * 队列里做，所以与 record 的写不会交错）。
+   *
+   * 排汇总是**延迟**的（合并窗口），排队时抓的那份 `record` 到写的时候可能已经
+   * 过时：比如「单兵升团队」把 `executor` 写成 `team` 之后，一笔早先排下的汇总
+   * 才落地 —— 若照着旧 record 整份写回，就把 `executor` 退回 `engine`，重启后
+   * 主控丢掉编排工具（踩过：host.restart.test.ts 的根身份一例随机红）。
+   */
+  saveRollup(record: SessionRecord, rollup: SessionRollup): Promise<WriteResult> {
+    const paths = this.pathsOf(record);
+    this.rollups.set(record.id, rollup);
+    return this.enqueue(paths.sessionFile, async () => {
+      await this.io.mkdir(paths.sessionDir);
+      let current = record;
+      try {
+        const parsed = parseSessionFile(await this.io.readFile(paths.sessionFile));
+        if (parsed.file) current = parsed.file.record;
+        // 单调守卫：盘上的汇总更新（at 更大）就不再写 —— 汇总是个缓存，但它是
+        // 列表左栏的显示来源，让老快照写回会把「刚升级成 3 人」显示回 1 人。
+        const onDisk = parsed.file?.rollup;
+        if (onDisk && onDisk.at > rollup.at) return { ok: true as const };
+      } catch {
+        // 还没有 session.json（createSession 的写还在路上）：用手里这份兜底。
+      }
+      const payload = encodeSessionFile({
+        storageVersion: SESSION_STORAGE_VERSION,
+        savedAt: this.now(),
+        record: current,
+        rollup,
+      });
+      return this.writeAtomic(paths.sessionFile, payload, current.id);
+    });
   }
 
   /** 落盘所有待写内容（will-quit 收尾）。返回是否全部成功。 */
