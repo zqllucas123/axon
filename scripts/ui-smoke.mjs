@@ -24,32 +24,34 @@ const launch = !args.includes('--no-launch');
 const roleName = 'smoke-role';
 
 let proc = null;
-if (launch) {
-  const rolesDir = await mkdtemp(join(tmpdir(), 'axon-roles-'));
+const rolesDir = launch ? await mkdtemp(join(tmpdir(), 'axon-roles-')) : null;
+// M5：会话落盘根也要隔离（绝不碰 ~/.axon）—— 重启幕必须落在同一个根上。
+const sessionsDir = launch ? await mkdtemp(join(tmpdir(), 'axon-sessions-')) : null;
+
+/** 拉起应用（第一次开机与重启幕共用；重启 = 同一份 env 再 spawn 一次）。 */
+function launchApp() {
   const electron = join(import.meta.dirname, '../node_modules/.bin/electron');
-  proc = spawn(
-    electron,
-    [`--remote-debugging-port=${port}`, 'apps/desktop/dist/main.mjs'],
-    {
-      cwd: join(import.meta.dirname, '..'),
-      stdio: ['ignore', 'ignore', 'pipe'],
-      env: {
-        ...process.env,
-        ELECTRON_RUN_AS_NODE: undefined, // 宿主（kalo）可能注入，必须剥掉
-        ELECTRON_ENABLE_LOGGING: '1',
-        AXON_ROLES_DIR: rolesDir,
-        // 冒烟绝不允许碰真网关：开发机上 ~/.axon/config.json 往往配了真 key，
-        // 而 AXON_SMOKE_SCRIPT 只替换 streamFn —— 靠它「恰好不发请求」是巧合不是保证。
-        AXON_PROVIDER: 'faux',
-        // 冒烟钩子：脚本化回复永不耗尽 + 每轮固定成本 0.05（软线 0.048 / 硬线 0.06），
-        // 恰好两轮 prompt 走完 warning → frozen 两段 UI。
-        AXON_SMOKE_SCRIPT: '1',
-        AXON_SMOKE_BUDGET_COST: '0.05',
-        AXON_SMOKE_BUDGET_HARD: '0.06',
-      },
+  proc = spawn(electron, [`--remote-debugging-port=${port}`, 'apps/desktop/dist/main.mjs'], {
+    cwd: join(import.meta.dirname, '..'),
+    stdio: ['ignore', 'ignore', 'pipe'],
+    env: {
+      ...process.env,
+      ELECTRON_RUN_AS_NODE: undefined, // 宿主（kalo）可能注入，必须剥掉
+      ELECTRON_ENABLE_LOGGING: '1',
+      AXON_ROLES_DIR: rolesDir,
+      AXON_SESSIONS_DIR: sessionsDir,
+      // 冒烟绝不允许碰真网关：开发机上 ~/.axon/config.json 往往配了真 key，
+      // 而 AXON_SMOKE_SCRIPT 只替换 streamFn —— 靠它「恰好不发请求」是巧合不是保证。
+      AXON_PROVIDER: 'faux',
+      // 冒烟钩子：脚本化回复永不耗尽 + 每轮固定成本 0.05（软线 0.048 / 硬线 0.06），
+      // 恰好两轮 prompt 走完 warning → frozen 两段 UI。
+      AXON_SMOKE_SCRIPT: '1',
+      AXON_SMOKE_BUDGET_COST: '0.05',
+      AXON_SMOKE_BUDGET_HARD: '0.06',
     },
-  );
+  });
 }
+if (launch) launchApp();
 
 async function getPageTarget() {
   for (let i = 0; i < 40; i++) {
@@ -80,11 +82,17 @@ function exit(code) {
 }
 
 let ws;
-try {
+let nextId = 1;
+let pending = new Map();
+/** 页面求值 —— connect() 每次重生（重启后是另一个页面目标，句柄全得换）。 */
+let evalJs;
+
+/** 连上当前窗口的 CDP（第一次开机与重启幕共用）。 */
+async function connect() {
   const page = await getPageTarget();
   ws = new WebSocket(page.webSocketDebuggerUrl);
-  let nextId = 1;
-  const pending = new Map();
+  nextId = 1;
+  pending = new Map();
   ws.onmessage = (ev) => {
     const msg = JSON.parse(ev.data);
     const p = pending.get(msg.id);
@@ -102,7 +110,7 @@ try {
     ws.send(JSON.stringify({ id, method, params }));
     return new Promise((resolve, reject) => pending.set(id, { resolve, reject }));
   };
-  const evalJs = async (expression) => {
+  evalJs = async (expression) => {
     const r = await send('Runtime.evaluate', {
       expression,
       awaitPromise: true,
@@ -115,6 +123,10 @@ try {
     }
     return r.result.value;
   };
+}
+
+try {
+  await connect();
 
   // ── 1. 桥接 + 初始角色数（等 preload 挂桥，CDP evaluate 不保证页面就绪）
   let before;
@@ -275,6 +287,57 @@ try {
   }
   log(frozen, '第二轮 prompt 后预算冻结：banner 变红 + 输入框禁用（budget.frozen → React 重渲染）');
   if (!frozen) exit(1);
+
+  // ── 8. 重启恢复（M5 §4.5/§4.6）：同一个落盘根、第二次开机
+  //     这一幕验的是「接线的形态」，单测（host.restart.test.ts）验的是语义：
+  //     index.ts 是否真的把根接上、listRecords 是否真的先读 session.json、
+  //     窗口重开时左栏是否重新列出上次的会话。
+  await new Promise((r) => setTimeout(r, 800)); // 让 500ms 的汇总窗口先收口
+  proc.kill('SIGTERM');
+  for (let i = 0; i < 50 && proc.exitCode === null; i++) {
+    await new Promise((r) => setTimeout(r, 100));
+  }
+  if (proc.exitCode === null) {
+    log(false, '第一次开机没能在 5s 内退出（SIGTERM 无效）');
+    exit(1);
+  }
+  launchApp();
+  await connect();
+
+  let status = null;
+  for (let i = 0; i < 40; i++) {
+    status = await evalJs(
+      `typeof window.axon?.invoke === 'function' ? window.axon.invoke('storage.status', {}) : null`,
+    );
+    if (status && typeof status.root === 'string') break;
+    await new Promise((r) => setTimeout(r, 250));
+  }
+  log(status?.root === sessionsDir, `重启后接的是同一个落盘根（storage.status.root）`);
+  // 懒加载的验收线：列表读的是 session.json + rollup，loadedCount 必须还是 0
+  const lazy = status?.sessionCount >= 1 && status?.loadedCount === 0;
+  log(
+    lazy,
+    `重启后列表秒开：${status?.sessionCount} 个会话、已加载 ${status?.loadedCount}（list 不读树）`,
+  );
+  if (status?.root !== sessionsDir || !lazy) exit(1);
+
+  const detail = await evalJs(
+    `window.axon.invoke('session.get', { sessionId: '${session.id}' })
+      .then(s => ({ root: s.rootPath, members: s.members.length, counts: s.counts.members }))`,
+  );
+  log(
+    detail?.root === session.root && detail?.members >= 2,
+    `点开会话后树回来了（${detail?.members} 个节点，成员 ${detail?.counts}）`,
+  );
+  const msgs = await evalJs(
+    `window.axon.invoke('agent.messages', { path: '${session.root}' }).then(m => m.length)`,
+  );
+  log(msgs > 0, `主控 transcript 读回来了（${msgs} 条消息）`);
+  const rowBack = await until(
+    `!!document.querySelector('[data-smoke="session-row"][data-session="${session.id}"]')`,
+  );
+  log(rowBack, '重启后左栏重新列出这个会话（session.list → 懒加载摘要）');
+  if (detail?.members < 2 || !(msgs > 0) || !rowBack) exit(1);
 
   exit(0);
 } catch (err) {
