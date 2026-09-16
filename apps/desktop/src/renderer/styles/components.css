@@ -87,6 +87,9 @@
 .nav-item .badge.quiet { background: var(--bg-active); color: var(--text-secondary); }
 
 .side-scroll { flex: 1; overflow-y: auto; padding-bottom: 8px; }
+/* 实现新增：overflow-y:auto 会让另一轴变成 auto —— 侧栏里任何一点点横向溢出，
+   底部就会露出一条 8px 的横向滚动条（原型在浏览器里被 overlay 滚动条盖住，看不见）。 */
+.side-scroll { overflow-x: hidden; }
 .side-scroll::-webkit-scrollbar { width: 8px; }
 .side-scroll::-webkit-scrollbar-thumb { background: rgba(0,0,0,.12); border-radius: 4px; }
 
@@ -646,3 +649,9 @@ table.tbl td.num { font-family: var(--font-mono); color: var(--text); }
   color: var(--text);
 }
 .composer textarea::placeholder { color: var(--text-dim); }
+
+/* 实现新增：原型没有 .btn 的禁用态（demo 不需要），真实界面必须一眼看出「现在不能点」，
+   否则「任务还空着就能点开始」这种状态会被误读成可以点。 */
+.btn:disabled { opacity: 0.45; cursor: not-allowed; }
+.btn:disabled:hover { background: var(--bg-sunken); }
+.btn.primary:disabled, .btn.primary:disabled:hover { background: var(--accent); border-color: var(--accent); color: #fff; }

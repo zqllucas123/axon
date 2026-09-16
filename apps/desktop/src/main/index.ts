@@ -353,7 +353,10 @@ async function runShotHook(): Promise<void> {
     await wait(1500);
     const init = process.env.AXON_SHOT_INIT;
     if (init) {
-      await w.webContents.executeJavaScript(init, true);
+      // 回显 init 的返回值：把它当 DOM 探针用（「这个元素是谁、多宽多高」），
+      // 否则量的结论只能靠看图猜。
+      const probe = await w.webContents.executeJavaScript(init, true);
+      console.log('[shot] init →', JSON.stringify(probe));
       await wait(2500);
     }
     const shots = (process.env.AXON_SHOT_HOOKS ?? 's0=nav-s0').split(',').filter(Boolean);
