@@ -112,8 +112,10 @@ function MemberRow({
 }
 
 export function S1Workbench(): ReactElement {
-  const { sessions, teams, roles, current, details, agents, budget, pending, openSession, go, setFocus } =
-    useApp();
+  const {
+    sessions, teams, roles, current, details, agents, budget, pending,
+    openSession, go, setFocus, setSessionView,
+  } = useApp();
   const [filter, setFilter] = useState<ListFilter>('all');
   const [memFilter, setMemFilter] = useState<MemberFilter>('all');
 
@@ -245,27 +247,58 @@ export function S1Workbench(): ReactElement {
 
           {/* ── 三张 stat ── */}
           <div className="grid3" style={{ marginTop: 22 }}>
-            <span className="stat">
-              <span className="k">{current ? '本会话花费' : '累计花费'}</span>
-              <span className="v">{money(current ? current.usage.costUsd : totalCost)}</span>
-              <span className="s">
-                {current
-                  ? `软线 $${current.budget.effectiveSoftUsd.toFixed(2)} · 硬线 $${current.budget.effectiveHardUsd.toFixed(2)}`
-                  : `跨 ${sessions.length} 个会话 · 全局已用 ${money(budget?.spentUsd)}`}
-              </span>
-            </span>
-            <span className="stat">
-              <span className="k">待你处理</span>
-              <span className="v">{pendingN}</span>
-              <span className="s">挂起中的审批与提问（收件箱同源）</span>
-            </span>
-            <span className="stat">
-              <span className="k">协作落账</span>
-              <span className="v">{current ? current.counts.ledger : totalLedger}</span>
-              <span className="s">
-                {current ? '进本会话账本 →' : `跨 ${sessions.length} 个会话合计`}
-              </span>
-            </span>
+            {(() => {
+              const toUsage = (): void => {
+                if (!current) return;
+                setSessionView('usage');
+                go('s2');
+              };
+              const toLedger = (): void => {
+                if (!current) return;
+                setSessionView('ledger');
+                go('s2');
+              };
+              return (
+                <>
+                  {current ? (
+                    <button className="stat" onClick={toUsage} data-smoke="stat-usage">
+                      <div className="k">本会话花费</div>
+                      <div className="v">{money(current.usage.costUsd)}</div>
+                      <div className="s">
+                        软线 ${current.budget.effectiveSoftUsd.toFixed(2)} · 硬线 $
+                        {current.budget.effectiveHardUsd.toFixed(2)} · 进会话用量 →
+                      </div>
+                    </button>
+                  ) : (
+                    <div className="stat">
+                      <div className="k">累计花费</div>
+                      <div className="v">{money(totalCost)}</div>
+                      <div className="s">
+                        跨 {sessions.length} 个会话 · 全局已用 {money(budget?.spentUsd)}
+                      </div>
+                    </div>
+                  )}
+                  <div className="stat">
+                    <div className="k">待你处理</div>
+                    <div className="v">{pendingN}</div>
+                    <div className="s">挂起中的审批与提问（收件箱同源）</div>
+                  </div>
+                  {current ? (
+                    <button className="stat" onClick={toLedger} data-smoke="stat-ledger">
+                      <div className="k">协作落账</div>
+                      <div className="v">{current.counts.ledger}</div>
+                      <div className="s">进本会话账本 →</div>
+                    </button>
+                  ) : (
+                    <div className="stat">
+                      <div className="k">协作落账</div>
+                      <div className="v">{totalLedger}</div>
+                      <div className="s">跨 {sessions.length} 个会话合计</div>
+                    </div>
+                  )}
+                </>
+              );
+            })()}
           </div>
         </div>
       </section>

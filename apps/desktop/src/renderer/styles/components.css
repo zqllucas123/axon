@@ -671,3 +671,6 @@ table.tbl td.num { font-family: var(--font-mono); color: var(--text); }
 .sheet .panel-title { padding: 12px 12px 8px; }
 .team-list { display: flex; flex-direction: column; overflow-y: auto; padding-bottom: 8px; }
 .team-list .side-row { text-align: left; }
+/* 可点击的统计卡（实现新增：原型里 stat 是 <a>，本实现同一形状但发意图而非跳页） */
+button.stat { display: block; width: 100%; text-align: left; cursor: pointer; }
+button.stat:hover { border-color: var(--line-strong); background: var(--bg-sunken); }
