@@ -53,3 +53,9 @@ button.mode-card,
 button.team-card,
 button.card-btn { width: 100%; text-align: left; }
 button.seg-a { width: auto; }
+
+/* 真实表单控件也要归一：原型的输入面是 div（.field / .composer），UA 样式天然不存在；
+   实现里 S0 的标题是 <input>、首条任务是 <textarea>，不归一就会用 UA 字体（textarea 甚至是
+   等宽 13px）。只归一字色与字体，尺寸/描边仍由 .inp / .field 决定。 */
+input, textarea, select { font: inherit; color: inherit; }
+textarea { resize: vertical; }

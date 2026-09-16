@@ -614,3 +614,17 @@ table.tbl td.num { font-family: var(--font-mono); color: var(--text); }
 .field.ta { min-height: 92px; align-items: flex-start; line-height: 1.7; color: var(--text-secondary); }
 .field.dim { color: var(--text-dim); }
 .hint { font-size: var(--fs-12); color: var(--text-dim); margin-top: 6px; line-height: 1.6; }
+
+/* ---------- 通用输入框（原型 §11 抽出）----------
+   原型把 .inp 放在「设置窗口（S8）」一节里，但它是全应用通用的单行输入面 ——
+   S0 的会话标题就用到它。本片只抽 .inp 一组；设置窗其余样式（.sel/.srow/.tgl/…）
+   随 S8（MU-3）一起进，避免把没用的几百行先搬进来。逐值来源：axon.css:838-845。 */
+.inp {
+  height: 30px; padding: 0 10px; min-width: 0;
+  border: 1px solid var(--line-strong); border-radius: var(--r-sm);
+  background: var(--bg-elev); font-family: var(--font); font-size: var(--fs-13); color: var(--text);
+}
+.inp.mono { font-family: var(--font-mono); font-size: var(--fs-12); }
+.inp.w-md { width: 210px; }
+.inp.w-sm { width: 78px; text-align: right; }
+.inp::placeholder { color: var(--text-dim); }
