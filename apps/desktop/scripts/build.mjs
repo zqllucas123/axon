@@ -93,7 +93,7 @@ await build({
 
 // 样式：四份按序拼成一份（tokens → components → screens），index.html 只挂一个 <link>。
 // 不走 esbuild：CSS 不是它这一段的输入，cp 更直白，也不会被 minify 打乱逐值对齐。
-const cssFiles = ['tokens.css', 'components.css', 'screens.css'];
+const cssFiles = ['tokens.css', 'base.css', 'components.css', 'screens.css'];
 const cssParts = [];
 for (const f of cssFiles) {
   cssParts.push(await readFile(join(appRoot, 'src/renderer/styles', f), 'utf8'));

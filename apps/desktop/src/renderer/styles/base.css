@@ -1,0 +1,55 @@
+/* =========================================================================
+   Axon 基础归一（base.css）
+   逐值来源：docs/ux/mockups/assets/axon.css 第 1 节尾部（59~88 行）—— 原型把「令牌」与
+   「基础归一」挤在同一节里，实现拆成两个文件：令牌 tokens.css、归一 base.css。
+   这一层不能省：html/body 决定全屏字体与底色，button 归一决定所有行级按钮不出现
+   UA 的灰底圆角描边（原型里这些锚点是 div，天然没有 UA 样式）。
+   ========================================================================= */
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  height: 100%;
+  font-family: var(--font);
+  font-size: var(--fs-14);
+  color: var(--text);
+  background: var(--bg-canvas);
+  -webkit-font-smoothing: antialiased;
+}
+
+button { font: inherit; color: inherit; border: 0; background: none; cursor: pointer; }
+a { color: inherit; text-decoration: none; }
+
+/* 图标统一：1.6px 线性描边，currentColor（<Icon> 渲染成 <span class="i i-16">） */
+.i {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 18px;
+  height: 18px;
+}
+.i svg { width: 100%; height: 100%; display: block; }
+.i-16 { width: 16px; height: 16px; }
+.i-14 { width: 14px; height: 14px; }
+.i-20 { width: 20px; height: 20px; }
+
+/* React 挂载点撑满，`.window` 的 100vh 才有基准 */
+#root { height: 100%; }
+
+/* ---------- 实现新增（原型没有这一段，必须写清为什么）----------
+   原型里下列锚点是 div（.nav-item / .side-row / .prow / .list-row / .menu-item …），
+   实现按「可点击」语义统一改成 <button>：键盘可达、语义正确、无障碍免费拿到。
+   上方 button 归一已抹掉字体/描边/底色/指针差异；这里只补 div 天然具备而 button
+   没有的那两条布局属性（块级宽度 + 左对齐）—— 视觉逐值不变，只是元素类型不同。
+   ⚠️ 新增行级 button 时记得加进本清单，否则会出现「居中、宽度随内容」的错位。 */
+button.nav-item,
+button.side-row,
+button.prow,
+button.list-row,
+button.menu-item,
+button.mode-card,
+button.team-card,
+button.card-btn { width: 100%; text-align: left; }
+button.seg-a { width: auto; }
