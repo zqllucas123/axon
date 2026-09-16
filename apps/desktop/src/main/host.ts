@@ -419,7 +419,9 @@ export class AxonHost {
     const usage = this.registry.totalUsage();
     return {
       state: this.budget.current,
-      spentUsd: usage.costUsd,
+      // M5：冷启动时 registry 里一个节点都没有（会话还在盘上），此时「已花」
+      // 只剩构造时按 rollup 种子化的那一份 —— 取两者更大的，别让 UI 显示成 $0。
+      spentUsd: Math.max(usage.costUsd, this.budget.spent),
       softUsd,
       hardUsd,
       disabled: this.budget.disabled,
