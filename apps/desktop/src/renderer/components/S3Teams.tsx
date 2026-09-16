@@ -34,7 +34,7 @@ export function S3Teams(): ReactElement {
     const draft: TeamDefinition = {
       name,
       description: '',
-      members: [{ role: 'engine', count: 1 }],
+      members: [{ name: '主控', role: 'engine', lead: true }],
     };
     const res = await saveTeam(draft);
     setBusy(false);
@@ -44,7 +44,7 @@ export function S3Teams(): ReactElement {
   };
 
   const agents = roles.entries.flatMap((r) =>
-    r.role.name === 'engine' ? [] : [{ name: r.role.name, tools: r.role.tools.length, approval: r.role.approval, source: r.source }],
+    r.role.name === 'engine' ? [] : [{ name: r.role.name, tools: r.role.tools?.length ?? 0, approval: r.role.approval, source: r.source }],
   );
 
   return (
@@ -143,7 +143,7 @@ export function S3Teams(): ReactElement {
                     </span>
                   </span>
                   <span className="t2">
-                    {r.role.tools.length} 工具（角色白名单） · 审批 {r.role.approval}
+                    {r.role.tools?.length ?? 0} 工具（角色白名单） · 审批 {r.role.approval}
                     {r.errors.length ? ` · ${r.errors.length} 处校验问题` : ''}
                   </span>
                 </span>
