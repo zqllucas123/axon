@@ -21,4 +21,32 @@
 
 /* ===== S7 会话恢复（W-C）===== */
 
+/* 会话行：右侧「继续」是唯一动作，行本身不可点（避免按钮套按钮）。 */
+[data-screen='s7'] .list-row .btn { flex: none; }
+
+/* 会话行的 meta 是两行（计数行 + 可能的中断行），必须各占一行。 */
+[data-screen='s7'] .list-row .t2 { display: block; }
+
+/* 「上次中断于 …」第二行：紧跟 meta 行，用告警色提醒「这不是正常结束」。
+   `.t2` 默认 nowrap + 省略号（components.css:506），这里允许折行显示完整句子。 */
+[data-screen='s7'] .list-row .t2.s7-cut {
+  margin-top: 2px;
+  color: var(--sem-run);
+  white-space: normal;
+  overflow: visible;
+}
+
+/* 存储实况卡里的表格贴着卡片左右边（card-body 有 14px padding，抵消掉）。 */
+[data-screen='s7'] [data-smoke='s7-storage'] table.tbl { margin: 0 -14px; }
+[data-screen='s7'] [data-smoke='s7-storage'] table.tbl td.num {
+  font-size: var(--fs-12);
+  word-break: break-all;
+}
+
+/* issue 分组：卡内嵌套的 fold 收掉外层上边距，条目行去掉 .prow 的左右缩排与 hover 底色。 */
+[data-screen='s7'] .s7-issues .fold { margin: 12px 0 0; }
+[data-screen='s7'] .s7-issues .fold .prow.def { padding-left: 0; padding-right: 0; }
+[data-screen='s7'] .s7-issues .fold .prow.def:hover { background: transparent; }
+[data-screen='s7'] .s7-issues .fold .prow.def .k { word-break: break-all; }
+
 /* ===== S8 设置窗：不在本文件 —— 见 styles/settings.css（W-D）===== */
