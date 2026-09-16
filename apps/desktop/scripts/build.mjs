@@ -91,6 +91,15 @@ await build({
   format: 'esm',
 });
 
+// 样式：四份按序拼成一份（tokens → components → screens），index.html 只挂一个 <link>。
+// 不走 esbuild：CSS 不是它这一段的输入，cp 更直白，也不会被 minify 打乱逐值对齐。
+const cssFiles = ['tokens.css', 'components.css', 'screens.css'];
+const cssParts = [];
+for (const f of cssFiles) {
+  cssParts.push(await readFile(join(appRoot, 'src/renderer/styles', f), 'utf8'));
+}
+await writeFile(join(out, 'renderer/axon.css'), cssParts.join('\n'), 'utf8');
+
 await cp(join(appRoot, 'src/renderer/index.html'), join(out, 'renderer/index.html'));
 
 console.log('\n✓ 构建完成 → apps/desktop/dist');

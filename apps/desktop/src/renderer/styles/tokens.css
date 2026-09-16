@@ -1,0 +1,87 @@
+/* =========================================================================
+   Axon 设计令牌与基础样式（tokens.css）
+   逐值来源：docs/ux/mockups/assets/axon.css 第 1 节（高保真原型是唯一样式真相）。
+   改动纪律：只允许「与原型同步」，不允许在这里发明新的色值/半径/字阶。
+   ========================================================================= */
+
+/* ---------- 1. 设计令牌 ---------- */
+:root {
+  /* 表面：暖灰三层，主内容比侧栏更亮 */
+  --bg-sidebar: #f2f1ee;
+  --bg-canvas: #fcfcfb;
+  --bg-elev: #ffffff;
+  --bg-sunken: #f6f5f2;
+  --bg-hover: rgba(0, 0, 0, 0.04);
+  --bg-active: #e6e4df;
+
+  /* 描边：极细、低对比，永不用阴影分层 */
+  --line: #e7e5e0;
+  --line-strong: #d8d5ce;
+
+  /* 文本 */
+  --text: #1c1b19;
+  --text-secondary: #55524d;
+  --text-muted: #8b8781;
+  --text-dim: #adaaa4;
+
+  /* 强调：近黑主按钮，语义色一律降饱和 */
+  --accent: #2b2a27;
+  --accent-hover: #141311;
+  --sem-run: #a8791a;
+  --sem-ok: #4a7a52;
+  --sem-wait: #6f6e84;
+  --sem-err: #b0473b;
+  --sem-info: #55698f;
+
+  /* 半径 / 间距 / 字阶 */
+  --r-xs: 6px;
+  --r-sm: 8px;
+  --r-md: 12px;
+  --r-lg: 16px;
+  --r-xl: 20px;
+  --r-pill: 999px;
+
+  --fs-11: 11px;
+  --fs-12: 12px;
+  --fs-13: 13px;
+  --fs-14: 14px;
+  --fs-15: 15px;
+  --fs-17: 17px;
+  --fs-20: 20px;
+
+  --sidebar-w: 268px;
+  --inspector-w: 300px;
+
+  --font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue",
+    "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+  --font-mono: "SF Mono", ui-monospace, "JetBrains Mono", Menlo, monospace;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  height: 100%;
+  font-family: var(--font);
+  font-size: var(--fs-14);
+  color: var(--text);
+  background: var(--bg-canvas);
+  -webkit-font-smoothing: antialiased;
+}
+
+button { font: inherit; color: inherit; border: 0; background: none; cursor: pointer; }
+a { color: inherit; text-decoration: none; }
+
+/* 图标统一：1.6px 线性描边，currentColor */
+.i {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 18px;
+  height: 18px;
+}
+.i svg { width: 100%; height: 100%; display: block; }
+.i-16 { width: 16px; height: 16px; }
+.i-14 { width: 14px; height: 14px; }
+.i-20 { width: 20px; height: 20px; }

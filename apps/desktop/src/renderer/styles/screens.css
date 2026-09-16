@@ -1,0 +1,9 @@
+/* =========================================================================
+   Axon 屏内样式（screens.css）
+   只放「某一屏专有」的规则（S0 新建会话 / S1 会话总览 / S2 会话 / S2-solo / S3）。
+   通用元件在 components.css；令牌在 tokens.css。
+   ========================================================================= */
+
+/* 空态：某块没有数据时整块渲染它（原型用 .hint / .card 表达，实现抽成独立类） */
+.empty { color: var(--text-dim); font-size: var(--fs-13); line-height: 1.7; padding: 16px 4px; }
+.empty .k { display: block; margin-bottom: 4px; color: var(--text-secondary); font-size: var(--fs-14); }
