@@ -405,6 +405,55 @@ describe('SessionPersistence · 写入', () => {
     expect((await readSessionFile(root, rec)).file?.rollup?.counts.ledger).toBe(2);
   });
 
+  it('汇总的延迟写不回退元数据：以盘上的 record 为准（老快照写回会丢 executor）', async () => {
+    const root = await tempRoot();
+    let clock = 100; // 离 lastRollupAt(0) 还在窗口内 ⇒ 这一笔会挂起
+    const p = new SessionPersistence({ root, now: () => clock, rollupIntervalMs: 500 });
+    const rec = record();
+    await p.createSession(rec);
+
+    const rollupAt = (at: number) => ({
+      at,
+      usage: { inputTokens: 0, outputTokens: 0, costUsd: 0 },
+      counts: { members: 1, running: 0, parked: 0, suspended: 0, ledger: 0, pending: 0 },
+      status: 'idle' as const,
+    });
+
+    p.scheduleRollup(rec, rollupAt(clock)); // 挂起（窗口内）
+    clock = 110;
+    await p.saveRecord({ ...rec, executor: 'team' }); // 同一会话升级成团队
+    clock = 120;
+    await p.flush(); // 老快照到此才落地
+
+    const after = await readSessionFile(root, rec);
+    expect(after.file?.record.executor).toBe('team'); // 没被老快照盖回 engine
+    expect(after.file?.rollup?.at).toBe(100); // 汇总本身照写
+  });
+
+  it('待写的汇总按会话分槽：两个会话各写各的（单槽时后者顶掉前者）', async () => {
+    const root = await tempRoot();
+    const clock = 100;
+    const p = new SessionPersistence({ root, now: () => clock, rollupIntervalMs: 500 });
+    const a = record({ id: 'sA-1' });
+    const b = record({ id: 'sB-1' });
+    await p.createSession(a);
+    await p.createSession(b);
+
+    const rollupAt = (ledger: number) => ({
+      at: clock,
+      usage: { inputTokens: 0, outputTokens: 0, costUsd: 0 },
+      counts: { members: 1, running: 0, parked: 0, suspended: 0, ledger, pending: 0 },
+      status: 'idle' as const,
+    });
+
+    p.scheduleRollup(a, rollupAt(1)); // 两笔都在窗口内 ⇒ 都挂起
+    p.scheduleRollup(b, rollupAt(2));
+    await p.flush();
+
+    expect((await readSessionFile(root, a)).file?.rollup?.counts.ledger).toBe(1);
+    expect((await readSessionFile(root, b)).file?.rollup?.counts.ledger).toBe(2);
+  });
+
   it('issue 上限：超出丢最旧（§4.8 上限 100）', async () => {
     const root = await tempRoot();
     const p = new SessionPersistence({ root, issueLimit: 3 });
