@@ -4,6 +4,17 @@
 > 编排规则见 `docs/milestones/MU-3-closing-screens.md` §7.0（文件所有权表 + 命令白名单）。
 > 三条铁律：**只写自己名下的文件** / **一次 git 命令都不许跑** / **不许跑 dev、ui-smoke、build:desktop**。
 
+> **阶段 0 已于 2026-09-16 完成并 commit（`32db327`）；四个并行窗口可以开了。**
+>
+> **主线已备好、直接用即可的 API**（别再造一份，也别改它们）：
+> - `useApp()`（`state/store.tsx`）新增：`pending` / `resolvedFeed` / `openPath(kind)` / `openSettings()` / `patchConfig(patch)`
+> - `state/selectors.ts` 新增：`money` `relDay` `fmtTime` `since`；S5 用 `splitPending` `blockedCount`；S6 用 `spendRanking` `strictestTier` `totalUsage`；S7 用 `interruptedAt` `splitRecoverable`
+> - `components/parts/ApprovalCard.tsx`：`<ApprovalCard request variant="stream"|"inbox" sessionTitle? onOpenSession? />`（S2 已改为复用它，四个 data-smoke 钩子不得改名）
+> - `settings/SettingsStore.tsx`：`useSettings()` → `{ config, issues, error, patch, reset, openPath, dismissError }`（不做乐观更新；真相只来自 `config.get` / `config.changed`）
+> - 三个屏骨架文件（`S5Inbox.tsx` / `S6Budget.tsx` / `S7Sessions.tsx`）头部注释已列出各自的可用原料与约束，开工先读
+> - 命令名变更：`role.openDir` / `team.openDir` 已删，统一为 `shell.openPath {kind:'roles'|'teams'|'config'|'sessions'}`；另有 `window.openSettings`、`config.reset`
+> - 环境：`bun` 不在默认 PATH，先 `export PATH="/opt/homebrew/bin:$PATH"`；当前测试基线 **528 例 / 24 文件**，不得回退
+
 ---
 
 ## 0. 主线会话（阶段 0，串行，必须先跑完）
@@ -17,19 +28,20 @@
 - E-1：packages/protocol/src/session.ts 的 SessionSummary 增可选 rollup: SessionRollup；apps/desktop/src/main/session-store.ts 的 buildSessionSummary 透传（S7 的「上次中断」只能来自 rollup.interruptedAt）
 - E-2：packages/protocol/src/config.ts 增 ui.theme / ui.density / ui.fontSize / ui.reduceMotion / ui.annotations 五条，进 ConfigPatchPath + CONFIG_FIELD_SPECS + CONFIG_DEFAULTS，并在 config-store.ts 的 validateValue 做 enum/boolean 校验
 - E-3：ipc.ts 的 openDir kind 从 'roles'|'teams' 扩到含 'config'|'sessions'（用 shell.showItemInFolder reveal 单文件）；新增命令 window.openSettings（payload 空）
+  【实际已实施为——删 role.openDir / team.openDir，新建单条枚举命令 shell.openPath {kind:'roles'|'teams'|'config'|'sessions'}；理由见 closing-screens.md §四.1 E-3 注】
 - E-4：新增命令 config.reset —— 把 15 条白名单路径删回默认，保留未知键，返回新快照并发 config.changed
 
 切片 2 —— 设置窗宿主：
 - 新建 apps/desktop/src/main/windows.ts（createMainWindow + openSettingsWindow，settingsWin 单例：已存在则 focus，closed 时置 null）
 - 新建 apps/desktop/src/main/menu.ts（Menu.buildFromTemplate，带标准 editMenu/windowMenu 角色，额外插「设置… ⌘,」）
-- index.ts 接线：启动装菜单、window.openSettings 路由、openDir 分支扩展、config.reset 路由；**不许改 will-quit 的 dispose/flush 流程**
+- index.ts 接线：启动装菜单、window.openSettings 路由、shell.openPath 路由（OPEN_PATHS 惰性求值表）、config.reset 路由；**不许改 will-quit 的 dispose/flush 流程**
 - renderer/main.tsx 按 location.hash === '#settings' 分叉挂 <SettingsApp/>；新建 renderer/settings/SettingsApp.tsx 空壳（st-nav + 五个空 pane）+ SettingsStore.tsx（只订 config.changed，只拉 config.get / budget.get / storage.status / ledger.getAdoptionPolicy）
 
 切片 2.5 —— 共享坑位一次做完（这是并行的前提，缺一项并行会话就会互相改同一个文件）：
 - renderer/state/types.ts：Screen 增 's5' | 's6' | 's7'
 - renderer/components/Shell.tsx：switch 加三个 case（注意 's0' 占着 default）
 - 建三个空壳文件：components/S5Inbox.tsx / S6Budget.tsx / S7Sessions.tsx（各自渲染一个 .empty 占位即可）
-- renderer/state/store.tsx：补订阅 question.request、approval.delegated；补 action patchConfig / resetConfig / openPath；补派生 resolvedFeed（本次运行期内已处理的请求流水）
+- renderer/state/store.tsx：补订阅 question.request、approval.delegated；补 action patchConfig / openSettings / openPath（重置只在设置窗用，不进主窗 store）；补派生 resolvedFeed（本次运行期内已处理的请求流水）
 - renderer/state/selectors.ts：把 money（现在 S2Views.tsx / S1Workbench.tsx / Chips.tsx 各写一遍）与时间格式化抽成公共导出；补 inbox / budget / sessions 三组口径函数
 - 新建 renderer/components/parts/ApprovalCard.tsx：从 MessageStream.tsx 抽出 ApprovalCard / QuestionFoot / Chain，带 variant: 'stream' | 'inbox'；MessageStream 改为引用它，**S2 的外观与行为必须零变化**
 - renderer/styles/screens.css：放四段带注释的空占位 /* ===== S5 ===== */ /* ===== S6 ===== */ /* ===== S7 ===== */（S8 用独立文件）
@@ -179,6 +191,12 @@ bun run typecheck 绿；自查：所有数字都能指到 SessionSummary / Stora
 - 设置窗**不复用主窗 store**（它不该订阅会话事件），只用主线建好的 SettingsStore
 - 设置窗**没有顶栏 chip**（它没有会话上下文）
 - headers/models 是 json 整体替换字段：以最近一次 config.get / config.changed 的快照为基做「读整体→改→整体写回」，收到 config.changed 就重绘
+
+【主线已放好的底座（以实文件为准，可改内部实现但不要换掉架构）】
+- `settings/SettingsStore.tsx`：`useSettings()` → `{ config, issues, error, patch(patch), reset(), openPath(kind), dismissError() }`；`patch`/`reset` 返回 `boolean`，失败时把错误文案放进 `error`。**它不做乐观更新** —— 字段级的乐观值与回滚由你在 `fields.tsx` 里做（用快照真值作为回滚目标）
+- `settings/SettingsApp.tsx`：已有 `.st-win` / `.st-nav` / `.st-navitem` / `.st-main` / `.st-pane[data-pane]` / `.st-sec` 骨架与五个 pane 占位（general / appearance / model / orchestration / about），错误条复用主窗的 `.card.err`（`data-smoke="settings-error"`）
+- `styles/settings.css` 已建并接进 `build.mjs` 的 `cssFiles`，里面已用既有 token 写了上述骨架类；你从原型 §11 搬组件样式时与它合并，**别再新建 CSS 文件**（新文件必须改 build.mjs，而 build.mjs 不在你名下）
+- 设置窗标题已由 `main.tsx` 置为「设置」；窗口单例、`config.changed` 双窗广播都已真窗口实测通过
 
 【完成标准】
 bun run typecheck 绿；自查：每行都有说明、无保存按钮、无死控件、被 env 覆盖的三项置灰且说明正确；然后向我汇报做了什么、删了哪些原型元素及原因。**不要 commit，由主线收口。**
