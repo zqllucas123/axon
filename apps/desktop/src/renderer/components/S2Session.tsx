@@ -11,11 +11,13 @@ import { VIEW_LABEL } from '../state/selectors.ts';
 import { Icon } from '../icons.tsx';
 import { Inspector } from './Inspector.tsx';
 import { MessageStream } from './MessageStream.tsx';
+import { EscalateSheet, LedgerView, UsageView } from './S2Views.tsx';
 import type { SessionView } from '../state/types.ts';
 
 export function S2Session(): ReactElement {
   const { current, details, sessionView, setSessionView, focusPath, prompt, interrupt, agents } = useApp();
   const [text, setText] = useState('');
+  const [sheet, setSheet] = useState(false);
 
   if (!current) {
     return (
@@ -89,7 +91,7 @@ export function S2Session(): ReactElement {
 
         <span className="spacer" />
         {solo ? (
-          <button className="btn sm" data-smoke="escalate" title="升级为团队会话（切片 5 接浮层）">
+          <button className="btn sm" data-smoke="escalate" title="升级为团队会话（消息不丢）" onClick={() => setSheet(true)}>
             <Icon name="users" size={14} />
             叫人（升级为团队会话）
           </button>
@@ -143,18 +145,20 @@ export function S2Session(): ReactElement {
             </div>
           </div>
         </>
+      ) : sessionView === 'ledger' ? (
+        <section className="canvas">
+          <LedgerView />
+        </section>
       ) : (
-        <div className="stream">
-          <div className="empty">
-            <span className="k">{VIEW_LABEL[sessionView]} 视图</span>
-            本视图在切片 6 落地（数据已在会话摘要里：账本 {current.counts.ledger} 笔 / 用量 $
-            {(current.usage.costUsd ?? 0).toFixed(2)}）。
-          </div>
-        </div>
+        <section className="canvas">
+          <UsageView />
+        </section>
       )}
         </div>
-        <Inspector />
+        <Inspector onEscalate={() => setSheet(true)} />
       </div>
+
+      {sheet ? <EscalateSheet onClose={() => setSheet(false)} /> : null}
     </>
   );
 }

@@ -106,6 +106,10 @@ export interface StoreValue {
   respondApproval: (requestId: string, approved: boolean) => Promise<void>;
   answerQuestion: (requestId: string, answer: string) => Promise<void>;
   adopt: (id: string, adoption: 'adopted' | 'rejected') => Promise<void>;
+  /** 拉本会话账本切片（ledger.query 只拉一次，之后靠增量事件）。 */
+  loadLedger: (sessionId: string) => Promise<void>;
+  /** 「叫人」：单兵会话升级为团队会话（session.escalate）。 */
+  escalate: (sessionId: string, teamId: string) => Promise<boolean>;
   saveRole: (role: RoleEntry['role']) => Promise<{ accepted: boolean; errors: RoleIssue[] }>;
   saveTeam: (team: TeamEntry['team']) => Promise<{ accepted: boolean; errors: TeamIssue[] }>;
   dismissError: () => void;
@@ -189,6 +193,40 @@ export function AppProvider({ children }: { children: ReactNode }): ReactElement
         );
         return { ...prev, [path]: [...history, ...live] };
       });
+    },
+    [call],
+  );
+
+  /** 已拉过账本的会话（账本 append-only：拉一次 + 事件增量即可）。 */
+  const ledgerLoadedRef = useRef<Set<string>>(new Set());
+
+  /** 本会话账本切片（必带 sessionId：/sX/a 这类路径只在会话内唯一）。 */
+  const loadLedger = useCallback(
+    async (sid: string): Promise<void> => {
+      if (ledgerLoadedRef.current.has(sid)) return;
+      ledgerLoadedRef.current.add(sid);
+      const res = await call(() => window.axon.invoke('ledger.query', { sessionId: sid, limit: 200 }));
+      if (!res) {
+        ledgerLoadedRef.current.delete(sid);
+        return;
+      }
+      setLedger((prev) => [...prev.filter((r) => r.sessionId !== sid), ...res.records]);
+    },
+    [call],
+  );
+
+  /** 「叫人」= 单兵 → 团队（session.escalate）；失败已由 call 记进 error。 */
+  const escalate = useCallback(
+    async (sid: string, teamId: string): Promise<boolean> => {
+      const d = await call(() => window.axon.invoke('session.escalate', { sessionId: sid, teamId, carryMessages: true }));
+      if (!d) return false;
+      setDetails((prev) => ({ ...prev, [sid]: d }));
+      setAgents((prev) => {
+        const next = { ...prev };
+        for (const m of d.members) next[m.path] = m;
+        return next;
+      });
+      return true;
     },
     [call],
   );
@@ -545,8 +583,9 @@ export function AppProvider({ children }: { children: ReactNode }): ReactElement
       if (!known) void loadDetail(id);
       const root = known ? known.rootPath : (s?.rootPath ?? null);
       if (root) void loadMessages(root);
+      void loadLedger(id);
     },
-    [details, loadDetail, loadMessages, sessions],
+    [details, loadDetail, loadLedger, loadMessages, sessions],
   );
 
   const createSession = useCallback(
@@ -560,9 +599,10 @@ export function AppProvider({ children }: { children: ReactNode }): ReactElement
       setSessionViewState('chat');
       void loadDetail(s.record.id);
       void loadMessages(s.rootPath);
+      void loadLedger(s.record.id);
       return s;
     },
-    [call, loadDetail, loadMessages],
+    [call, loadDetail, loadLedger, loadMessages],
   );
 
   const removeSession = useCallback(
@@ -673,6 +713,8 @@ export function AppProvider({ children }: { children: ReactNode }): ReactElement
     respondApproval,
     answerQuestion,
     adopt,
+    loadLedger,
+    escalate,
     saveRole,
     saveTeam,
     dismissError: () => setError(null),
