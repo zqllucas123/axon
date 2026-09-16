@@ -14,6 +14,7 @@
 
 import { app, BrowserWindow, ipcMain, shell } from 'electron';
 import { fileURLToPath } from 'node:url';
+import { mkdir, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { homedir } from 'node:os';
 import {
@@ -330,11 +331,51 @@ async function applyConfigPatch(): Promise<void> {
   sendEvent('config.changed', { config: configStore.snapshot() });
 }
 
+/**
+ * 截图钩子 —— MU-2 逐值对齐（设计与实现并排看）用。
+ *
+ * 为什么放主进程而不是外挂 CDP 脚本：capturePage 在这里只要一句话；
+ * 走 CDP 得另起 WebSocket + Runtime.evaluate + 生命周期管理，为几张 PNG 不值。
+ * 与 AXON_SMOKE_SCRIPT 同一惯例：只有 env 打开时才生效，生产路径不受影响。
+ *
+ * 驱动方式（三个 env）：
+ *   AXON_SHOT_DIR   —— 输出目录（必需，缺它就是普通启动）
+ *   AXON_SHOT_INIT  —— 截图前先跑的页面 JS（造种子数据，可选）
+ *   AXON_SHOT_HOOKS —— `名字=data-smoke值` 逗号分隔，逐个点击后截图
+ */
+async function runShotHook(): Promise<void> {
+  const dir = process.env.AXON_SHOT_DIR;
+  const w = win;
+  if (!dir || !w) return;
+  const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  try {
+    await mkdir(dir, { recursive: true });
+    await wait(1500);
+    const init = process.env.AXON_SHOT_INIT;
+    if (init) {
+      await w.webContents.executeJavaScript(init, true);
+      await wait(2500);
+    }
+    const shots = (process.env.AXON_SHOT_HOOKS ?? 's0=nav-s0').split(',').filter(Boolean);
+    for (const item of shots) {
+      const [name, hookName] = item.split('=');
+      const js = `document.querySelector('[data-smoke="${hookName}"]')?.click()`;
+      await w.webContents.executeJavaScript(js, true);
+      await wait(900);
+      const img = await w.webContents.capturePage();
+      await writeFile(join(dir, `${name}.png`), img.toPNG());
+      console.log(`[shot] ${name} → ${name}.png`);
+    }
+  } catch (err) {
+    console.error('[shot] 失败:', err);
+  }
+  app.quit();
+}
 function createWindow(): void {
   win = new BrowserWindow({
     width: 1280,
     height: 820,
-    backgroundColor: '#16181d',
+    backgroundColor: '#fcfcfb', // = tokens.css --bg-canvas（浅色主题，避免启动瞬间深色闪一下）
     webPreferences: {
       // 三条都不能松：渲染进程绝不碰 Node。
       // preload 用 .mjs：ESM preload 是 Electron 的硬性要求（且需 sandbox:false）。
@@ -350,6 +391,8 @@ function createWindow(): void {
     // 冒烟探针：窗口起来 + 页面加载完。renderer 启动后会立刻 invoke
     // role.list / agent.list，那一步的成败在「交互」阶段验证。
     console.log('[desktop] window loaded');
+    // MU-2 逐值对齐用：AXON_SHOT_DIR 打开时自己截图（见 runShotHook）。
+    if (process.env.AXON_SHOT_DIR) void runShotHook();
   });
   win.on('closed', () => {
     win = null;
