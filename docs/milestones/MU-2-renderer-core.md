@@ -410,7 +410,7 @@ S3 团队 tab：team.list → 卡片；点卡 → 详情（成员列表 + 策略
 | A-7 | parked 排队位次 | `counts.parked` 只有数量（G4.6） | `counts` 扩展或位次字段 | 删位次，只写 parked |
 | A-8 | 会话行头像叠层 / 成员名 | `SessionTeamRef` 只有 `name/memberCount/tempCount`（S1-1） | `SessionTeamRef.members: string[]`（或只取前 3） | 降级为「团队名首字 + 成员数」 |
 | A-9 | S1 的失败计数 | `SessionCounts` 无 `failed`（S1-2，`session.ts:193-206`） | `SessionCounts.failed` | 删该项 |
-| A-10 | 「上次中断」提示条 | `SessionSummary` 不带 rollup（`interruptedAt`） | `SessionSummary.rollup` 或 `storage.status` 扩展 | 删（改为 MU-3/S7 一起做） |
+| A-10 | 「上次中断」提示条 | `SessionSummary` 不带 rollup（`interruptedAt`） | `SessionSummary.rollup` 或 `storage.status` 扩展 | ✅ **MU-3 已核销**：`SessionSummary.rollup` 已透传 `interruptedAt`，S7 会话恢复屏落地 |
 
 ### B. 方言依赖类（等 M6「真模型尖峰」核对 pi 方言后回收）
 
@@ -426,10 +426,10 @@ S3 团队 tab：team.list → 卡片；点卡 → 详情（成员列表 + 策略
 
 | # | 内容 | 落点 |
 |---|---|---|
-| C-1 | 会话内账本/用量的细化：动作过滤增强、按成员子树聚合视图、图表 | MU-3（与 S6 全局预算一起看口径） |
-| C-2 | **S5 收件箱 / S6 全局预算 / S7 会话恢复 / S8 设置窗** | MU-3（已拍板） |
+| C-1 | 会话内账本/用量的细化：动作过滤增强、按成员子树聚合视图、图表 | ⏳ **MU-3 部分核销**：S6 已把口径定下来（全局三指标 + 按会话排行，全部「累计」语义）；图表与子树聚合仍未做 → 转 MU-3 台账 D-5/D-6 |
+| C-2 | **S5 收件箱 / S6 全局预算 / S7 会话恢复 / S8 设置窗** | ✅ **MU-3 已核销**：四屏全部落地（S8 为独立窗） |
 | C-3 | 单兵会话的**升级提议卡**（`s2-solo.html:62-90`） | 需要「建议升级」事件（协议+编排建议逻辑）→ M4/M6 后再议 |
-| C-4 | 暗色主题 + 主题切换器 | MU-3/S8（用户拍板：MU-2 只做浅色） |
+| C-4 | 暗色主题 + 主题切换器 | ⏳ **转结**：MU-3 拍板 P-4 确认仍不做（全量换肤要复核 12 屏，够独立一片）；`ui.theme` 字段与置灰控件已就位 → MU-3 台账 D-7 |
 | C-5 | S0「最近用过」的频次统计 | 需要使用计数（本地统计即可，无协议改动）→ 后续按需 |
 | C-6 | 手动作协作发起（consult/fork/delegate/handoff 的 UI） | M4 协作动作与落账 |
 | C-7 | 「标注开关」（`.ann` 调试态） | 决定不做（不是产品能力）；若开发期需要，作为 dev-only 开关另议 |

@@ -1,6 +1,6 @@
 # MU-3 收尾屏（S5 收件箱 / S6 预算与用量 / S7 会话恢复 / S8 设置窗）：方案设计与实施计划
 
-> 状态：**已评审通过，实施中**（2026-09-16 用户拍板：§〇 八条全按推荐；并行作业编排见 §七.0）
+> 状态：**已完成（2026-09-16）** —— 九片全部落地，质量门七件套全绿（528 测试 / `ui-smoke` 41 条断言）；拍板见 §十一，实测偏离见 §十三
 > 对应里程碑：MU-3（03 §1 MU 支线最后一片）｜ 依赖：MU-2（渲染主干，`d610476`）+ M5（落盘）+ MU-1（config/session 协议）
 > 设计依据：`docs/ux/00-信息架构与屏幕清单.md`（S5/S6/S7 定义与 G1~G9）、`docs/ux/02-团队与会话模型.md`（左右栏职责切分）、`docs/ux/03-设置界面设计.md`（S8 全文 + G11 十四条）、`docs/ux/mockups/{s5-inbox,s6-budget,s7-sessions,s8-settings}.html`
 > 纪律：本片**允许动主进程与协议**（S8 独立窗 + 四处最小扩展，逐条列在 §4.1），与 MU-2「只动 renderer」不同——范围边界写死在 §1.2，越界即返工
@@ -332,19 +332,21 @@ S7 不发明新动作：**「继续」= `session.get` + 切到 S2**（等价于�
 
 **测试基线**：518 例 / 24 文件不许回退；本片预计 +10~15 例（全在主进程侧）。
 
+**实测结果（收尾）**：**528 例 / 24 文件**（+10，全在 `config-store.test.ts` 与 `host.restart.test.ts`），渲染层零单测的口径守住。ui-smoke 从 24 条断言涨到 **41 条**（新增四幕 + 3 条 `loadedCount` 反向断言）。
+
 ---
 
 ## 九、验收标准（可勾选）
 
-- [ ] 左栏六项导航**全部可点**，无 `disabled`、无 `title="MU-3"` 残留；badge 取真实待批数
-- [ ] S5：跨会话审批可见可批；穿透链正确；代批有留痕流水；空态有解释；在 S5 批准后 S2 同步消失
-- [ ] S6：全局档位/软硬线/累计已用三指标正确；按会话排行可点进该会话用量视图；无「今日」「协作开销占比」「轮数」等无源数字
-- [ ] S7：重启后能看出哪些会话被中断；点「继续」能回到完整会话
-- [ ] S8：`⌘,` 与账号菜单都能开窗且是**单例聚焦**；五个 pane 齐；改任一项立刻生效且重启后保持；被 env 覆盖的三项置灰且说明正确；重置只动 config.json
-- [ ] 每行设置都有一句说明（03 §3 硬规矩），无保存按钮
-- [ ] 懒加载不破：进 S6/S7 后 `storage.status.loadedCount` 不变
-- [ ] 质量门七件套全绿：`guard` / `typecheck` / `test`（≥518） / `build:desktop` / `verify-lazy` / `ui-smoke` / `dev` 手工过一遍上述能力
-- [ ] MU-2 台账 A-10 / C-1 / C-2 / C-4 四行按实际结果核销，不留口头延期
+- [x] 左栏六项导航**全部可点**，无 `disabled`、无 `title="MU-3"` 残留；badge 取真实待批数
+- [x] S5：跨会话审批可见可批；穿透链正确；代批有留痕流水；空态有解释；在 S5 批准后 S2 同步消失
+- [x] S6：全局档位/软硬线/累计已用三指标正确；按会话排行可点进该会话用量视图；无「今日」「协作开销占比」「轮数」等无源数字（冒烟 7.6 幕有一条「全屏无『今日』」的文案断言）
+- [x] S7：重启后能看出哪些会话被中断；点「继续」能回到完整会话（冒烟 8.5 幕）
+- [x] S8：`⌘,` 与账号菜单都能开窗且是**单例聚焦**；五个 pane 齐；改任一项立刻生效且重启后保持；被 env 覆盖的三项置灰且说明正确；重置只动 config.json
+- [x] 每行设置都有一句说明（03 §3 硬规矩），无保存按钮
+- [x] 懒加载不破：进 S6/S7 后 `storage.status.loadedCount` 不变（冒烟三条反向断言）
+- [x] 质量门七件套全绿：`guard` / `typecheck` / `test`（**528**） / `build:desktop` / `verify-lazy` / `ui-smoke` / `dev` 手工过一遍上述能力
+- [x] MU-2 台账 A-10 / C-1 / C-2 / C-4 四行按实际结果核销，不留口头延期
 
 ---
 
@@ -363,7 +365,19 @@ S7 不发明新动作：**「继续」= `session.get` + 切到 S2**（等价于�
 
 ## 十一、拍板记录
 
-> 待用户逐条拍板 §〇 的 P-1~P-8 后回填。
+> 用户 2026-09-16 逐条拍板，全部按「推荐方案」通过，无改动。
+
+| # | 议题 | 结论 | 一句话理由 |
+|---|---|---|---|
+| P-1 | 本片做三屏还是四屏 | **四屏（含 S7 会话恢复）** | 不做 S7，M5 的落盘/恢复成果在 UI 上没有出口，「重启后哪些会话被中断」只能看日志 |
+| P-2 | S8 是屏还是独立窗 | **独立 `BrowserWindow`** | 设置没有会话上下文，塞进主窗就得给它挂一个语义错误的会话 chip；⌘, 是系统级习惯 |
+| P-3 | 外观偏好存哪 | **`config.json` 的 `ui.*`** | 两窗要同步，而 `file://` 下 localStorage 分区不可靠；配置的真相本来就在主进程 |
+| P-4 | 暗色主题 | **本片不做**，`ui.theme` 保留 `dark`/`system` 枚举但控件置灰 | 全量换肤要复核 12 屏，够独立一片（台账 D-7） |
+| P-5 | S5「已处理」的时间范围 | **降级为「本次运行期内」** | `ApprovalBroker` 结算即 delete，盘上没有历史（台账 D-1） |
+| P-6 | 选项式提问 | **不做** | `question.request` 全仓无发射方，形状未定（台账 D-2） |
+| P-7 | 协议扩展的边界 | 做 `shell.openPath` + `config.reset`，**不做** `provider.test` | 前两个是纯本地枚举操作；后者要主进程发真 HTTP，归 M6 |
+| P-8 | S6 的时间口径 | **全部改「累计」文案** | `BudgetGuard` 只有进程内累计，没有日切；写「今日」就是假数据（台账 D-4） |
+| R-8 | 外观四项要不要真生效 | **三项真生效，`annotations` 删行不删字段** | density/fontSize/reduceMotion 落 body `data-*` + CSS 变量；标注系统在渲染层根本不存在（原型里是 `assets/shell.js` 的 `⌘/` 调试工具），按「协议给不出就删界面元素」删行，白名单字段留给 G11.13（台账 D-11） |
 
 ## 十二、遗留工作台账（延期项登记处，实施中新增的当场补）
 
@@ -379,6 +393,17 @@ S7 不发明新动作：**「继续」= `session.get` + 切到 S2**（等价于�
 | D-8 | 孤儿目录清理（S7「清理孤儿」） | 无扫描/删除命令；删用户目录不可逆 | 待排（需单独设计确认流程） |
 | D-9 | Tray / 防休眠、检查更新、开源许可证、设置搜索框、目录选择器 | 无实现且非本片主线 | M7（打包与分发）一并考虑 |
 | D-10 | 只读打开会话（S7 按钮） | 无只读模式协议 | 待排 |
+| D-11 | 「显示协议数据标注」设置行 | 渲染层没有标注系统（原型里那是 `assets/shell.js` 的 `⌘/` 调试浮层，不是产品能力）；按「协议给不出就删掉界面元素，不填假数据」删行 —— 白名单字段 `ui.annotations` **保留**，`config.patch` 存得进、读得出，只是没人消费 | G11.13（做标注系统那一片）；届时按 `SegField` 形状重写一个 `ToggleField`（本片已把死控件与 `.tgl` CSS 一并删除，见 §十三 T-11） |
+| D-12 | S8「关于」pane 的检查更新 / 开源许可证 | 无实现，属打包分发范畴 | 归入 D-9（M7） |
+
+**MU-2 台账核销（本片承接的四行）**：
+
+| MU-2 # | 内容 | 本片结果 |
+|---|---|---|
+| A-10 | 左栏 S5/S6/S8 三项导航置灰（`NAV_LATER`） | ✅ **核销**：六项全部可点，`NAV_LATER` 与 `title="MU-3"` 已从 `Sidebar.tsx` 删除；badge 取 `pending.length` 真值 |
+| C-1 | 底部「待批 N」是死数字 | ✅ **核销**：`data-smoke="foot-pending"` 接 S5 落点，冒烟 7.6 幕验它可点并跳屏 |
+| C-2 | 账号菜单两项无落点 | ✅ **核销**：「设置…」→ `window.openSettings`；「打开配置目录」→ `shell.openPath('config')` |
+| C-4 | 暗色主题缺失 | ⏳ **转结**：本片确认不做（拍板 P-4），并入本表 D-7；`ui.theme` 字段与置灰控件已就位 |
 
 ## 十三、设计 vs 实测
 
@@ -397,3 +422,31 @@ S7 不发明新动作：**「继续」= `session.get` + 切到 S2**（等价于�
 | T-7 | — | `ui-smoke.mjs` 的 `getPageTarget()` 用 `url.includes('index.html')` 选窗 | 设置窗 URL 同样含 `index.html`（带 `#settings`）⇒ **切片 9 补冒烟幕时必须改成排除 `#settings`**，否则会随机选错窗 |
 
 **阶段 0 真窗口实测（CDP 探针，临时脚本）**：① `window.openSettings` → `{opened:true}`，设置窗 1 个；② 再调一次仍为 1 个（单例成立）；③ 设置窗 5 个导航项、`body[data-window=settings]`、`settings.css` 已生效；④ 在设置窗 `config.patch {ui.density:'compact'}` 后，**主窗** `config.get` 读到 `{density:'compact'}`（双窗同步通）；⑤ `config.reset` 后 `ui` 清空；⑥ 左栏 s5/s6/s7 均可点达，标题分别为「收件箱 / 预算与用量 / 会话恢复」。
+
+### 阶段 1 实施记录（2026-09-16，四窗并行 · 切片 3~7）
+
+| # | 设计原话 | 实际做法 | 为什么改 |
+|---|---|---|---|
+| T-8 | `ApprovalCard` 的对外形状是 `{request, variant, sessionTitle?, onOpenSession?}` | 补两个可选扩展点 `headTag?` / `children?` | S5 要在卡头挂「代批」标记、在卡尾插「阻塞影响」说明，而这两处 S2 都不需要；两者都有默认值 ⇒ 不传时与抽件前**逐像素一致**，四个 `data-smoke` 钩子零变化 |
+| T-9 | 「S3/S6 各写一个 `money()` 格式化」 | 四个局部 `money` + 一个局部 `relDay` 合并进 `selectors`，`S3Teams` 只留一层 `teamMoney` 包装 | 同一个金额在四屏里必须一模一样；`teamMoney` 留着是因为团队的 `undefined` 语义是「没设上限」而不是「$0.00」，这层判空不该塞进通用格式化 |
+| T-10 | — | W-C（S7）**违规自行 commit `96f1aee`** | 违反 AGENTS.md §4.4 受控豁免第 3 条（git 单点）。已保留原样不做历史改写（rebase 一条已入库的 commit 收益远小于风险），只记在此处备查 |
+
+**阶段 1 真窗口实测（CDP 探针）**：三屏正常渲染无 console 错误；`storage.status.loadedCount` 进 S6/S7 前后 1 → 1（R-7 守住）；设置窗五个 pane 的设置行数分别为 6/5/10/6/8。
+
+### 阶段 2 实施记录（2026-09-16，切片 8 / 9）
+
+| # | 设计原话 | 实际做法 | 为什么改 |
+|---|---|---|---|
+| T-11 | R-8「外观四项真生效」 | 三项真生效 + `ToggleField` **整个组件与 `.tgl` CSS 一族删除** | 删掉 `ui.annotations` 那一行后，全仓布尔配置项归零 ⇒ 控件零使用者。留着就是 40 行组件 + 25 行 CSS 的死代码；G11.13 要用时按 `SegField` 形状重写只需 20 行 |
+| T-12 | 密度「按原型收紧行距与字号」 | **只改纵向节奏**（`--row-y` 13→8px / `--prow-y` 9→5px / `--sec-gap` 22→14px），字号与横向留白不动 | 缩字号是拿可读性换密度，而字号本来就有独立的滑杆；收横向留白会让长路径更早被截断 |
+| T-13 | 字号「落 `data-font-size`」 | 落 CSS 变量 `--fs-msg`（`body.style.setProperty`），只影响会话正文 | 字号是连续量（12~20），枚举属性要为每个值写一条规则、改区间还得同步改 CSS；且全局缩放会顺带改掉侧栏/顶栏，那不是用户在「消息字号」滑杆上期待的 |
+| T-14 | — | `reduceMotion === 'system'` 也必须落属性 | 浏览器只对自己的滚动/动画尊重 `prefers-reduced-motion`，不会替我们停掉自定义 `transition`；「缺省从没设过」与「显式选跟随系统」在 CSS 上是两条不同规则 |
+| T-15 | — | `applyAppearance` 由 `useEffect` 盯 `config` 状态，而不是在三个 `setConfig` 调用点各写一遍 | 三条写入路径（开机拉取 / `config.changed` / 本窗 patch 回包）终值相同，盯状态就只有一处真相，也不会漏掉以后新增的写入路径 |
+| T-16 | 冒烟「S5 幕：触发审批 → 收件箱可见 → 批准 → 消失」 | 改为**另起一个分身留一条不批的审批**，且必须排在烧钱幕**之前** | ① 预算 `frozen` 是终态，`assertCanStart` 会挡下之后所有 spawn/prompt（`packages/kernel/src/budget.ts:94`）；② 同一个分身被审批卡住时发不了新 prompt，而烧钱那两轮还得用它；③ 这条待批同时充当 S7「上次中断」的标的 —— 硬杀时得有人处于非终态，恢复扫描才有痕迹可留 |
+| T-17 | 冒烟 S5 断言「空态 + 已处理流水并存」 | 改为「默认 tab 验待处理卡 → 切『全部』tab 验两段并存」 | 实测默认 tab 是「待处理」，它根本不渲染「本次已处理」段，原断言要求两个互斥的钩子同时在场，必红。顺带把分段切换这个交互也验了 |
+| T-18 | （未入设计，切片 9 跑出来的真 bug） | `host.ts` 的 `scheduleRollup` **透传已有 `interruptedAt`** | 它是**历史事实**（上次退出时还有人在跑），不是当前状态。重启后任意一次落账/状态跃迁/`turn.end` 都会走到 `scheduleRollup`，不透传就等于把刚标上的中断痕迹无声抹掉 —— S7 的「可恢复」会在用户眼皮底下消失 |
+| T-19 | （同上） | `markInterruptedAt` 之后 `emit('session.changed')` | 该方法在**懒加载当场**被调（用户刚点开这个会话），而渲染层的会话列表还是开机那一发 `session.list` 的快照；不播的话 S7 要等下一次全量刷新才看得见「上次中断」，而那时用户早已错过提示 |
+
+**阶段 2 真窗口实测**：`ui-smoke` 41 条断言全绿（原 24 条 + 新四幕）。R-8 单独跑过 CDP 探针：设置窗 patch `{density:'compact', fontSize:18}` → 两窗 `body.dataset.density === 'compact'`、`--fs-msg` 计算值 `18px`、`--row-y` `8px`；`config.reset` → 两窗回缺省（`data-density` 消失、`--fs-msg` 回 `15px`）；两窗 console 零错误。
+
+**切片 8 死链核销清单（`git show 0b6555a --stat`）**：侧栏 brand 区两枚装饰图标（搜索/通知）及其 CSS；`tokens.css` 与 `base.css` 的重复归一段（拼接顺序下 base 胜出，前者从未生效）；约 14 条无使用者的 CSS 规则（`.bubble-meta`/`.msg-actions`/`.topbar .act`/`.composer .act`/`.badge.quiet`/`.menu[hidden]`/`a.stat:hover`/`.seg-a`/`.field.ta`/`.field.dim`/`.view-head h2`/`.lnk`/`.st-back`/`.is-ext`）；重复定义的 `.side-scroll` 与 `.tree .lvN::before` 合并；`selectors.blockedCount`/`splitRecoverable` 两个无消费者的导出删除，`isTerminal`/`textOfBlocks`/`fmtInt`/`relDay`/`Prose`/`InlineSeg` 六个降为文件私有；store context 上 `removeSession`/`renameSession`/`patchConfig`/`loadLedger` 四个无消费者的导出收回。保留 `Icon` 的 18/20 两档尺寸并加注：它是令牌梯度，不是死链。

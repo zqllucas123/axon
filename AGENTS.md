@@ -21,7 +21,7 @@
 
 ## 2. 工作流（用户拍板，2026-09-13）
 
-- **按里程碑推进**：总览见 03 §1，M0~M3 已完成，下一个是 M4 协作动作与落账
+- **按里程碑推进**：总览见 03 §1，M0~M5 与 MU-1/MU-2/MU-3 均已完成，下一个是 M6 真实模型接入
 - **每个里程碑开工前**，先在 `docs/milestones/M<id>-<短名>.md` 写「方案设计 + 实施计划」（模板在 03 §4），经用户过目后才许写实现代码
 - **每个里程碑收尾**过质量门（§3）后才算完成，且文档同步（03 §1 状态列、01 §1 进度表）
 
@@ -30,7 +30,7 @@
 ```bash
 bun run guard        # 6 项：包管理约束 / pi import 白名单 / electron 落地等
 bun run typecheck    # root + renderer 双 tsc
-bun run test         # 现有 162 例不能回退
+bun run test         # 现有 528 例不能回退
 bun run build:desktop && bun run verify-lazy   # 打包保险丝（pi 懒加载不能被提升）
 bun run ui-smoke     # UI 端到端冒烟（CDP 五幕）
 bun run dev          # 手工过一遍本里程碑的用户可见能力
