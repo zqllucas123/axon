@@ -1,70 +1,345 @@
 /* ────────────────────────────────────────────────────────────
- * settings.css —— S8 设置窗专属样式（MU-3）。
+ * settings.css —— S8 设置窗专属样式（MU-3 切片 3，W-D）。
  *
  * 单独成文件而不是塞进 screens.css：设置窗是第二个 BrowserWindow，
  * 它的布局（左导航 + 右内容，无顶栏无侧栏）与主窗五屏没有任何共享结构；
  * 混在一起只会让主窗的屏样式越读越难分辨「这条是谁的」。
  *
- * 样式来源：docs/ux/mockups/assets/axon.css §11（.st-* 一族）。
- * 注意原型里的 `.path` 与实现里的 `.card-head .path` 不是一回事，别直接抄选择器。
+ * 逐值来源：docs/ux/mockups/assets/axon.css §11（748-862 行，.st-* / .grp /
+ * .srow / .tgl / .sel / .path / .seg.sm / .danger-zone 一族）。
  *
- * 本文件在切片 2 只放骨架所需的最小一组；其余由 W-D 在切片 7 补齐。
+ * ── 两条与原型不同的地方，都是实现约束逼出来的 ──
+ *
+ * 1. **全部选择器挂在 `.st-win` 下**。两个窗口共用同一份 axon.css 产物
+ *    （build.mjs 把五份 CSS 拼成一份），而原型 §11 里的 `.path` / `.grp` /
+ *    `.srow` 是**裸类名**：主窗的 S3Teams.tsx:627、MessageStream.tsx:102、
+ *    parts/ApprovalCard.tsx:91 都在用 `class="path"`（那是 components.css 的
+ *    `.card-head .path`，与设置窗的「只读路径胶囊」不是一回事）。裸着搬进来，
+ *    max-width/ellipsis 会跨窗污染主窗的三处调用点。加 `.st-win ` 前缀后
+ *    逐值不变，污染面为零。
+ * 2. **`.window.is-settings` 落成 `.st-win`**：原型的设置窗复用 `.window`
+ *    基础再覆盖列宽，实现里主线已把根节点定为 `.st-win`（SettingsApp.tsx），
+ *    这里把 `.window` 的四条基础属性 + `is-settings` 的列宽合并进同一条规则，
+ *    值与原型一致（grid / 100vh / overflow hidden / --bg-canvas）。
+ *
+ * 其余「实现新增」的规则集中在文件末尾，每条都写清为什么原型里没有。
  * ──────────────────────────────────────────────────────────── */
 
-/* 窗体：左导航固定宽，右内容滚动。 */
+/* §11 的两个宽度令牌（原型 axon.css:752）。 */
+:root {
+  --st-nav-w: 250px;
+  --st-body-w: 704px;
+}
+
+/* 原型 .window + .window.is-settings（axon.css:88-95,754）。 */
 .st-win {
   display: grid;
-  grid-template-columns: 180px 1fr;
+  grid-template-columns: var(--st-nav-w) 1fr;
   height: 100vh;
+  overflow: hidden;
   background: var(--bg-canvas);
 }
 
-.st-nav {
+/* ---------- 左侧子导航 ---------- */
+
+.st-sidebar {
   display: flex;
   flex-direction: column;
-  gap: 2px;
-  padding: 12px 8px;
-  border-right: 1px solid var(--line);
+  overflow: hidden;
   background: var(--bg-sidebar);
+  border-right: 1px solid var(--line);
 }
 
-.st-navitem {
-  appearance: none;
-  border: 0;
-  background: transparent;
-  text-align: left;
-  padding: 6px 10px;
-  border-radius: var(--r-xs);
-  font: inherit;
-  color: var(--text-secondary);
-  font-size: var(--fs-13);
-  cursor: pointer;
-}
-
-.st-navitem:hover {
-  background: var(--bg-hover);
-}
-
-.st-navitem.is-on {
-  background: var(--bg-active);
+.st-back,
+.st-win .st-item {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  margin: 1px 10px;
+  padding: 7px 10px;
+  border-radius: var(--r-sm);
+  font-size: var(--fs-14);
   color: var(--text);
-  font-weight: 500;
+}
+.st-back:hover,
+.st-win .st-item:hover { background: var(--bg-hover); }
+.st-back.is-on,
+.st-win .st-item.is-on { background: var(--bg-active); }
+.st-back .i,
+.st-win .st-item .i { color: var(--text-secondary); flex: none; }
+.st-win .st-item .ext { margin-left: auto; color: var(--text-dim); }
+/* 外链（回主窗打开）：arrowUp 转 45° = ↗，与 pane 内切的 chevR 区分开。
+   ⚠️ 这两条与上面的 `.st-back` 当前**没有调用点**，是刻意留的：协议里只有
+   `window.openSettings`（主窗 → 设置窗），没有反向的聚焦/导航命令，所以
+   「团队与角色 ↗ / 预算与用量 ↗」两项与「← 返回应用」都不渲染（用户拍板）。
+   等哪天补了反向导航命令，样式现成，不用再回原型逐值抄一遍。 */
+.st-win .st-item.is-ext .ext { transform: rotate(45deg); }
+.st-win .st-item.is-ext span { color: var(--text-secondary); }
+
+.st-navnote {
+  margin: 2px 10px 0;
+  padding: 0 8px;
+  font-size: var(--fs-11);
+  line-height: 1.5;
+  color: var(--text-dim);
 }
 
-.st-main {
+.st-win .st-nav {
+  flex: 1;
   overflow-y: auto;
-  padding: 16px 20px 32px;
+  padding: 0 0 12px;
 }
-
-/* 分节小标题（原型 .st-sec）。 */
-.st-sec {
+.st-group {
+  padding: 14px 20px 5px;
   font-size: var(--fs-12);
-  font-weight: 600;
-  letter-spacing: 0.02em;
   color: var(--text-muted);
-  margin: 18px 0 8px;
 }
 
-.st-pane > .st-sec:first-child {
-  margin-top: 0;
+/* ---------- 右侧内容 ---------- */
+
+.st-win .st-main {
+  min-width: 0;
+  overflow-y: auto;
+  background: var(--bg-canvas);
 }
+.st-body {
+  max-width: var(--st-body-w);
+  margin: 0 auto;
+  padding: 34px 40px 80px;
+}
+.st-h1 {
+  margin: 0 0 6px;
+  font-size: 26px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+.st-lede {
+  margin: 0;
+  font-size: var(--fs-13);
+  color: var(--text-muted);
+  line-height: 1.7;
+}
+.st-win .st-sec {
+  margin: 30px 0 8px;
+  font-size: var(--fs-13);
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+
+/* 分组卡：一行一设置，行间发丝线。 */
+.st-win .grp {
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+  background: var(--bg-elev);
+  overflow: hidden;
+}
+.st-win .srow {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  padding: 15px 16px;
+  border-top: 1px solid var(--line);
+}
+.st-win .srow:first-child { border-top: 0; }
+.st-win .srow > .txt { flex: 1; min-width: 0; }
+.st-win .srow .t {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: var(--fs-14);
+  color: var(--text);
+}
+.st-win .srow .d {
+  margin-top: 4px;
+  font-size: var(--fs-12);
+  color: var(--text-muted);
+  line-height: 1.65;
+}
+.st-win .srow .d .lnk { color: var(--sem-info); }
+.st-win .srow .d code,
+.st-win .srow .t code {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--text-secondary);
+}
+.st-win .srow > .ctl { flex: none; display: flex; align-items: center; gap: 8px; }
+.st-win .srow.top { align-items: flex-start; }
+.st-win .srow.col { flex-direction: column; align-items: stretch; }
+/* col 行里控件占满整宽并左对齐（json 编辑面、issue 清单）。 */
+.st-win .srow.col > .ctl { width: 100%; margin-top: 10px; }
+/* 分段控件里的「（未实现）」小注，与 .session-bar 同款但那条只作用于会话条。 */
+.st-win .seg button .n { margin-left: 5px; color: var(--text-dim); }
+.st-win .seg button.is-on .n { color: var(--text-muted); }
+
+/* 开关（不叫 .sw：那个名字被设计语言页的色板占了）。 */
+.st-win .tgl {
+  flex: none;
+  width: 40px;
+  height: 23px;
+  border-radius: var(--r-pill);
+  background: #ddd9d2;
+  position: relative;
+  transition: background 0.15s;
+}
+.st-win .tgl::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 19px;
+  height: 19px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.18);
+  transition: transform 0.15s;
+}
+.st-win .tgl.on { background: var(--accent); }
+.st-win .tgl.on::after { transform: translateX(17px); }
+.st-win .tgl.dis { opacity: 0.4; }
+.st-win .tgl:disabled { cursor: not-allowed; }
+
+/* 下拉 / 路径（.inp 已在 components.css 抽成全应用通用，这里不重复定义）。 */
+.st-win .sel {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 30px;
+  padding: 0 9px 0 11px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-sm);
+  background: var(--bg-elev);
+  font-size: var(--fs-13);
+  color: var(--text);
+  white-space: nowrap;
+}
+.st-win .sel .i { color: var(--text-dim); }
+.st-win .path {
+  max-width: 250px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-size: var(--fs-12);
+  color: var(--text-muted);
+}
+.st-win .seg.sm button { padding: 4px 11px; font-size: var(--fs-12); }
+
+/* 组内小标题行（模型清单这种需要表头的）。 */
+.st-win .srow.head { padding: 10px 16px; background: var(--bg-sunken); }
+.st-win .srow.head .t { font-size: var(--fs-12); color: var(--text-muted); font-weight: 500; }
+
+/* 底部危险区。 */
+.st-win .danger-zone { border-color: #ecd5d0; }
+.st-win .danger-zone .srow .t { color: var(--sem-err); }
+
+/* 命令级错误横幅（不是字段校验错误 —— 那一类在行内标红）。
+   复用 components.css 的 .card.err 描边，但它的内部结构（.card-head/.card-body）
+   对一条横幅来说太重，这里只给最小排版。 */
+.st-win .card.err {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 18px;
+  padding: 12px 14px;
+  border-radius: var(--r-md);
+  background: #fdf3f1;
+}
+.st-win .card.err .t { font-size: var(--fs-13); color: var(--sem-err); flex: none; }
+.st-win .card.err .d { flex: 1; min-width: 0; font-size: var(--fs-12); color: var(--text-muted); }
+
+/* 滚动条（原型：设置窗要能整页滚）。 */
+.st-win .st-main::-webkit-scrollbar,
+.st-win .st-nav::-webkit-scrollbar { width: 9px; }
+.st-win .st-main::-webkit-scrollbar-thumb,
+.st-win .st-nav::-webkit-scrollbar-thumb { background: rgba(0, 0, 0, 0.1); border-radius: 5px; }
+
+/* ═══════════════ 实现新增（原型没有的态，逐条写明原因）═══════════════ */
+
+/* 1. 原型的 .st-item 是 <button>/<a> 混用的静态锚点；实现全用 <button>，
+      base.css 的 button 归一只抹了字体/底色，块级宽度与左对齐要补。 */
+.st-win button.st-item { width: 100%; text-align: left; }
+
+/* 2. 原型没有「被环境变量锁定」这一态（G11.14 明确标为未画，UX 03 §4.2 是
+      本屏最重要的设计点）：控件置灰 + 行内一句「被 AXON_* 覆盖」。
+      不给这一态，用户改了不生效会以为是 bug。 */
+.st-win .srow.is-locked .t { color: var(--text-secondary); }
+.st-win .env-note {
+  display: block;
+  margin-top: 4px;
+  font-size: var(--fs-11);
+  line-height: 1.6;
+  color: var(--sem-info);
+}
+.st-win .sel:disabled,
+.st-win .inp:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+  background: var(--bg-sunken);
+}
+.st-win .seg button:disabled { color: var(--text-dim); cursor: not-allowed; }
+
+/* 3. 行内错误（UX 03 §4.1「写入失败时行内报错并把控件回滚到真实值，而不是
+      假装成功」）。原型没有错误态，因为它没有写盘路径。 */
+.st-win .field-err {
+  display: block;
+  margin-top: 5px;
+  font-size: var(--fs-11);
+  line-height: 1.6;
+  color: var(--sem-err);
+}
+.st-win .srow.is-err .ctl .inp,
+.st-win .srow.is-err .ctl .sel { border-color: #e6cdc8; }
+
+/* 4. 提交中（await config.patch 的那一小段）：乐观值已经显示出来，但还没有
+      真值确认。不给任何反馈的话，慢盘上会像是点了没反应。 */
+.st-win .srow.is-saving .ctl { opacity: 0.7; }
+
+/* 5. 模型清单/请求头是「整体替换」的 json 字段，编辑面是多行网格，
+      原型只画了只读行。列宽写死是刻意的：表头与数据列必须对齐。 */
+.st-win .kv-editor { display: flex; flex-direction: column; gap: 6px; width: 100%; }
+.st-win .kv-row { display: flex; align-items: center; gap: 6px; }
+.st-win .kv-row .inp { flex: 1; min-width: 0; }
+.st-win .model-form {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  width: 100%;
+}
+.st-win .model-form label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: var(--fs-12);
+  color: var(--text-muted);
+}
+.st-win .model-form label .inp { flex: 1; min-width: 0; }
+.st-win .row-acts { display: flex; align-items: center; gap: 8px; margin-top: 10px; }
+.st-win .row-acts .spacer { flex: 1; }
+
+/* 6. 危险动作的二次确认（UX 03 §4.5：红描边整组 + 二次确认 + 写清不动什么）。
+      原型只画了按钮，没有确认态。 */
+.st-win .confirm {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+.st-win .confirm .q { font-size: var(--fs-12); color: var(--sem-err); }
+
+/* 7. 存储实况的 issue 清单（关于 pane）：storage.status 可能一条都没有，
+      也可能十几条，行内用等宽小字列出来即可，不值得再造一个表格件。 */
+.st-win .issue-list {
+  margin: 0;
+  padding-left: 18px;
+  font-size: var(--fs-11);
+  line-height: 1.8;
+  color: var(--text-muted);
+}
+.st-win .issue-list li { margin-bottom: 4px; }
+.st-win .issue-list code {
+  margin: 0 6px;
+  font-family: var(--font-mono);
+  color: var(--text-secondary);
+}
+.st-win .issue-list .d { margin: 0; }

@@ -1,80 +1,116 @@
 /**
- * S8 设置窗外壳 —— 左导航 + 右内容（原型 `docs/ux/mockups/s8-settings.html`）。
+ * S8 设置窗外壳 —— 左导航 + 右内容（MU-3 切片 4，W-D）。
  *
- * 本文件在切片 2 只搭「窗能开、五个 pane 能切」的骨架；每个 pane 的内容由
- * MU-3 阶段 1 的 W-D 会话填（文件所有权见 MU-3 §7.0）。
+ * 结构照原型 s8-settings.html：`.st-win` > `.st-sidebar`（`.st-nav` 三组）
+ * + `.st-main` > `.st-body` > pane。
  *
- * 一条纪律照抄自 UX `03-设置界面设计.md:18`：**协议给不出的项就不画**，
- * 不摆一个永远灰着的假开关充数。
+ * ── 两处按用户拍板不渲染 ──
+ * 1. **「← 返回应用」与假交通灯**：原型是浏览器里的静态稿，需要自绘窗控；真窗口
+ *    有原生交通灯，再画一套只会变成两排按钮。样式仍留在 settings.css 里备用。
+ * 2. **「团队与角色 ↗」「预算与用量 ↗」两个跳回主窗的入口**：协议里只有
+ *    `window.openSettings`（主窗 → 设置窗的单向），没有反向的聚焦/导航命令。
+ *    用户拍板「这两项不用从设置窗跳回主窗」，所以它们降级为导航里的一段
+ *    **说明文字**（`.st-navnote`）——告诉你去哪儿找，而不是给一个点了没反应的项。
+ *
+ * 错误条：`config.patch` 的**字段级**错误在各自行内标红（fields.tsx），这里只接
+ * 传输/命令级错误（IPC 断了、命令抛异常），所以它是一条可关闭的横幅而不是行内红字。
  */
 
 import { useState, type ReactElement } from 'react';
 import { SettingsProvider, useSettings } from './SettingsStore.tsx';
+import { GeneralPane } from './panes/General.tsx';
+import { AppearancePane } from './panes/Appearance.tsx';
+import { ModelsPane } from './panes/Models.tsx';
+import { OrchestrationPane } from './panes/Orchestration.tsx';
+import { AboutPane } from './panes/About.tsx';
 
-/** 五个 pane（03 §3 的信息分组）。 */
-const PANES = [
+type PaneId = 'general' | 'appearance' | 'model' | 'orchestration' | 'about';
+
+const PANES: ReadonlyArray<{ id: PaneId; label: string }> = [
   { id: 'general', label: '通用' },
-  { id: 'model', label: '模型与网关' },
-  { id: 'budget', label: '预算与限额' },
   { id: 'appearance', label: '外观' },
+  { id: 'model', label: '模型与网关' },
+  { id: 'orchestration', label: '编排与安全' },
   { id: 'about', label: '关于' },
-] as const;
+];
 
-type PaneId = (typeof PANES)[number]['id'];
-
-function SettingsBody(): ReactElement {
-  const [pane, setPane] = useState<PaneId>('general');
-  const { config, error, dismissError } = useSettings();
-
-  return (
-    <div className="st-win">
-      <nav className="st-nav">
-        {PANES.map((p) => (
-          <button
-            key={p.id}
-            className={`st-navitem${pane === p.id ? ' is-on' : ''}`}
-            onClick={() => setPane(p.id)}
-            data-smoke={`settings-${p.id}`}
-          >
-            {p.label}
-          </button>
-        ))}
-      </nav>
-      <main className="st-main">
-        {error ? (
-          // 与主窗 ErrorBar 同一套类（components.css 的 .card.err），不另造样式。
-          <div className="card err" data-smoke="settings-error">
-            <div className="card-head">
-              <span className="name">命令失败</span>
-              <span className="spacer" />
-              <button className="act" onClick={dismissError} title="关闭">
-                ✕
-              </button>
-            </div>
-            <div className="card-body mono">{error}</div>
-          </div>
-        ) : null}
-        {config === null ? <div className="empty">读取配置中…</div> : <Pane id={pane} />}
-      </main>
-    </div>
-  );
+function paneOf(id: PaneId): ReactElement {
+  switch (id) {
+    case 'general':
+      return <GeneralPane />;
+    case 'appearance':
+      return <AppearancePane />;
+    case 'model':
+      return <ModelsPane />;
+    case 'orchestration':
+      return <OrchestrationPane />;
+    case 'about':
+      return <AboutPane />;
+  }
 }
 
-/** 占位：各 pane 由 W-D 填充（MU-3 切片 7）。 */
-function Pane({ id }: { id: PaneId }): ReactElement {
-  const label = PANES.find((p) => p.id === id)?.label ?? id;
+function SettingsShell(): ReactElement {
+  const { error, dismissError } = useSettings();
+  const [pane, setPane] = useState<PaneId>('general');
+
   return (
-    <section className="st-pane" data-pane={id}>
-      <div className="st-sec">{label}</div>
-      <div className="empty">此节尚未实现（MU-3 切片 7）。</div>
-    </section>
+    <div className="st-win" data-smoke="settings-win">
+      <aside className="st-sidebar">
+        <div className="st-nav">
+          <div className="st-group">个人</div>
+          {PANES.slice(0, 4).map((p) => (
+            <button
+              key={p.id}
+              type="button"
+              className={`st-item${pane === p.id ? ' is-on' : ''}`}
+              data-smoke={`settings-${p.id}`}
+              onClick={() => setPane(p.id)}
+            >
+              {p.label}
+            </button>
+          ))}
+
+          <div className="st-group">在主窗里管</div>
+          {/* 不做成可点项：没有「设置窗 → 主窗」的导航协议（见文件头）。 */}
+          <p className="st-navnote">
+            团队与角色、预算与用量都在主窗：左栏「团队」进角色与编队，顶栏预算胶囊进用量明细。
+            这里只放影响全局默认值的设置。
+          </p>
+
+          <div className="st-group">其他</div>
+          <button
+            type="button"
+            className={`st-item${pane === 'about' ? ' is-on' : ''}`}
+            data-smoke="settings-about"
+            onClick={() => setPane('about')}
+          >
+            关于
+          </button>
+        </div>
+      </aside>
+
+      <main className="st-main">
+        <div className="st-body">
+          {error ? (
+            <div className="card err" data-smoke="settings-error">
+              <div className="t">设置操作失败</div>
+              <div className="d">{error}</div>
+              <button type="button" className="btn sm ghost" onClick={dismissError}>
+                知道了
+              </button>
+            </div>
+          ) : null}
+          {paneOf(pane)}
+        </div>
+      </main>
+    </div>
   );
 }
 
 export function SettingsApp(): ReactElement {
   return (
     <SettingsProvider>
-      <SettingsBody />
+      <SettingsShell />
     </SettingsProvider>
   );
 }
