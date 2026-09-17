@@ -447,6 +447,33 @@ export function AppProvider({ children }: { children: ReactNode }): ReactElement
       }),
     );
     offs.push(
+      // M6 阶段C：流式增量。text/thinking 二选一，每帧只带一个字段。
+      // 找最近一个 pending 占位，append delta，触发 React 增量 re-render。
+      // message.end 到来时整块替换（防流式与最终落盘内容不一致）。
+      sub('agent.message.delta', ({ messageId: _id, text, thinking }, meta) => {
+        if (!meta.source) return;
+        const path = meta.source;
+        const delta = text ?? thinking ?? '';
+        if (!delta) return;
+        setStreams((prev) => {
+          const list = prev[path];
+          if (!list) return prev;
+          // 从末尾找最近的 pending 占位
+          let i = -1;
+          for (let k = list.length - 1; k >= 0; k--) {
+            const it = list[k];
+            if (it && it.kind === 'assistant' && it.pending) { i = k; break; }
+          }
+          if (i < 0) return prev; // 没有占位（message.end 已经收口了）
+          const prev_item = list[i] as Extract<StreamItem, { kind: 'assistant' }>;
+          const updated = { ...prev_item, text: prev_item.text + delta };
+          const next = [...list];
+          next[i] = updated;
+          return { ...prev, [path]: next };
+        });
+      }),
+    );
+    offs.push(
       sub('agent.message.end', ({ message }, meta) => {
         // toolResult 是独立消息：它的结果已经并进工具卡，再渲染一条就出双份。
         if (!meta.source || message.role === 'toolResult') return;

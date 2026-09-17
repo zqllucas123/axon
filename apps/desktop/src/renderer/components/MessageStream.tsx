@@ -157,7 +157,9 @@ export function MessageStream(): ReactElement {
           case 'assistant':
             return (
               <div className={item.pending ? 'assistant pending' : 'assistant'} key={item.id} data-smoke="assistant-msg">
-                {item.pending ? <p>正在生成…</p> : <Prose text={item.text} />}
+                {item.pending && !item.text
+                  ? <p>正在生成…</p>
+                  : <Prose text={item.text} />}
               </div>
             );
           case 'tool':
