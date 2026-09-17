@@ -73,15 +73,15 @@ export function Sidebar(): ReactElement {
         <span className="dot g" />
       </div>
 
+      {/*
+        brand 区只留品牌字。原本这里摆着两个 `opacity:0.5` 的占位图标（搜索 / 通知），
+        MU-3 切片 8 删除 —— 它们是 `<span>`：无 onClick、无 role、无 tabIndex，点上去
+        什么也不会发生，却有 hover 底色诱导人去点（`components.css` 的 `.brand .act`）。
+        而且两个能力已经有真正的去处：「通知」就是下面 NAV 里的 s5 收件箱（带真 badge），
+        「搜索」则连协议面都没有（台账 D-12）。两个入口指向同一件事时，留那个假的只会分歧。
+      */}
       <div className="brand">
         <span className="name">Axon</span>
-        <span className="spacer" />
-        <span className="act" title="搜索（MU-3）" style={{ opacity: 0.5 }}>
-          <Icon name="search" size={16} />
-        </span>
-        <span className="act" title="通知（MU-3）" style={{ opacity: 0.5 }}>
-          <Icon name="bell" size={16} />
-        </span>
       </div>
 
       <nav className="nav">

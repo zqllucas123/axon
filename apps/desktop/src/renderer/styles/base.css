@@ -50,9 +50,10 @@ button.prow,
 button.list-row,
 button.menu-item,
 button.mode-card,
-button.team-card,
-button.card-btn { width: 100%; text-align: left; }
-button.seg-a { width: auto; }
+button.team-card { width: 100%; text-align: left; }
+/* `button.card-btn` / `button.seg-a` 两条已删（MU-3 切片 8）：全仓无这两个类名。
+   归一清单留空条目比漏条目更危险：以后真加一个叫 `card-btn` 的按钮时，
+   看到清单里已经有它就不会再检查，而它未必真需要 `width: 100%`。 */
 
 /* 真实表单控件也要归一：原型的输入面是 div（.field / .composer），UA 样式天然不存在；
    实现里 S0 的标题是 <input>、首条任务是 <textarea>，不归一就会用 UA 字体（textarea 甚至是

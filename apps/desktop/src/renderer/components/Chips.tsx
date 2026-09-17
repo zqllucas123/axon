@@ -7,12 +7,8 @@
 
 import type { ReactElement } from 'react';
 import { useApp } from '../state/store.tsx';
-import { globalChips, sessionChips } from '../state/selectors.ts';
+import { globalChips, sessionChips, money } from '../state/selectors.ts';
 import { Icon } from '../icons.tsx';
-
-function money(n: number, digits = 2): string {
-  return `$${n.toFixed(digits)}`;
-}
 
 export function Chips(): ReactElement {
   const { screen, current, sessions, pending, budget } = useApp();

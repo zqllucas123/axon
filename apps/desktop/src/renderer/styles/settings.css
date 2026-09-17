@@ -50,7 +50,13 @@
   border-right: 1px solid var(--line);
 }
 
-.st-back,
+/* 导航项。
+   ⚠️ 原本这里还有 `.st-back`（← 返回应用）与 `.is-ext` / `.ext`（↗ 外链）两组，
+   写的时候注明「暂无调用点，先留着备用」—— MU-3 切片 8 删除。
+   理由：它们对应的两个界面元素是用户拍板**不做**的（真窗口有原生交通灯；
+   协议没有「设置窗 → 主窗」的反向导航命令），不是「还没来得及接」。为一个
+   已经被否决的元素存样式，只会让下一个人以为这个元素只是暂时没渲染。
+   真要做时从 `docs/ux/mockups/assets/axon.css` 重新逐值抄一遍就行（总共六行）。 */
 .st-win .st-item {
   display: flex;
   align-items: center;
@@ -61,20 +67,9 @@
   font-size: var(--fs-14);
   color: var(--text);
 }
-.st-back:hover,
 .st-win .st-item:hover { background: var(--bg-hover); }
-.st-back.is-on,
 .st-win .st-item.is-on { background: var(--bg-active); }
-.st-back .i,
 .st-win .st-item .i { color: var(--text-secondary); flex: none; }
-.st-win .st-item .ext { margin-left: auto; color: var(--text-dim); }
-/* 外链（回主窗打开）：arrowUp 转 45° = ↗，与 pane 内切的 chevR 区分开。
-   ⚠️ 这两条与上面的 `.st-back` 当前**没有调用点**，是刻意留的：协议里只有
-   `window.openSettings`（主窗 → 设置窗），没有反向的聚焦/导航命令，所以
-   「团队与角色 ↗ / 预算与用量 ↗」两项与「← 返回应用」都不渲染（用户拍板）。
-   等哪天补了反向导航命令，样式现成，不用再回原型逐值抄一遍。 */
-.st-win .st-item.is-ext .ext { transform: rotate(45deg); }
-.st-win .st-item.is-ext span { color: var(--text-secondary); }
 
 .st-navnote {
   margin: 2px 10px 0;
@@ -155,7 +150,8 @@
   color: var(--text-muted);
   line-height: 1.65;
 }
-.st-win .srow .d .lnk { color: var(--sem-info); }
+/* `.lnk` 已删（MU-3 切片 8）：说明文里没有任何链接 —— 设置窗里的跳转都是
+   `在访达中显示`（`shell.openPath`）或 pane 切换，它们都是 `.btn`，不是行内链接。 */
 .st-win .srow .d code,
 .st-win .srow .t code {
   font-family: var(--font-mono);

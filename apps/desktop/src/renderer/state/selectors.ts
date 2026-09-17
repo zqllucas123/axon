@@ -86,7 +86,8 @@ export function statusLabel(status: AgentStatus): string {
 }
 
 /** 终止态：进左栏「最近」分组（原型 shell.js 的 SESSIONS_DONE 口径）。 */
-export function isTerminal(status: AgentStatus): boolean {
+/** 仅本文件用（`splitSessions` 与旧 S7 分段），不导出：避免与 `@axon/protocol` 的同名函数混淆。 */
+function isTerminal(status: AgentStatus): boolean {
   return status === 'done' || status === 'failed' || status === 'interrupted';
 }
 
@@ -191,7 +192,7 @@ export function leafOf(path: AgentPath): string {
 // ─────────────────────────────────────────────────────────────
 
 /** 内容块里的纯文本（其余块一律忽略 —— 不猜形状，见台账 B-2）。 */
-export function textOfBlocks(blocks: ContentBlockLike[]): string {
+function textOfBlocks(blocks: ContentBlockLike[]): string {
   const out: string[] = [];
   for (const b of blocks) {
     if (b.type !== 'text') continue;
@@ -239,7 +240,7 @@ export function toolResultText(result: unknown, error?: string): string {
 }
 
 /** 千分位整数（用量行）。 */
-export function fmtInt(n: number): string {
+function fmtInt(n: number): string {
   return Math.round(n).toLocaleString('en-US');
 }
 
@@ -342,7 +343,7 @@ function walkMessage(
 }
 
 /** 助手正文的最小解析：空行分段、`- `/数字起列表（不引 markdown 依赖）。 */
-export type Prose = { kind: 'p'; text: string } | { kind: 'ul'; items: string[] };
+type Prose = { kind: 'p'; text: string } | { kind: 'ul'; items: string[] };
 
 export function parseProse(text: string): Prose[] {
   const out: Prose[] = [];
@@ -378,7 +379,7 @@ export function parseProse(text: string): Prose[] {
 }
 
 /** 行内 `code` 切分（只认反引号；不匹配的奇偶段按 code 处理）。 */
-export type InlineSeg = { code: boolean; text: string };
+type InlineSeg = { code: boolean; text: string };
 
 export function inlineSegments(text: string): InlineSeg[] {
   const out: InlineSeg[] = [];
@@ -453,13 +454,8 @@ export function splitPending(pending: PendingRequest[]): {
   };
 }
 
-/**
- * 一条待办卡住了几个人：穿透链上 origin 到 root 之间的全部节点。
- * `chain` 是真实路径数组，长度即影响面，不需要再去树上查。
- */
-export function blockedCount(request: PendingRequest): number {
-  return Math.max(1, request.chain.length);
-}
+/* `blockedCount` 已删（MU-3 切片 8）：S5 实现时发现「卡住几个人」要的不是个数而是
+   具体名字（`BlockedList` 直接渲染 chain 上的分身），数字反而要再展开一次才能用。 */
 
 // ── S6 预算与用量口径 ──────────────────────────────────────
 
@@ -507,20 +503,9 @@ export function interruptedAt(s: SessionSummary): number | undefined {
   return s.rollup?.interruptedAt;
 }
 
-/** S7 分段：可恢复（有中断痕迹）/ 运行中 / 已结束。 */
-export function splitRecoverable(sessions: SessionSummary[]): {
-  recoverable: SessionSummary[];
-  active: SessionSummary[];
-  finished: SessionSummary[];
-} {
-  const byRecent = [...sessions].sort((a, b) => b.record.updatedAt - a.record.updatedAt);
-  const recoverable: SessionSummary[] = [];
-  const active: SessionSummary[] = [];
-  const finished: SessionSummary[] = [];
-  for (const s of byRecent) {
-    if (interruptedAt(s) !== undefined && !isTerminal(s.status)) recoverable.push(s);
-    else if (isTerminal(s.status)) finished.push(s);
-    else active.push(s);
-  }
-  return { recoverable, active, finished };
-}
+// `splitRecoverable` 已删（MU-3 切片 8）：S7 实现时发现分段口径不同 ——
+// 它分的是「可恢复 / 运行中 / 已结束」（看运行时 status），而 S7 要的是
+// 「全部 / 可恢复 / 已归档」（后者看 `record.status === 'closed'` 这个**用户意志态**，
+// 与运行时状态正交）。两套口径同时存在只会让人拿错，留 S7 实际在用的那套。
+// 分段逻辑在 `components/S7Sessions.tsx` 的 `isRecoverable` / `isArchived` / `inSeg`。
+

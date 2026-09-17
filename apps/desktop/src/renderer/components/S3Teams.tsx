@@ -15,6 +15,7 @@
 import { useMemo, useState, type ReactElement } from 'react';
 import { useApp } from '../state/store.tsx';
 import { Icon } from '../icons.tsx';
+import { money } from '../state/selectors.ts';
 import {
   formatForkMode,
   leadMember,
@@ -48,7 +49,13 @@ const FORK_CHOICES: Array<{ id: string; label: string }> = [
   { id: 'all', label: 'all' },
 ];
 
-const money = (n: number | undefined): string => (n ? `$${n.toFixed(2)}` : '—');
+/**
+ * 团队预算的金额文本。没走 `selectors.money` 是因为口径真的不同：
+ * 全局口径里 `undefined` 意味着「已用 0 元」，而团队硬线的 `undefined`
+ * 意味着「没设过这个限额」—— 显示 `$0.00` 会让人以为团队被卡死在零预算。
+ * 有值时仍调 `selectors.money` ，保证钱的写法全应用只有一种。
+ */
+const teamMoney = (n: number | undefined): string => (n ? money(n) : '—');
 
 /** 团队成员的「类型」提示：拿不到类型定义时不编（返回 null）。 */
 function roleOf(roleName: string, roles: { entries: Array<{ role: RoleDefinition; source: string }> }): RoleDefinition | null {
@@ -92,7 +99,7 @@ function TeamCard({
       <span className="tc-foot">
         <span className="tag">{team.members.length} 成员</span>
         {team.maxConcurrent ? <span className="tag">并发 {team.maxConcurrent}</span> : null}
-        {team.budget?.hardUsd ? <span className="tag">硬线 {money(team.budget.hardUsd)}</span> : null}
+        {team.budget?.hardUsd ? <span className="tag">硬线 {teamMoney(team.budget.hardUsd)}</span> : null}
         {lead ? <span className="tag">lead {lead.name}</span> : null}
       </span>
     </button>
@@ -724,7 +731,7 @@ export function S3Teams(): ReactElement {
                             />
                           </span>
                           <div className="hint">
-                            硬线 {money(draft.budget?.hardUsd)}：与全局、会话三档取更严者。团队预算是会话预算的默认值，会话可下调不可上调。
+                            硬线 {teamMoney(draft.budget?.hardUsd)}：与全局、会话三档取更严者。团队预算是会话预算的默认值，会话可下调不可上调。
                           </div>
                         </div>
                       </div>

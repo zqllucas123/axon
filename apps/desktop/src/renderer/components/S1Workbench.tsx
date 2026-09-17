@@ -14,7 +14,7 @@
 
 import { useState, type ReactElement } from 'react';
 import { useApp } from '../state/store.tsx';
-import { splitSessions, statusDot, statusLabel } from '../state/selectors.ts';
+import { splitSessions, statusDot, statusLabel, money } from '../state/selectors.ts';
 import { Icon } from '../icons.tsx';
 import { formatForkMode, parseForkMode, type AgentSnapshot, type SessionSummary } from '@axon/protocol';
 
@@ -22,8 +22,6 @@ import { formatForkMode, parseForkMode, type AgentSnapshot, type SessionSummary 
 type ListFilter = 'all' | 'team' | 'solo';
 /** 分身过滤器：全部 / 运行中 / 等待 / 异常（原型 seg 四态）。 */
 type MemberFilter = 'all' | 'running' | 'waiting' | 'error';
-
-const money = (n: number | undefined): string => `$${(n ?? 0).toFixed(2)}`;
 
 /** 团队会话 = 有团队引用（executor=team/adhoc 且落了 teamId）。 */
 const isTeam = (s: SessionSummary): boolean => s.record.executor !== 'engine';

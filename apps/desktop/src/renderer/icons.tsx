@@ -72,6 +72,12 @@ export function Icon({
   title,
 }: {
   name: IconName;
+  /**
+   * 图标尺寸阶梯（缺省 18）。
+   * 18 / 20 目前无调用点但保留 —— 它与 `tokens.css` 的 `--fs-*` 一样是**令牌阶梯**，
+   * 不是死链：成套的尺寸梯度缺一档，下次需要时就会有人随手写 `style={{width:20}}`。
+   * （MU-3 切片 8 盘点时确认过，不要再当死链删。）
+   */
   size?: 14 | 16 | 18 | 20;
   cls?: string;
   title?: string;

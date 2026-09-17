@@ -12,7 +12,7 @@
 import { useState, type ReactElement } from 'react';
 import { COLLAB_ACTIONS, type CollabAction, type LedgerRecord } from '@axon/protocol';
 import { useApp } from '../state/store.tsx';
-import { statusLabel } from '../state/selectors.ts';
+import { statusLabel, money } from '../state/selectors.ts';
 import { Icon, type IconName } from '../icons.tsx';
 
 /** 四动词 → 图标（与原型 `.lm` 的图标口径一致）。 */
@@ -30,10 +30,6 @@ export const ACTION_LABEL: Record<CollabAction, string> = {
   delegate: '派活，等回执',
   handoff: '整段交接',
 };
-
-export function money(n: number, digits = 2): string {
-  return `$${n.toFixed(digits)}`;
-}
 
 /** 账本一行（右栏精简面板与全幅视图共用同一形状，钩子也共用）。 */
 export function LedgerRow({ record }: { record: LedgerRecord }): ReactElement {

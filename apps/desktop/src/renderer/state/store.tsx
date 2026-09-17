@@ -29,7 +29,6 @@ import type {
   AgentPath,
   AgentSnapshot,
   BudgetSnapshot,
-  ConfigPatch,
   ConfigSnapshot,
   CreateSessionPayload,
   LedgerRecord,
@@ -101,8 +100,6 @@ export interface StoreValue {
   go: (screen: Screen) => void;
   openSession: (sessionId: string) => void;
   createSession: (payload: CreateSessionPayload) => Promise<SessionSummary | null>;
-  removeSession: (sessionId: string) => Promise<void>;
-  renameSession: (sessionId: string, title: string) => Promise<void>;
   setSessionView: (view: SessionView) => void;
   setFocus: (path: AgentPath) => void;
   prompt: (path: AgentPath, text: string) => Promise<void>;
@@ -110,8 +107,6 @@ export interface StoreValue {
   respondApproval: (requestId: string, approved: boolean) => Promise<void>;
   answerQuestion: (requestId: string, answer: string) => Promise<void>;
   adopt: (id: string, adoption: 'adopted' | 'rejected') => Promise<void>;
-  /** 拉本会话账本切片（ledger.query 只拉一次，之后靠增量事件）。 */
-  loadLedger: (sessionId: string) => Promise<void>;
   /** 「叫人」：单兵会话升级为团队会话（session.escalate）。 */
   escalate: (sessionId: string, teamId: string) => Promise<boolean>;
   saveRole: (role: RoleEntry['role']) => Promise<{ accepted: boolean; errors: RoleIssue[] }>;
@@ -124,11 +119,6 @@ export interface StoreValue {
   openPath: (kind: OpenPathKind) => Promise<void>;
   /** 打开（或聚焦）设置窗（`window.openSettings`）。 */
   openSettings: () => Promise<void>;
-  /**
-   * 改配置（`config.patch`）。主窗只用它改**界面偏好**（`ui.*`）；
-   * 完整的设置表单在设置窗（自带 SettingsStore）。
-   */
-  patchConfig: (patch: ConfigPatch) => Promise<boolean>;
   /**
    * 本次运行期内已处理的待办流水（S5 「已处理」段，拍板 P-5）。
    *
@@ -225,7 +215,13 @@ export function AppProvider({ children }: { children: ReactNode }): ReactElement
   /** 已拉过账本的会话（账本 append-only：拉一次 + 事件增量即可）。 */
   const ledgerLoadedRef = useRef<Set<string>>(new Set());
 
-  /** 本会话账本切片（必带 sessionId：/sX/a 这类路径只在会话内唯一）。 */
+  /**
+   * 本会话账本切片（必带 sessionId：/sX/a 这类路径只在会话内唯一）。
+   *
+   * 只作**内部**函数（`openSession` / `createSession` 调），不放进 context：
+   * “拉账本”不是用户意图而是“打开会话”的副作用；暴露给组件反而会出现
+   * “某个屏忘了调于是账本空了”这类时序 bug（MU-3 切片 8 摘除）。
+   */
   const loadLedger = useCallback(
     async (sid: string): Promise<void> => {
       if (ledgerLoadedRef.current.has(sid)) return;
@@ -696,20 +692,14 @@ export function AppProvider({ children }: { children: ReactNode }): ReactElement
     [call, loadDetail, loadLedger, loadMessages],
   );
 
-  const removeSession = useCallback(
-    async (id: string) => {
-      await call(() => window.axon.invoke('session.remove', { sessionId: id }));
-    },
-    [call],
-  );
-
-  const renameSession = useCallback(
-    async (id: string, title: string) => {
-      const s = await call(() => window.axon.invoke('session.rename', { sessionId: id, title }));
-      if (s) setSessions((prev) => prev.map((x) => (x.record.id === id ? s : x)));
-    },
-    [call],
-  );
+  /*
+   * 【已删：`removeSession` / `renameSession`，MU-3 切片 8】
+   * 两个意图调用包装好了 `session.remove` / `session.rename`，但十二个屏里
+   * **没有任何一处入口** —— S7 只做恢复不做删除（删会话是不可逆操作，要先
+   * 设计确认流程，同台账 D-8 的孤儿目录清理），S0/S2 的标题也只在创建时定。
+   * 主进程的两条命令保留（协议面是完整的），等真有入口时再包一遍，各五行。
+   * 台账 D-12 登记了这两个缺的界面入口。
+   */
 
   const prompt = useCallback(
     async (path: AgentPath, text: string) => {
@@ -798,17 +788,13 @@ export function AppProvider({ children }: { children: ReactNode }): ReactElement
     await call(() => window.axon.invoke('window.openSettings', {}));
   }, [call]);
 
-  /** 改配置：不做乐观更新 —— 主进程回的快照才是真相（字段可能被拒）。 */
-  const patchConfig = useCallback(
-    async (patch: ConfigPatch): Promise<boolean> => {
-      const res = await call(() => window.axon.invoke('config.patch', { patch }));
-      if (!res) return false;
-      setConfig(res.config);
-      if (!res.accepted && res.errors[0]) setError(res.errors[0].message);
-      return res.accepted;
-    },
-    [call],
-  );
+  /*
+   * 【已从 context 摘除：`patchConfig`，MU-3 切片 8】
+   * 它写的时候是给主窗改 `ui.*` 用的，但外观设置最终全部归到了设置窗（S8），
+   * 那边走自己的 `SettingsStore`。主窗只需要**读** `config` 快照（`config.changed`
+   * 订阅已在），不需要写。留着一个一直没人调的写入口，只会让人以为主窗
+   * 也能改配置 —— 而两个写入口正是双窗一致性最容易出事的地方。
+   */
 
   const value: StoreValue = {
     storage,
@@ -832,8 +818,6 @@ export function AppProvider({ children }: { children: ReactNode }): ReactElement
     go: setScreen,
     openSession,
     createSession,
-    removeSession,
-    renameSession,
     setSessionView: setSessionViewState,
     setFocus: (path) => {
       setFocusPath(path);
@@ -844,7 +828,6 @@ export function AppProvider({ children }: { children: ReactNode }): ReactElement
     respondApproval,
     answerQuestion,
     adopt,
-    loadLedger,
     escalate,
     saveRole,
     saveTeam,
@@ -852,7 +835,6 @@ export function AppProvider({ children }: { children: ReactNode }): ReactElement
     deleteRole,
     openPath,
     openSettings,
-    patchConfig,
     // 派生（不存第二份真相）：已结算的待办就是 `pending` 里 state!=='pending' 那些。
     resolvedFeed: pending.filter((p) => p.state !== 'pending'),
     dismissError: () => setError(null),

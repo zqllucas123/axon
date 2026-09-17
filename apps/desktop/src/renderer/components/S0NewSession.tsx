@@ -13,7 +13,7 @@
 
 import { useState, type ReactElement } from 'react';
 import { useApp } from '../state/store.tsx';
-import { splitSessions } from '../state/selectors.ts';
+import { splitSessions, relDay } from '../state/selectors.ts';
 import { Icon, type IconName } from '../icons.tsx';
 import type { SessionExecutor } from '@axon/protocol';
 
@@ -57,16 +57,7 @@ function titleOfTask(task: string): string {
   return first.length > 30 ? `${first.slice(0, 30)}…` : first;
 }
 
-/** 「今天 / 昨天 / 9-14」—— 原型右栏那种粗粒度相对时间。 */
-function relDay(at: number): string {
-  const d = new Date(at);
-  const today = new Date();
-  const same = (a: Date, b: Date) => a.toDateString() === b.toDateString();
-  if (same(d, today)) return '今天';
-  const y = new Date(today.getTime() - 86400000);
-  if (same(d, y)) return '昨天';
-  return `${d.getMonth() + 1}-${d.getDate()}`;
-}
+/** 「今天 / 昨天 / 9-14」口径已归并到 `selectors.relDay`（MU-3 切片 8）。 */
 
 export function S0NewSession(): ReactElement {
   const { config, teams, sessions, createSession, openSession, go } = useApp();
