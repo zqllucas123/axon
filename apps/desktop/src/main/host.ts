@@ -1108,20 +1108,36 @@ export class AxonHost {
     for (const record of open) this.ledger.settle(record.id, { summary: '应用重启，未及结算' });
   }
 
-  /** rollup.interruptedAt：给 MU-2 的「恢复自上次运行」提示留证据（R7）。 */
+  /**
+   * `rollup.interruptedAt`：给「恢复自上次运行」留证据（MU-2 R7，S7 的唯一数据源）。
+   *
+   * ⚠️ 必须**同时**写内存 map 与盘（MU-3 切片 9 修）。之前只调 `scheduleRollup`，
+   * 那是异步落盘，不碰 `sessionRollups` —— 于是出现这个悄无声息的缺口：
+   * 重启后第一次打开会话，恢复扫描明明把中断痕迹算出来了，S7 却读不到，
+   * 必须**再重启一次**才看得见「上次中断于 …」—— 而那时候已经迟了一个轮回，
+   * 正好错过用户真正需要提示的那一次。内存 map 是 `session.list` 的直接数据源
+   * （`rollupSummaryOf` / `summaryOf` 都读它），写盘不写内存等于只给下一世看。
+   */
   private markInterruptedAt(sessionId: string): void {
     const p = this.persistence;
     const record = this.sessions.get(sessionId);
     const summary = this.summaryOf(sessionId);
     if (!p || !record || !summary) return;
     const at = Date.now();
-    p.scheduleRollup(record, {
+    const rollup = {
       at,
       usage: summary.usage,
       counts: summary.counts,
       status: summary.status,
       interruptedAt: at,
-    });
+    };
+    this.sessionRollups.set(sessionId, rollup);
+    p.scheduleRollup(record, rollup);
+    // 广播一声：本方法在**懒加载当场**被调（用户刚点开这个会话），而渲染层的
+    // 会话列表是开机时那一发 `session.list` 的快照 —— 不播的话，S7 要等下一次
+    // 全量刷新才看得见「可恢复」，而那时候用户早就错过了提示。
+    const summaryWithRollup = this.summaryOf(sessionId);
+    if (summaryWithRollup) this.emit('session.changed', { summary: summaryWithRollup });
   }
 
   /** 未加载会话的摘要：只用 record + rollup，**不读树**（§4.5）。 */
@@ -1293,12 +1309,22 @@ export class AxonHost {
     if (!record) return;
     const computed = summary ?? this.summaryOf(sessionId);
     if (!computed) return;
-    p.scheduleRollup(record, {
+    // `interruptedAt` 是**历史事实**，不是当前状态：它记的是「上次退出时
+    // 还有人在跑」。重启后会话一旦有任何动静（落账/状态跳迁/turn.end）都会走到
+    // 这里，不透传就等于把刚刚才标上的中断痕迹抹掉，S7 的「可恢复」会在
+    // 用户眼皮底下无声无息地消失（MU-3 切片 9）。
+    const prev = this.sessionRollups.get(sessionId);
+    const next = {
       at: Date.now(),
       usage: computed.usage,
       counts: computed.counts,
       status: computed.status,
-    });
+      ...(prev?.interruptedAt !== undefined ? { interruptedAt: prev.interruptedAt } : {}),
+    };
+    // 内存 map 同步更新：它是 `session.list` 的数据源（rollupSummaryOf / summaryOf），
+    // 只写盘不写内存的话，本次运行期内它永远是开机时读进来的老快照。
+    this.sessionRollups.set(sessionId, next);
+    p.scheduleRollup(record, next);
   }
 
   /**

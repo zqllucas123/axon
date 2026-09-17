@@ -53,12 +53,21 @@ function launchApp() {
 }
 if (launch) launchApp();
 
-async function getPageTarget() {
+/**
+ * 找一个 CDP 页面目标。
+ *
+ * ⚠️ `filter` 必须排掉 `#settings`（MU-3 切片 9）：两个窗口共用同一份
+ * `index.html`，只靠 hash 分叉（`renderer/main.tsx`）。旧的「`url.includes('index.html')`
+ * 」会在设置窗开着时随机选中它 —— 而设置窗里没有侧栏、没有 nav-sN，
+ * 下一句 `document.querySelector(...).click()` 就会报 null —— 且报错地点距离
+ * 真因很远，极难查。
+ */
+async function getPageTarget(filter = (t) => !t.url.includes('#settings')) {
   for (let i = 0; i < 40; i++) {
     try {
       const res = await fetch(`http://127.0.0.1:${port}/json`);
       const list = await res.json();
-      const page = list.find((t) => t.type === 'page' && t.url.includes('index.html'));
+      const page = list.find((t) => t.type === 'page' && t.url.includes('index.html') && filter(t));
       if (page) return page;
     } catch {
       /* 窗口还没起 */
@@ -66,6 +75,43 @@ async function getPageTarget() {
     await new Promise((r) => setTimeout(r, 250));
   }
   throw new Error('等不到 CDP 页面目标');
+}
+
+/** 当前有几个设置窗（单例断言用）。 */
+async function countSettingsWindows() {
+  const list = await (await fetch(`http://127.0.0.1:${port}/json`)).json();
+  return list.filter((t) => t.type === 'page' && t.url.includes('#settings')).length;
+}
+
+/**
+ * 给任意目标开一条**独立**的 CDP 连接（设置窗幕用）。
+ * 不复用全局 `ws`/`evalJs`：那两个句柄归主窗，设置窗幕跑完要接着用主窗
+ * 验「双窗同步」，两边必须同时活着。
+ */
+async function attach(page) {
+  const sock = new WebSocket(page.webSocketDebuggerUrl);
+  const waiting = new Map();
+  let id = 0;
+  sock.onmessage = (ev) => {
+    const msg = JSON.parse(ev.data);
+    const p = waiting.get(msg.id);
+    if (p) {
+      waiting.delete(msg.id);
+      msg.error ? p.reject(new Error(msg.error.message)) : p.resolve(msg.result);
+    }
+  };
+  await new Promise((res, rej) => {
+    sock.onopen = res;
+    sock.onerror = rej;
+  });
+  const ev = async (expression) => {
+    const i = ++id;
+    sock.send(JSON.stringify({ id: i, method: 'Runtime.evaluate', params: { expression, awaitPromise: true, returnByValue: true } }));
+    const r = await new Promise((resolve, reject) => waiting.set(i, { resolve, reject }));
+    if (r.exceptionDetails) throw new Error('设置窗求值异常: ' + JSON.stringify(r.exceptionDetails.exception?.description));
+    return r.result.value;
+  };
+  return { ev, close: () => sock.close() };
 }
 
 const log = (ok, msg) => console.log(`${ok ? '✓' : '✗'} ${msg}`);
@@ -289,6 +335,29 @@ try {
   log(cleared, '点「批准」后 banner 消失，工具放行（pending.resolved）');
   if (!cleared) exit(1);
 
+  // ── 6.5 故意留一条**不批**的审批（MU-3 切片 9）
+  //     一石三鸟：① S5 收件箱才有真的「待处理」卡可验（否则整屏只剩空态）；
+  //     ② 被卡的分身停在 waiting，正是 M5 §4.6 说的「重启前在跑」—— 下面重启幕
+  //     的 `rollup.interruptedAt` 与 S7「上次中断于 …」全靠它做标的；
+  //     ③ 它必须排在烧钱幕**之前**：预算 frozen 是终态，`assertCanStart` 会把
+  //     之后所有 spawn/prompt 一律挡下（packages/kernel/src/budget.ts:94）。
+  //     另起一个分身而不复用 `spawned`：同一个分身被审批卡住时发不了新 prompt，
+  //     而烧钱那两轮还得用它。
+  const parkedAgent = await evalJs(
+    `window.axon.invoke('agent.spawn', { role: 'blank', parent: '${session.root}' }).then(r => r.path)`,
+  );
+  // 文本不能与上一幕重复：脚本答复按**原文**记「第几次」（index.ts:277 的
+  // smokeCalls），同一句话的第二次只会得到纯文本答复、不再触发工具调用。
+  await evalJs(`window.axon.invoke('agent.prompt', { path: '${parkedAgent}', text: '动手试试第二次' })`);
+  // 这里用协议而不是 DOM 做断言：S2 的 banner 只渲染**当前焦点成员**的待批
+  // （MessageStream.tsx:190），而焦点还停在 blank-1 上 —— 恰好是 S5 存在的理由：
+  // 跨会话/跨成员的待批在会话屏里是看不见的。它的 DOM 形态留给下方 7.6 验。
+  const parked = await until(
+    `window.axon.invoke('pending.list', {}).then(l => l.some(p => p.origin === '${parkedAgent}'))`,
+  );
+  log(parked, `故意留一条未批的审批（${parkedAgent} 停在 waiting，充当 S5/S7 的标的）`);
+  if (!parked) exit(1);
+
   // ─ 7. 预算熔断（M3 切片 6 / MU-2 视觉）：含「烧钱」的 prompt×2 走完 warning → frozen。
   //     MU-2 起冻结信号是**顶栏预算 chip 变色**（原型 shell.js:258 的 warn/danger 两档），
   //     旧的 .budget 横幅随 SessionPanel 一起下线 —— 这里断言的是真窗口里的那一枚 chip。
@@ -370,6 +439,134 @@ try {
   );
   if (loadedAfterS3 !== loadedBefore) exit(1);
 
+  // ── 7.6 MU-3 四屏（切片 9）：S5 收件箱 / S6 预算 / S7 会话恢复 / S8 设置窗
+  //     这四屏在四个并行窗口里写，各自只能跑 typecheck（不允许跑 ui-smoke，
+  //     会抢 Electron 实例）—— 所以真窗口的验收全部集中在这里。
+
+  // S5 收件箱：入口从底部「待批 N」进（而不是侧栏 nav）—— 那条在 MU-2 是个
+  // 不可点的数字，切片 2.5 接了真落点，这一句同时验了它。
+  // 此刻挂着一条未批（6.5 留的）+ 一条已批（审批幕结的），两段都有料。
+  const toS5 = await evalJs(
+    `(() => { const b = document.querySelector('[data-smoke="foot-pending"]'); if (!b) return false; b.click(); return true; })()`,
+  );
+  const s5 = toS5 && (await until(`!!document.querySelector('[data-screen="s5"]')`));
+  log(s5, 'S5 收件箱：底部「待批 N」可点并跳进收件箱（MU-2 里它是死数字）');
+  if (!s5) exit(1);
+  // 默认 tab 是「待处理」，它不渲染「本次已处理」段 —— 先量待处理卡，
+  // 再切到「全部」量两段共存，顺手验了分段切换这个交互。
+  const s5waiting = await until(
+    `!!document.querySelector('[data-screen="s5"] [data-smoke="approval-banner"]')`,
+  );
+  log(s5waiting, 'S5 「待处理」段列出真实审批卡（跨会话聚合，与 S2 共用 ApprovalCard 抽件）');
+  if (!s5waiting) exit(1);
+  await evalJs(`document.querySelector('[data-smoke="inbox-tab-all"]').click()`);
+  const s5feed = await until(
+    `!!document.querySelector('[data-smoke="inbox-feed"]') &&
+     !!document.querySelector('[data-screen="s5"] [data-smoke="approval-banner"]')`,
+  );
+  log(
+    s5feed,
+    'S5「全部」tab：待处理与「本次已处理」流水并存（resolvedFeed 派生自 pending，拍板 P-5）',
+  );
+  if (!s5feed) exit(1);
+
+  // S6 预算：三指标 + 按会话排行。前面烧钱两轮已经把全局档位推到 frozen，
+  // 所以「最严重的会话档位」必须是非 none 的真值（data-tier 把它暴露出来）。
+  await evalJs(`document.querySelector('[data-smoke="nav-s6"]').click()`);
+  const s6 = await until(
+    `!!document.querySelector('[data-smoke="budget-total"]') &&
+     !!document.querySelector('[data-smoke="budget-limits"]') &&
+     !!document.querySelector('[data-smoke="budget-session-row"]')`,
+  );
+  log(s6, 'S6 预算与用量：三指标 + 按会话排行（只读 session.list 的 usage）');
+  if (!s6) exit(1);
+  const tier = await evalJs(`document.querySelector('[data-smoke="budget-tier"]')?.dataset.tier ?? null`);
+  log(tier === 'frozen' || tier === 'hard' || tier === 'soft', `S6 最严会话档位取真值（${tier}）`);
+  if (!tier || tier === 'none') exit(1);
+  // 文案自查（拍板 P-8）：BudgetGuard 无日切，全屏不得出现「今日」。
+  const noToday = await evalJs(
+    `!(document.querySelector('[data-screen="s6"]')?.textContent ?? '').includes('今日')`,
+  );
+  log(noToday, 'S6 全屏无「今日」字样（拍板 P-8：BudgetGuard 只有进程内累计，无日切）');
+  if (!noToday) exit(1);
+
+  const loadedAfterS6 = await evalJs(loadedExpr);
+  log(
+    loadedAfterS6 === loadedBefore,
+    `进 S6 不触发读盘（loadedCount ${loadedBefore} → ${loadedAfterS6}）`,
+  );
+  if (loadedAfterS6 !== loadedBefore) exit(1);
+
+  // S7 会话恢复：本次还没重启过，所以「可恢复」段应该是空的 —— 先验会话行
+  // 与存储实况卡；真正的「上次中断」在重启幕之后验（下方 8.5）。
+  await evalJs(`document.querySelector('[data-smoke="nav-s7"]').click()`);
+  const s7 = await until(
+    `!!document.querySelector('[data-smoke="s7-row"][data-session="${session.id}"]') &&
+     !!document.querySelector('[data-smoke="s7-storage"]')`,
+  );
+  log(s7, 'S7 会话恢复：会话行 + 存储实况卡（storage.status）');
+  if (!s7) exit(1);
+
+  const loadedAfterS7 = await evalJs(loadedExpr);
+  log(
+    loadedAfterS7 === loadedBefore,
+    `进 S7 不触发读盘（loadedCount ${loadedBefore} → ${loadedAfterS7}）`,
+  );
+  if (loadedAfterS7 !== loadedBefore) exit(1);
+
+  // ── 7.7 S8 设置窗：单例 + 双窗同步 + 外观真生效
+  //     这一幕是本片唯一的**跨窗**验收：配置的真相在主进程，两个窗各自订
+  //     `config.changed`。只在设置窗里看自己变了是不够的 —— R-8 就是这么漏掉的：
+  //     当时 `ui.*` 能存能读能同步，就是没人把它写到 DOM 上。
+  const opened = await evalJs(`window.axon.invoke('window.openSettings', {}).then(r => r.opened)`);
+  log(opened === true, '设置窗打开（window.openSettings → 独立 BrowserWindow，拍板 P-2）');
+  if (opened !== true) exit(1);
+
+  const stPage = await getPageTarget((t) => t.url.includes('#settings'));
+  const st = await attach(stPage);
+  const stReady = await (async () => {
+    for (let i = 0; i < 40; i++) {
+      if (await st.ev(`!!document.querySelector('[data-smoke="settings-win"]')`)) return true;
+      await new Promise((r) => setTimeout(r, 250));
+    }
+    return false;
+  })();
+  log(stReady, '设置窗渲染（同一份 renderer.js，按 #settings 分叉到 SettingsApp）');
+  if (!stReady) exit(1);
+
+  // 再发一次开窗：必须还是一个窗（单例）。不然每按一次 ⌘, 开一个，
+  // 而它们共享同一份配置，多窗同时改同一字段就是互相覆盖。
+  await evalJs(`window.axon.invoke('window.openSettings', {})`);
+  await new Promise((r) => setTimeout(r, 500));
+  const stCount = await countSettingsWindows();
+  log(stCount === 1, `重复开窗仍是单例（设置窗 ${stCount} 个）`);
+  if (stCount !== 1) exit(1);
+
+  // 设置窗改外观 → 主窗必须跟着变（不止是读到新值，而是 DOM 真的变了）。
+  await st.ev(
+    `window.axon.invoke('config.patch', { patch: { 'ui.density': 'compact', 'ui.fontSize': 18 } })`,
+  );
+  const applied = await until(
+    `document.body.dataset.density === 'compact' &&
+     getComputedStyle(document.body).getPropertyValue('--fs-msg').trim() === '18px'`,
+  );
+  log(applied, '设置窗改外观 → 主窗 DOM 真生效（config.changed → applyAppearance，台账 R-8）');
+  if (!applied) exit(1);
+  const stApplied = await st.ev(`document.body.dataset.density === 'compact'`);
+  log(stApplied, '设置窗自己也跟着变（否则用户在哪里改就在哪里看不到效果）');
+  if (!stApplied) exit(1);
+
+  // 重置：删白名单叶子而不是逐个置 null（后者会被 env-locked 挡住 ⇒ 「重置了但没
+  // 重置干净」，见 §十三 T-3）。验收点是两个窗都回缺省。
+  await st.ev(`window.axon.invoke('config.reset', {})`);
+  const resetOk = await until(
+    `document.body.dataset.density === undefined &&
+     getComputedStyle(document.body).getPropertyValue('--fs-msg').trim() === '15px'`,
+  );
+  log(resetOk, 'config.reset 后两窗外观回缺省（删白名单叶子，不走 patch）');
+  if (!resetOk) exit(1);
+  st.close();
+
   // 回到会话屏：重启幕的「左栏重新列出会话」断言要在稳定态上跑。
   await evalJs(`document.querySelector('[data-smoke="nav-s1"]').click()`);
 
@@ -377,6 +574,8 @@ try {
   //     这一幕验的是「接线的形态」，单测（host.restart.test.ts）验的是语义：
   //     index.ts 是否真的把根接上、listRecords 是否真的先读 session.json、
   //     窗口重开时左栏是否重新列出上次的会话。
+  //     重启前 6.5 幕已经留下一个停在 waiting 的分身 —— 它就是下方
+  //     「上次中断于 …」的标的（每个分身都是终态的话，恢复扫描无痕可留）。
   await new Promise((r) => setTimeout(r, 800)); // 让 500ms 的汇总窗口先收口
   // 硬杀：这一幕验的是「盘上的东西能不能装回来」，不是退出路径本身；
   // graceful 的退出收口由 host.restart.test.ts + index.ts 的 will-quit flush 覆盖。
@@ -420,6 +619,31 @@ try {
   );
   log(rowBack, '重启后左栏重新列出这个会话（session.list → 懒加载摘要）');
   if (detail?.members < 2 || !(msgs > 0) || !rowBack) exit(1);
+
+  // ── 8.5 S7 的真正验收点（MU-3 切片 9）：重启后才能验「上次中断」
+  //     上一次是硬杀（killApp），而死前有分身处于非终态 ⇒ 恢复扫描会把它们降为
+  //     空闲并在 rollup 里落 `interruptedAt`（host.restart.test.ts 验语义）。
+  //     这里验的是那个字段**有没有真的走到界面** —— E-1 整条链路的终点。
+  //     它也是 P-1（本片含 S7）的理由：不做这一屏，M5 的落盘成果在 UI 上没出口。
+  const hasCut = await evalJs(
+    `window.axon.invoke('session.list', {}).then(l => l.some(s => typeof s.rollup?.interruptedAt === 'number'))`,
+  );
+  log(hasCut, '重启后 session.list 的 rollup 带回 interruptedAt（MU-3 E-1 协议扩展）');
+  if (!hasCut) exit(1);
+
+  await evalJs(`document.querySelector('[data-smoke="nav-s7"]').click()`);
+  const s7cut = await until(
+    `!!document.querySelector('[data-smoke="s7-row"] .s7-cut') &&
+     !!document.querySelector('[data-smoke="s7-seg-recoverable"]')`,
+  );
+  log(s7cut, 'S7 把它渲染成「上次中断于 …」并归入「可恢复」分段');
+  if (!s7cut) exit(1);
+
+  // 「继续」要真能把人送进 S2（否则恢复屏只是个只读清单）。
+  await evalJs(`document.querySelector('[data-smoke="s7-row"] [data-smoke="s7-continue"]').click()`);
+  const backInSession = await until(`!!document.querySelector('[data-smoke="composer"]')`);
+  log(backInSession, 'S7「继续」→ 回到会话屏（发意图 openSession，不是重新创建）');
+  if (!backInSession) exit(1);
 
   exit(0);
 } catch (err) {
