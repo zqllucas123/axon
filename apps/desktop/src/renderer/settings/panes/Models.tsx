@@ -21,12 +21,11 @@
  * 被 `config.changed` 重绘覆盖（最后写入者胜）。这句话写进了行内说明。
  */
 
-import { useState, type ReactElement } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactElement } from 'react';
 import type { ModelSpec } from '@axon/protocol';
 import { useSettings } from '../SettingsStore.tsx';
 import {
   InputField,
-  SecretField,
   SelectField,
   SettingsRow,
   envLock,
@@ -42,6 +41,192 @@ const fmtCost = (m: ModelSpec): string => {
   if (!c.input && !c.output) return '价格 0（成本不计入预算 ⇒ 熔断永不触发）';
   return `in $${c.input ?? 0} / out $${c.output ?? 0}（每百万 token）`;
 };
+
+// ─────────────────────────────────────────────────────────────
+// Provider 专用控件
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * API Key 输入行。
+ *
+ * 与通用 SecretField 的差别：UX 03 §3.3 要求的「聚焦即可输入」行内单框，
+ * 而不是「先点更换、再出输入框」的两步流。
+ *
+ * 实现要点：
+ * - 输入框永远是 type=password（已输入的字符不可见）
+ * - 未聚焦时 value=''，placeholder 显示掩码（sk-***xxxx）或「未配置」
+ * - 聚焦后 placeholder 换成「粘贴新的 API Key」，此时输入框为空可直接输入
+ * - 失焦且 text 为空：无操作，恢复 placeholder 显示掩码
+ * - 失焦且 text 不为空 / Enter：提交 config.patch；成功后清空 draft
+ * - 清除按钮写 null（config-store 用 null 表示「回到缺省/删除该字段」）
+ */
+function ApiKeyRow(): ReactElement {
+  const { saving, error, commit } = useFieldPatch('provider.apiKey');
+  const { config } = useSettings();
+  const p = config?.config.provider;
+  const env = config?.envOverrides ?? [];
+  const lock = envLock(env, 'provider.apiKey');
+
+  const masked = p?.apiKeyMasked;
+  const isSet = p?.apiKeySet === true;
+
+  const [text, setText] = useState('');
+  const [focused, setFocused] = useState(false);
+
+  // 真值变了（另一窗口改了 / 成功写回后 config.changed 推新快照）→ 清掉 draft
+  const truthKey = `${isSet ? (masked ?? '') : ''}`;
+  useEffect(() => {
+    setText('');
+  }, [truthKey]);
+
+  const submit = useCallback((): void => {
+    const val = text.trim();
+    if (val === '') return; // 没改，失焦不触发写
+    void commit(val).then((ok) => {
+      if (ok) setText('');
+    });
+  }, [text, commit]);
+
+  const idlePlaceholder = isSet ? (masked ?? 'sk-***') : '粘贴 API Key';
+
+  return (
+    <SettingsRow
+      title="API Key"
+      desc="明文存在 config.json 里（0600 权限），钥匙串推迟到 M6 —— 在那之前这一项就是明文，界面上说实话。读回来的永远只有掩码，明文不出主进程。"
+      lock={lock}
+      error={error}
+      saving={saving}
+      smoke="set-apiKey"
+    >
+      <input
+        className="inp w-md"
+        type="password"
+        autoComplete="new-password"
+        value={text}
+        placeholder={focused ? '粘贴新的 API Key' : idlePlaceholder}
+        disabled={Boolean(lock) || saving}
+        data-smoke="set-apiKey-inp"
+        onChange={(e) => setText(e.target.value)}
+        onFocus={() => setFocused(true)}
+        onBlur={() => {
+          setFocused(false);
+          submit();
+        }}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') {
+            submit();
+            (e.target as HTMLInputElement).blur();
+          }
+          if (e.key === 'Escape') {
+            setText('');
+            (e.target as HTMLInputElement).blur();
+          }
+        }}
+      />
+      {isSet && !lock ? (
+        <button
+          type="button"
+          className="btn sm ghost"
+          disabled={saving}
+          onClick={() => void commit(null)}
+        >
+          清除
+        </button>
+      ) : null}
+    </SettingsRow>
+  );
+}
+
+/**
+ * 探针状态的四种形态。
+ *
+ * 用联合类型而不是三个独立 bool：三个 bool 的组合空间有 8 种，
+ * 但语义上只有四种有意义，联合类型在编译期就把无效组合排除掉了。
+ */
+type ProbePhase =
+  | { tag: 'idle' }
+  | { tag: 'loading' }
+  | { tag: 'ok'; latencyMs: number; count: number }
+  | { tag: 'err'; error: string };
+
+/**
+ * 「测试连接」行 —— M6 新增（ipc.ts `provider.test`）。
+ *
+ * 点击 → 调 window.axon.invoke('provider.test', {}) → 主进程发 GET /v1/models
+ * → 行内显示结果（成功：绿色延迟+模型数；失败：红色错误）→ 5 秒后自动恢复 idle。
+ *
+ * 这一行是「意图」而非「配置」：它不写任何字段，也不需要 useFieldPatch。
+ */
+function ProviderTestRow(): ReactElement {
+  const [phase, setPhase] = useState<ProbePhase>({ tag: 'idle' });
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const clearAutoReset = useCallback((): void => {
+    if (timerRef.current !== null) {
+      clearTimeout(timerRef.current);
+      timerRef.current = null;
+    }
+  }, []);
+
+  // 组件卸载时取消定时器，避免 setState on unmounted component
+  useEffect(() => clearAutoReset, [clearAutoReset]);
+
+  const scheduleReset = useCallback((): void => {
+    clearAutoReset();
+    timerRef.current = setTimeout(() => setPhase({ tag: 'idle' }), 5000);
+  }, [clearAutoReset]);
+
+  const run = useCallback((): void => {
+    clearAutoReset();
+    setPhase({ tag: 'loading' });
+    void window.axon
+      .invoke('provider.test', {})
+      .then((res) => {
+        if (res.ok) {
+          setPhase({ tag: 'ok', latencyMs: res.latencyMs, count: res.models.length });
+        } else {
+          setPhase({ tag: 'err', error: res.error ?? '未知错误' });
+        }
+        scheduleReset();
+      })
+      .catch((e: unknown) => {
+        setPhase({
+          tag: 'err',
+          error: e instanceof Error ? e.message : String(e),
+        });
+        scheduleReset();
+      });
+  }, [clearAutoReset, scheduleReset]);
+
+  const loading = phase.tag === 'loading';
+
+  return (
+    <SettingsRow
+      title="连接测试"
+      desc="向网关发 GET /v1/models，返回延迟和可用模型数。不写任何配置，也不消耗 token。测试结果 5 秒后自动消失。"
+      smoke="set-probe"
+    >
+      <button
+        type="button"
+        className="btn sm"
+        disabled={loading}
+        data-smoke="set-probe-btn"
+        onClick={run}
+      >
+        {loading ? '测试中…' : '测试连接'}
+      </button>
+      {phase.tag === 'ok' ? (
+        <span className="tag ok" data-smoke="set-probe-result">
+          ✓ 延迟 {phase.latencyMs}ms，可用模型 {phase.count} 个
+        </span>
+      ) : phase.tag === 'err' ? (
+        <span className="tag err" data-smoke="set-probe-result">
+          ✗ {phase.error}
+        </span>
+      ) : null}
+    </SettingsRow>
+  );
+}
 
 /** 请求头编辑面：整块 `Record<string,string>` 读改写。 */
 function HeadersRow(): ReactElement {
@@ -368,15 +553,7 @@ export function ModelsPane(): ReactElement {
           smoke="set-baseUrl"
         />
 
-        <SecretField
-          path="provider.apiKey"
-          title="API Key"
-          desc="明文存在 config.json 里（0600 权限），钥匙串推迟到 M6 —— 在那之前这一项就是明文，界面上说实话。读回来的永远只有掩码，明文不出主进程。"
-          masked={p?.apiKeyMasked}
-          isSet={p?.apiKeySet === true}
-          lock={envLock(env, 'provider.apiKey')}
-          smoke="set-apiKey"
-        />
+        <ApiKeyRow />
 
         <SelectField<string>
           path="provider.defaultModel"
@@ -390,6 +567,7 @@ export function ModelsPane(): ReactElement {
         />
 
         <HeadersRow />
+        <ProviderTestRow />
       </div>
 
       <div className="st-sec">模型清单</div>

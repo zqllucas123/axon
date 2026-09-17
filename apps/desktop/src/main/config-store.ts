@@ -26,21 +26,25 @@ import {
   type ConfigSnapshot,
   type EnvOverride,
   type ModelSpec,
+  type ProviderConfig,
   type ProviderConfigView,
 } from '@axon/protocol';
 import { chmod, mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { CONFIG_PATH, loadConfig, maskKey, resolveModelChoice } from './model-config.ts';
+import { getKey, hasKey, setKey } from './keychain.ts';
 
-/** 密钥类的读侧掩码：`sk-***xyz`；未配置时不给字段。 */
-function maskConfig(config: AxonConfig): AxonConfigView {
+/** 密钥类的读侧掩码：`sk-***xyz`；未配置时不给字段。解密明文只在此函数内，不出 config-store。 */
+function maskConfig(config: AxonConfig, configPath: string): AxonConfigView {
   const { provider, ...rest } = config;
-  if (!provider) return { ...rest };
-  const { apiKey, ...providerRest } = provider;
+  const keychainPlain = hasKey('provider.apiKey', configPath) ? getKey('provider.apiKey', configPath) : null;
+  if (!provider && keychainPlain === null) return { ...rest };
+  const { apiKey, ...providerRest } = provider ?? ({} as ProviderConfig);
+  const effectiveKey = keychainPlain ?? apiKey;
   const view: ProviderConfigView = {
     ...providerRest,
-    apiKeySet: typeof apiKey === 'string' && apiKey.length > 0,
-    ...(apiKey ? { apiKeyMasked: maskKey(apiKey) } : {}),
+    apiKeySet: typeof effectiveKey === 'string' && effectiveKey.length > 0,
+    ...(effectiveKey ? { apiKeyMasked: maskKey(effectiveKey) } : {}),
   };
   return { ...rest, provider: view };
 }
@@ -207,11 +211,30 @@ export class ConfigStore {
     const { config, error } = await loadConfig(this.configPath);
     this.raw = config as Record<string, unknown>;
     this.lastError = error;
+    // 启动时迁移：若 config.json 里还有明文 apiKey，自动加密迁移并删明文
+    const provider = (this.raw as Record<string, unknown>)['provider'];
+    const plainApiKey =
+      typeof provider === 'object' && provider !== null
+        ? (provider as Record<string, unknown>)['apiKey']
+        : undefined;
+    if (typeof plainApiKey === 'string' && plainApiKey.length > 0) {
+      await setKey('provider.apiKey', plainApiKey, this.configPath);
+      const { config: migrated } = await loadConfig(this.configPath);
+      this.raw = migrated as Record<string, unknown>;
+      console.log('[keychain] apiKey 已自动迁移到 safeStorage');
+    }
   }
 
-  /** 未脱敏的原始配置（**只允许主进程内部用**：建模型源、造 HostOptions）。 */
+  /** 未脱敏的原始配置（**只允许主进程内部用**：建模型源、造 HostOptions）。
+   * keychain 迁移后 this.raw 里没有 apiKey 明文，从 keychain 解密后注入。 */
   rawConfig(): AxonConfig {
-    return this.raw as AxonConfig;
+    const base = this.raw as AxonConfig;
+    const plain = getKey('provider.apiKey', this.configPath);
+    if (plain === null) return base;
+    return {
+      ...base,
+      provider: base.provider ? { ...base.provider, apiKey: plain } : { apiKey: plain },
+    };
   }
 
   /** 当前模型解析结论（顶栏「faux（未配置…）」与设置界面共用）。 */
@@ -245,7 +268,7 @@ export class ConfigStore {
   /** 读侧快照（脱敏）。 */
   snapshot(): ConfigSnapshot {
     return {
-      config: maskConfig(this.raw as AxonConfig),
+      config: maskConfig(this.raw as AxonConfig, this.configPath),
       envOverrides: this.envOverrides(),
       paths: this.paths(),
       resolution: this.resolution(),
@@ -263,6 +286,7 @@ export class ConfigStore {
     const errors: ConfigIssue[] = [];
     const locked = new Set(this.envOverrides().map((o) => o.path));
     const draft: Record<string, unknown> = structuredClone(this.raw);
+    let pendingApiKey: string | undefined;
 
     for (const [path, value] of Object.entries(patch)) {
       if (value === undefined) continue;
@@ -279,6 +303,11 @@ export class ConfigStore {
         errors.push(...issues);
         continue;
       }
+      if (path === 'provider.apiKey' && typeof value === 'string') {
+        pendingApiKey = value;
+        // 明文不写进 draft，走 keychain 加密存储
+        continue;
+      }
       if (value === null) deletePath(draft, path);
       else setPath(draft, path, value);
     }
@@ -289,7 +318,14 @@ export class ConfigStore {
       return { accepted: false, errors, config: this.snapshot() };
     }
 
-    return this.commit(draft, errors);
+    const result = await this.commit(draft, errors);
+    if (result.accepted && pendingApiKey !== undefined) {
+      await setKey('provider.apiKey', pendingApiKey, this.configPath);
+      const { config: updated } = await loadConfig(this.configPath);
+      this.raw = updated as Record<string, unknown>;
+      return { ...result, config: this.snapshot() };
+    }
+    return result;
   }
 
   /**

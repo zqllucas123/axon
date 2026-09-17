@@ -318,6 +318,7 @@ async function createHost(config: AxonConfig): Promise<AxonHost> {
   const records = await storage.listRecords();
   console.log(`[desktop] sessions: ${root}（装载 ${records.length} 个会话记录）`);
 
+  // M6: modelSource 可能携带 selectModel（openai-compat path），套入安全。
   return new AxonHost({
     modelSource,
     roles: EFFECTIVE_ROLES,
@@ -529,6 +530,25 @@ app.whenReady().then(async () => {
         if (request.command === 'window.openSettings') {
           openSettingsWindow();
           return { id: request.id, ok: true, result: { opened: true } };
+        }
+
+        // M6: provider.test —— W-B 的 provider-probe.ts 落地后替换 stub 实现。
+        // 拦在 host.execute 之前，因为 host 不处理这条命令。
+        if (request.command === 'provider.test') {
+          try {
+            const { probeProvider } = await import('./provider-probe.ts');
+            const result = await probeProvider();
+            return { id: request.id, ok: true, result };
+          } catch {
+            // provider-probe.ts 尚未交付（W-B 阶段）或探针失败时的兜底。
+            const result: CommandMap['provider.test']['result'] = {
+              ok: false,
+              latencyMs: 0,
+              models: [],
+              error: 'provider-probe not yet available',
+            };
+            return { id: request.id, ok: true, result };
+          }
         }
 
         const result = await host!.execute(

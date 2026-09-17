@@ -307,7 +307,12 @@ export interface EventMap {
 
   /** 流式输出三段式：start → delta* → end。 */
   'agent.message.start': { messageId: string };
-  'agent.message.delta': { messageId: string; text: string };
+  /**
+   * 流式消息增量（M6 wire() 分支）。
+   * text / thinking 二选一，每条事件只带一个字段。
+   * thinking 来自 deepseek-r1 风格的 reasoning 通道（S2 闸口1取证）。
+   */
+  'agent.message.delta': { messageId: string; text?: string; thinking?: string };
   'agent.message.end': { messageId: string; message: MessageLike };
 
   'agent.tool.start': { callId: string; tool: string; args: unknown };

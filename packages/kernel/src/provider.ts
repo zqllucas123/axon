@@ -180,6 +180,7 @@ export function createOpenAICompatSource(
     cost: { ...MODEL_DEFAULTS.cost, ...m.cost },
     contextWindow: m.contextWindow ?? MODEL_DEFAULTS.contextWindow,
     maxTokens: m.maxTokens ?? MODEL_DEFAULTS.maxTokens,
+    ...(m.compat ? { compat: m.compat } : {}),
     ...(spec.headers ? { headers: spec.headers } : {}),
   }));
 

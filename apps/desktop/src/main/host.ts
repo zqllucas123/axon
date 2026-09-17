@@ -135,8 +135,10 @@ export interface BudgetOptions {
 
 export interface HostOptions {
   emit: EmitFn;
-  /** 模型来源。由调用方决定是真 provider 还是 faux —— 宿主不关心。 */
-  modelSource: ModelSource;
+  /** 模型来源。由调用方决定是真 provider 还是 faux —— 宿主不关心。
+   * M6：携带可选的 selectModel 方法供 per-role 模型映射使用。
+   */
+  modelSource: ModelSource & { selectModel?: (id: string) => ModelSource };
   roles: RoleDefinition[];
   /** 工具全集。角色的白名单在此之上做交集，只能减不能加。 */
   tools?: unknown[];
@@ -234,7 +236,7 @@ export class AxonHost {
   private runtime: RuntimeConfig;
   private readonly emit: EmitFn;
   /** 模型来源。config.patch 改了 provider 后会整体替换（见 setModelSource）。 */
-  private modelSource: ModelSource;
+  private modelSource: ModelSource & { selectModel?: (id: string) => ModelSource };
   private readonly tools: unknown[];
   // ── M3：闸门 / 预算 / 活性 ──────────────────────────────
   private readonly budget: BudgetGuard;
@@ -251,6 +253,9 @@ export class AxonHost {
   /** per-agent idle 计时器与最后活动时间（看门狗，按空闲而非总时长）。 */
   private readonly idleTimers = new Map<AgentPath, ReturnType<typeof setTimeout>>();
   private readonly lastActivity = new Map<AgentPath, number>();
+  /** M6 流式看门狗：path → 最后一次 message_update 或 turn_start 时间戳。 */
+  private readonly watchdogActivity = new Map<AgentPath, number>();
+  private watchdogTimer: ReturnType<typeof setInterval> | null = null;
 
   // ── M4：账本 / 审批 / 裁决 ───────────────────────
   private readonly ledger: Ledger;
@@ -325,6 +330,9 @@ export class AxonHost {
     for (const role of options.roles) {
       this.roles.set(role.name, { role, source: 'builtin', errors: [] });
     }
+    // M6 流式看门狗：500ms 轮询，超过 10s 无流式活动的 running agent 强制中断。
+    // 阈值 10s = 实测最大静默 1676ms（工具回合间隙，S2 §三.闸口 3）× ~6 倍余量。
+    this.watchdogTimer = setInterval(() => this.runWatchdog(), 500);
   }
 
   /** 释放全部计时器（测试与退出时用）。 */
@@ -339,6 +347,11 @@ export class AxonHost {
       }
       this.approvals.respond(pending.requestId, false, '应用退出，未决请求已拒绝');
     }
+    if (this.watchdogTimer !== null) {
+      clearInterval(this.watchdogTimer);
+      this.watchdogTimer = null;
+    }
+    this.watchdogActivity.clear();
     for (const t of this.idleTimers.values()) clearTimeout(t);
     this.idleTimers.clear();
     this.approvals.dispose();
@@ -376,8 +389,39 @@ export class AxonHost {
    * 已 spawn 的引擎不受影响：它们在创建时就把 model/streamFn 固化进 pi Agent 了
    * —— 与角色热重载同一条纪律。新会话/新成员走新模型。
    */
-  setModelSource(source: ModelSource): void {
+  setModelSource(source: ModelSource & { selectModel?: (id: string) => ModelSource }): void {
     this.modelSource = source;
+  }
+
+  /**
+   * M6 per-role 模型映射：按角色声明的 model id 从 modelSource 里选出对应的 ModelSource。
+   * 角色没声明 model、modelSource 不支持 selectModel、或 id 不在清单里时，fallback 全局默认。
+   */
+  private pickModelSource(roleModel?: string): ModelSource {
+    if (roleModel && this.modelSource.selectModel) {
+      try {
+        return this.modelSource.selectModel(roleModel);
+      } catch {
+        console.warn(`[axon] per-role model "${roleModel}" 不在清单里，fallback 全局默认`);
+      }
+    }
+    return this.modelSource;
+  }
+
+  /** M6 流式看门狗轮询体：每 500ms 被 setInterval 调用。 */
+  private runWatchdog(): void {
+    const WATCHDOG_MS = 10_000;
+    const now = Date.now();
+    for (const [path, lastAt] of this.watchdogActivity) {
+      if (now - lastAt > WATCHDOG_MS) {
+        const node = this.registry.get(path);
+        if (node?.snapshot.status === 'running') {
+          console.warn(`[watchdog] ${path} 超过 ${WATCHDOG_MS}ms 无流式活动，强制中断`);
+          node.engine?.abort();
+        }
+        this.watchdogActivity.delete(path);
+      }
+    }
   }
 
   /**
@@ -694,10 +738,11 @@ export class AxonHost {
     },
   ): AxonEngine {
     const allowSet = lead.role.tools ? new Set(lead.role.tools) : undefined;
+    const ms0 = this.pickModelSource(lead.role.model);
     const engine = createAxonEngine({
       systemPrompt: [lead.role.instructions, opts.systemPromptExtra].filter(Boolean).join('\n\n'),
-      model: this.modelSource.model,
-      streamFn: this.modelSource.streamFn,
+      model: ms0.model,
+      streamFn: ms0.streamFn,
       messages: fromMessageLike(opts.messages ?? []),
       tools: this.toolsFor(rootPath, allowSet, { orchestration: opts.orchestration }) as never,
       sessionId,
@@ -1078,10 +1123,11 @@ export class AxonHost {
       }
       const allowSet = allowedByPath.get(snap.path);
       const allow = allowSet !== undefined ? new Set(allowSet) : undefined;
+      const ms1 = this.pickModelSource(plan.role.model);
       const engine = createAxonEngine({
         systemPrompt: plan.role.instructions,
-        model: this.modelSource.model,
-        streamFn: this.modelSource.streamFn,
+        model: ms1.model,
+        streamFn: ms1.streamFn,
         messages: fromMessageLike(messages),
         // 与 spawn 同一套：白名单 ∩ 父级 —— 重启后工具表必须一模一样
         tools: this.toolsFor(snap.path, allow) as never,
@@ -1545,10 +1591,11 @@ export class AxonHost {
       forkMode: payload.forkMode ?? role.defaultForkMode,
     });
 
+    const ms2 = this.pickModelSource(role.model);
     const engine = createAxonEngine({
       systemPrompt: payload.overrides?.instructions ?? role.instructions,
-      model: this.modelSource.model,
-      streamFn: this.modelSource.streamFn,
+      model: ms2.model,
+      streamFn: ms2.streamFn,
       messages: fromMessageLike(inherited),
       tools: this.toolsFor(snapshot.path, allowSet) as never,
       sessionId: snapshot.sessionId,
@@ -2070,6 +2117,37 @@ export class AxonHost {
           }
 
           this.emit('agent.turn.end', { usage: delta }, path);
+          // 轮次正常结束，清理看门狗记录。
+          this.watchdogActivity.delete(path);
+          break;
+        }
+        case 'turn_start':
+          // 刷新看门狗时间戳：turn_start 是工具回合间隙的起点，此期间无 message_update，
+          // 但 agent 仍在正常运行（S2 §三.闸口 3：最长间隙 1676ms）。
+          this.watchdogActivity.set(path, Date.now());
+          break;
+        case 'message_update': {
+          // M6 流式接线：把 pi 的 assistantMessageEvent 翻译成 Axon 协议事件。
+          // 载荷形状来自 S2 §三.闸口 1 取证 + pi-ai/dist/types.d.ts:AssistantMessageEvent。
+          const ae = event.assistantMessageEvent;
+          if (ae.type === 'text_delta') {
+            this.emit('agent.message.delta', { messageId: path, text: ae.delta }, path);
+          } else if (ae.type === 'thinking_delta') {
+            // EventMap['agent.message.delta'] 当前只有 text 字段；thinking 字段待主线补入 ipc.ts。
+            // 类型断言保证本文件 typecheck 通过，不影响运行时行为。
+            this.emit(
+              'agent.message.delta',
+              { messageId: path, thinking: ae.delta } as unknown as { messageId: string; text: string },
+              path,
+            );
+          } else if (ae.type === 'toolcall_delta') {
+            // toolcall_delta 无独立 toolCallId 字段；从 partial.content[contentIndex] 取。
+            const block = ae.partial.content[ae.contentIndex] as { id?: string } | undefined;
+            const callId = block?.id ?? `${path}:${ae.contentIndex}`;
+            this.emit('agent.tool.update', { callId, chunk: ae.delta }, path);
+          }
+          // 刷新看门狗时间戳
+          this.watchdogActivity.set(path, Date.now());
           break;
         }
         default:
