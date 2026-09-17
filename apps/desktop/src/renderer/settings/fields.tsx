@@ -158,56 +158,14 @@ export function SettingsRow({
 }
 
 // ─────────────────────────────────────────────────────────────
-// 1. 开关（.tgl）
-// ─────────────────────────────────────────────────────────────
-
-export function ToggleField({
-  path,
-  title,
-  desc,
-  value,
-  lock,
-  smoke,
-}: {
-  path: ConfigPatchPath;
-  title: ReactNode;
-  desc: ReactNode;
-  /** 快照真值。 */
-  value: boolean;
-  lock?: EnvOverride | undefined;
-  smoke?: string;
-}): ReactElement {
-  const { saving, error, commit } = useFieldPatch(path);
-  const [draft, setDraft] = useState<boolean | null>(null);
-  const shown = draft ?? value;
-
-  return (
-    <SettingsRow
-      title={title}
-      desc={desc}
-      lock={lock}
-      error={error}
-      saving={saving}
-      {...(smoke ? { smoke } : {})}
-    >
-      <button
-        type="button"
-        className={`tgl${shown ? ' on' : ''}`}
-        aria-pressed={shown}
-        disabled={Boolean(lock) || saving}
-        data-smoke={smoke ? `${smoke}-tgl` : undefined}
-        onClick={() => {
-          const next = !shown;
-          setDraft(next); // 乐观：开关必须立刻动，否则像没点上
-          void commit(next).finally(() => setDraft(null)); // 回落真值（成功=新值，失败=旧值）
-        }}
-      />
-    </SettingsRow>
-  );
-}
-
-// ─────────────────────────────────────────────────────────────
-// 2. 下拉（.sel —— 外观是按钮，不是原生 <select>）
+// 1. 下拉（.sel —— 外观是按钮，不是原生 <select>）
+//
+// 【曾经的第 1 节：`ToggleField`（开关 .tgl）已删 —— MU-3 切片 8】
+// 全仓布尔配置项只有 `ui.annotations` 一个，而那一行按台账 D-11 删掉了
+// （渲染层没有标注系统，开关点了没反应就是假控件）。控件与它唯一的使用者
+// 一起走，才不会留下「看着是活的、其实没人用」的组件；`settings.css` 里
+// 的 `.tgl` 一族同步删除。G11.13 真做标注系统时按 `SegField` 的形状重写
+// 一个即可（它本来也只有 40 行）。
 // ─────────────────────────────────────────────────────────────
 
 export interface SelectOption<T extends string> {
@@ -379,7 +337,7 @@ export function SelectField<T extends string>({
 }
 
 // ─────────────────────────────────────────────────────────────
-// 3. 分段控件（.seg.sm —— 二/三选一，比下拉少一次点击）
+// 2. 分段控件（.seg.sm —— 二/三选一，比下拉少一次点击）
 // ─────────────────────────────────────────────────────────────
 
 export function SegField<T extends string>({
@@ -436,7 +394,7 @@ export function SegField<T extends string>({
 }
 
 // ─────────────────────────────────────────────────────────────
-// 4. 输入框（.inp）
+// 3. 输入框（.inp）
 // ─────────────────────────────────────────────────────────────
 
 /**
@@ -656,7 +614,7 @@ export function SecretField({
 }
 
 // ─────────────────────────────────────────────────────────────
-// 5. 只读路径 + 动作（.path）
+// 4. 只读路径 + 动作（.path）
 // ─────────────────────────────────────────────────────────────
 
 /**

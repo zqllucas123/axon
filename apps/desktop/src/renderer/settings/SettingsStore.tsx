@@ -34,6 +34,7 @@ import type {
   RoleEntry,
   StorageIssue,
 } from '@axon/protocol';
+import { applyAppearance } from '../appearance.ts';
 
 /** 存储实况（`storage.status`）—— 「关于」pane 的「会话与账本」用它说实话。 */
 export interface StorageStatus {
@@ -108,6 +109,16 @@ export function SettingsProvider({ children }: { children: ReactNode }): ReactEl
       off();
     };
   }, []);
+
+  /**
+   * 外观偏好 → 本窗自己的 DOM（MU-3 切片 8）。
+   *
+   * 设置窗自己也是界面：在这里把密度调紧、它自己不跟着紧，用户会以为没生效。
+   * 主窗那边由 `state/store.tsx` 同样盯 `config` 并调同一个函数。
+   */
+  useEffect(() => {
+    applyAppearance(config?.config.ui);
+  }, [config]);
 
   // 另外三条只读数据源（MU-3 §4.2 列的五条里的后三条）。
   // 刻意**不订阅任何会话/分身事件**：设置窗不参与会话，订了只会白白重渲染。

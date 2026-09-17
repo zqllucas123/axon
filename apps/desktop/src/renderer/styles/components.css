@@ -288,7 +288,7 @@
   background: var(--bg-sunken);
   border: 1px solid var(--line);
   line-height: 1.6;
-  font-size: var(--fs-15);
+  font-size: var(--fs-msg);
 }
 .bubble-meta {
   display: flex;
@@ -300,7 +300,7 @@
   margin-bottom: 18px;
 }
 
-.assistant { margin: 22px 0; font-size: var(--fs-15); line-height: 1.75; color: var(--text); }
+.assistant { margin: 22px 0; font-size: var(--fs-msg); line-height: 1.75; color: var(--text); }
 .assistant p { margin: 0 0 12px; }
 .assistant ul { margin: 0 0 12px; padding-left: 20px; }
 .assistant li { margin: 4px 0; }
@@ -484,7 +484,8 @@
 
 .prow {
   display: flex; align-items: center; gap: 10px;
-  padding: 9px 10px; border-radius: var(--r-sm);
+  /* 纵向走密度令牌（tokens.css 的 --prow-y），横向固定：见那里的说明 */
+  padding: var(--prow-y) 10px; border-radius: var(--r-sm);
   font-size: var(--fs-14); color: var(--text);
 }
 .prow:hover { background: var(--bg-hover); }
@@ -498,7 +499,7 @@
 
 /* ---------- 8. 列表 / 表格（账本、收件箱、预算） ---------- */
 .list { border: 1px solid var(--line); border-radius: var(--r-md); background: var(--bg-elev); overflow: hidden; }
-.list-row { display: flex; align-items: center; gap: 12px; padding: 13px 16px; border-bottom: 1px solid var(--line); }
+.list-row { display: flex; align-items: center; gap: 12px; padding: var(--row-y) 16px; border-bottom: 1px solid var(--line); }
 .list-row:last-child { border-bottom: 0; }
 .list-row:hover { background: var(--bg-sunken); }
 .list-row .grow { flex: 1; min-width: 0; }
@@ -620,7 +621,7 @@ table.tbl td.num { font-family: var(--font-mono); color: var(--text); }
 
 /* ---------- 通用输入框（原型 §11 抽出）----------
    原型把 .inp 放在「设置窗口（S8）」一节里，但它是全应用通用的单行输入面 ——
-   S0 的会话标题就用到它。本片只抽 .inp 一组；设置窗其余样式（.sel/.srow/.tgl/…）
+   S0 的会话标题就用到它。本片只抽 .inp 一组；设置窗其余样式（.sel/.srow/.seg.sm/…）
    随 S8（MU-3）一起进，避免把没用的几百行先搬进来。逐值来源：axon.css:838-845。 */
 .inp {
   height: 30px; padding: 0 10px; min-width: 0;

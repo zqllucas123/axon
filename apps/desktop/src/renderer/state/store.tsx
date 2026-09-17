@@ -24,6 +24,7 @@ import {
   type ReactNode,
 } from 'react';
 import { sessionIdOfPath } from '@axon/protocol';
+import { applyAppearance } from '../appearance.ts';
 import type {
   AgentPath,
   AgentSnapshot,
@@ -281,6 +282,17 @@ export function AppProvider({ children }: { children: ReactNode }): ReactElement
       alive = false;
     };
   }, [call]);
+
+  /**
+   * 外观偏好 → DOM（MU-3 切片 8）。
+   *
+   * 盯的是 `config` 状态而不是在三个 `setConfig` 调用点各写一遍：
+   * 初次拉取、`config.changed` 事件、本窗 patch 回包都会更新它，
+   * 盯终值只需一处，也不会漏掉以后新增的写入路径。
+   */
+  useEffect(() => {
+    applyAppearance(config?.config.ui);
+  }, [config]);
 
   // ── 订阅（全仓唯一一处） ──
   useEffect(() => {

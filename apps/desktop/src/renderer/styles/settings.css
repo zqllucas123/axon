@@ -6,7 +6,7 @@
  * 混在一起只会让主窗的屏样式越读越难分辨「这条是谁的」。
  *
  * 逐值来源：docs/ux/mockups/assets/axon.css §11（748-862 行，.st-* / .grp /
- * .srow / .tgl / .sel / .path / .seg.sm / .danger-zone 一族）。
+ * .srow / .sel / .path / .seg.sm / .danger-zone 一族）。
  *
  * ── 两条与原型不同的地方，都是实现约束逼出来的 ──
  *
@@ -171,32 +171,8 @@
 .st-win .seg button .n { margin-left: 5px; color: var(--text-dim); }
 .st-win .seg button.is-on .n { color: var(--text-muted); }
 
-/* 开关（不叫 .sw：那个名字被设计语言页的色板占了）。 */
-.st-win .tgl {
-  flex: none;
-  width: 40px;
-  height: 23px;
-  border-radius: var(--r-pill);
-  background: #ddd9d2;
-  position: relative;
-  transition: background 0.15s;
-}
-.st-win .tgl::after {
-  content: "";
-  position: absolute;
-  top: 2px;
-  left: 2px;
-  width: 19px;
-  height: 19px;
-  border-radius: 50%;
-  background: #fff;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.18);
-  transition: transform 0.15s;
-}
-.st-win .tgl.on { background: var(--accent); }
-.st-win .tgl.on::after { transform: translateX(17px); }
-.st-win .tgl.dis { opacity: 0.4; }
-.st-win .tgl:disabled { cursor: not-allowed; }
+/* 开关 .tgl 一族已删（MU-3 切片 8）：唯一的布尔设置项「显示协议数据标注」
+   按台账 D-11 删行，`fields.tsx` 的 `ToggleField` 同步删除，这里不留孤儿规则。 */
 
 /* 下拉 / 路径（.inp 已在 components.css 抽成全应用通用，这里不重复定义）。 */
 .st-win .sel {

@@ -9,12 +9,21 @@
  * （台账 D-7）。这里把「深色 / 跟随系统」两档置灰标「未实现」而不是删掉整行 ——
  * 与「协议给不出就删掉」不冲突：枚举值在协议里是**存在**的（`ui.theme` 三值），
  * 缺的是渲染层实现，如实标注比假装没有这回事更准确。
+ *
+ * **「显示协议数据标注」那一行已删**（MU-3 切片 8，台账 D-11）：与主题置灰不同，
+ * 它缺的不是「一个枚举值的实现」而是**整个标注系统** —— 渲染层连一个 `.ann`
+ * 元素都没有（原型里它是 `assets/shell.js` 的 `⌘/` 评审工具），摆上去就是一个
+ * 点了没任何反应的开关。`ui.annotations` 字段保留（白名单与校验都在），
+ * 等 G11.13 真做出标注系统时把这一行加回来即可。
+ *
+ * 剩下的三项已真正生效（MU-3 切片 8）：`renderer/appearance.ts` 把它们写到
+ * 两个窗口的 `<body>` 上，样式规则在 `styles/tokens.css` 尾部。
  */
 
 import type { ReactElement } from 'react';
 import { CONFIG_DEFAULTS } from '@axon/protocol';
 import { useSettings } from '../SettingsStore.tsx';
-import { SegField, SelectField, ToggleField, envLock } from '../fields.tsx';
+import { SegField, SelectField, envLock } from '../fields.tsx';
 
 const FONT_SIZES: Array<{ value: string; label: string }> = [
   { value: '13', label: '13px' },
@@ -52,15 +61,6 @@ export function AppearancePane(): ReactElement {
           lock={envLock(env, 'ui.theme')}
           smoke="set-theme"
         />
-
-        <ToggleField
-          path="ui.annotations"
-          title="显示协议数据标注"
-          desc="在界面上标出每一项数据来自哪个协议事件 / 命令。排查「这个数字怎么来的」时不用读代码；日常关掉即可。"
-          value={ui.annotations ?? CONFIG_DEFAULTS.ui.annotations}
-          lock={envLock(env, 'ui.annotations')}
-          smoke="set-annotations"
-        />
       </div>
 
       <div className="st-sec">排版</div>
@@ -68,7 +68,7 @@ export function AppearancePane(): ReactElement {
         <SegField<'comfortable' | 'compact'>
           path="ui.density"
           title="信息密度"
-          desc="「紧凑」把列表行高收紧，一屏多放约三分之一；会话正文不受影响（长文阅读优先，这是刻意的）。"
+          desc="「紧凑」把列表行与右栏面板行的行高收紧，一屏多放约三分之一；字号与横向留白不变（缩字号会牺牲可读性，收横向会让长路径更早被截断）。会话正文不受影响。"
           value={ui.density ?? CONFIG_DEFAULTS.ui.density}
           options={[
             { value: 'comfortable', label: '舒适' },
@@ -93,7 +93,7 @@ export function AppearancePane(): ReactElement {
         <SegField<'system' | 'always'>
           path="ui.reduceMotion"
           title="减弱动态效果"
-          desc="关掉流式逐字与卡片进场动画。「跟随系统」= 听系统的 prefers-reduced-motion；「始终减弱」= 不管系统怎么设都减弱。"
+          desc="关掉控件过渡与卡片动画。「跟随系统」= 听系统的 prefers-reduced-motion；「始终减弱」= 不管系统怎么设都减弱。当前界面本来就几乎没有动效（只有设置页开关的两条过渡），打开这项的可见变化很小 —— 它主要是为后续流式渲染与卡片进场提前守住边界。"
           value={ui.reduceMotion ?? CONFIG_DEFAULTS.ui.reduceMotion}
           options={[
             { value: 'system', label: '跟随系统' },

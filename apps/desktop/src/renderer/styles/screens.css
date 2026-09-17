@@ -35,7 +35,8 @@
 [data-screen='s5'] .inbox-fold { margin: 12px 0 2px; }
 
 /* 「本次已处理」分段头：原型拿侧栏的 .side-section 当正文小标题用，需要去掉左内边距。 */
-[data-screen='s5'] .inbox-sec { padding-left: 0; margin-top: 22px; }
+/* 分节间距走密度令牌（tokens.css 的 --sec-gap，紧凑档 22→14px）。 */
+[data-screen='s5'] .inbox-sec { padding-left: 0; margin-top: var(--sec-gap); }
 [data-screen='s5'] .inbox-sec-note { padding: 0 0 10px; }
 
 /* 批量拒绝的确认文案（两步确认的第一步）。 */

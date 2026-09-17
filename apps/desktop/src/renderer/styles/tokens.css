@@ -49,6 +49,15 @@
   --fs-17: 17px;
   --fs-20: 20px;
 
+  /**
+   * 会话正文字号。单拉一个变量而不是直接用 `--fs-15`，是因为它是
+   * 唯一可由用户调的字号（S8 外观 pane 的 `ui.fontSize`，由
+   * `renderer/appearance.ts` 写到 body 的行内样式上覆盖此值）。
+   * 界面其余部分继续用 `--fs-15` 等固定档位 —— 只动正文是刻意的：
+   * 调大字号是为了读长文，不是为了把侧栏也擑大。
+   */
+  --fs-msg: var(--fs-15);
+
   --sidebar-w: 268px;
   --inspector-w: 300px;
 
@@ -85,3 +94,48 @@ a { color: inherit; text-decoration: none; }
 .i-16 { width: 16px; height: 16px; }
 .i-14 { width: 14px; height: 14px; }
 .i-20 { width: 20px; height: 20px; }
+
+/* =========================================================================
+   外观偏好（`config.ui.*` → `renderer/appearance.ts` → 这里）
+   MU-3 切片 8：把「能存能改」的三项真正接到样式上（台账 R-8）。
+   两个窗口共用这一段 —— 在设置窗里调紧密度，设置窗自己也得跟着紧。
+   ========================================================================= */
+
+/* ---- 密度：只改「纵向节奏」，不动字号与横向留白 ----
+   紧凑的目标是一屏多放约三分之一的行，而不是把界面整体缩小；
+   字号变小会牺牲可读性，横向收窄会让长路径更早被截断，两者都不划算。 */
+:root {
+  --row-y: 13px;   /* .list-row 的纵向 padding */
+  --prow-y: 9px;   /* .prow（右栏面板行）的纵向 padding */
+  --sec-gap: 22px; /* 屏内分节的上边距 */
+}
+body[data-density='compact'] {
+  --row-y: 8px;
+  --prow-y: 5px;
+  --sec-gap: 14px;
+}
+
+/* ---- 减弱动效 ----
+   `always`：无条件关掉过渡与动画。
+   `system`：只在系统开了 prefers-reduced-motion 时关 —— 注意这条必须显式写，
+   浏览器不会替我们把自定义 transition 停掉；「缺省（没设过这一项）」与
+   「显式选了跟随系统」在 CSS 上是两条不同的规则，所以 appearance.ts 对
+   system 也会落属性。 */
+body[data-reduce-motion='always'],
+body[data-reduce-motion='always'] *,
+body[data-reduce-motion='always'] *::before,
+body[data-reduce-motion='always'] *::after {
+  transition: none !important;
+  animation: none !important;
+  scroll-behavior: auto !important;
+}
+@media (prefers-reduced-motion: reduce) {
+  body[data-reduce-motion='system'],
+  body[data-reduce-motion='system'] *,
+  body[data-reduce-motion='system'] *::before,
+  body[data-reduce-motion='system'] *::after {
+    transition: none !important;
+    animation: none !important;
+    scroll-behavior: auto !important;
+  }
+}

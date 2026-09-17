@@ -118,7 +118,13 @@ export interface UiPreferences {
   fontSize?: number;
   /** 减弱动态效果：跟随系统（prefers-reduced-motion）或始终减弱。 */
   reduceMotion?: 'system' | 'always';
-  /** 显示协议数据标注（每项数据来自哪个事件/命令）。 */
+  /**
+   * 显示协议数据标注（每项数据来自哪个事件/命令）。
+   *
+   * MU-3 切片 8：字段保留（白名单 + 校验 + 默认值都在），但 **S8 暂无对应开关**：
+   * 渲染层连一个标注元素都没有（原型里它是 `assets/shell.js` 的 `⌘/` 评审工具），
+   * 摆一个点了没反应的开关就是假控件。待 G11.13 做出标注系统后再加回那一行。
+   */
   annotations?: boolean;
 }
 
@@ -249,7 +255,7 @@ export const CONFIG_FIELD_SPECS: readonly ConfigFieldSpec[] = Object.freeze([
   { path: 'ui.density', kind: 'enum', values: ['comfortable', 'compact'], note: '列表信息密度；会话正文不受影响' },
   { path: 'ui.fontSize', kind: 'number', min: 12, max: 20, note: '会话正文字号（px）；缺省 15' },
   { path: 'ui.reduceMotion', kind: 'enum', values: ['system', 'always'], note: '减弱动态效果：跟随系统 prefers-reduced-motion 或始终减弱' },
-  { path: 'ui.annotations', kind: 'boolean', note: '在界面上标出每项数据来自哪个协议事件/命令' },
+  { path: 'ui.annotations', kind: 'boolean', note: '在界面上标出每项数据来自哪个协议事件/命令（字段已就绪，渲染层的标注系统待 G11.13）' },
 ]);
 
 const SPEC_BY_PATH = new Map<string, ConfigFieldSpec>(
