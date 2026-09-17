@@ -17,7 +17,54 @@
 
 /* ===== S5 收件箱（W-A）===== */
 
-/* ===== S6 预算与用量（W-B）===== */
+/* 行内 code：收件箱要频繁写出档位名与命令名，全局没有 code 样式，就在本屏内做一份
+   （与 components.css:307 的 `.assistant code` 同值，只是作用域不同）。 */
+[data-screen='s5'] code {
+  font-family: var(--font-mono);
+  font-size: 0.88em;
+  background: var(--bg-sunken);
+  border: 1px solid var(--line);
+  border-radius: var(--r-xs);
+  padding: 1px 5px;
+}
+
+/* 发起者一行：卡内插槽的第一行（原型里是 card-body 的首句）。 */
+[data-screen='s5'] .inbox-origin { margin-top: 10px; }
+
+/* 卡内折叠块：.fold 缺省上下 14px 外距，在卡片里只需要上边距。 */
+[data-screen='s5'] .inbox-fold { margin: 12px 0 2px; }
+
+/* 「本次已处理」分段头：原型拿侧栏的 .side-section 当正文小标题用，需要去掉左内边距。 */
+[data-screen='s5'] .inbox-sec { padding-left: 0; margin-top: 22px; }
+[data-screen='s5'] .inbox-sec-note { padding: 0 0 10px; }
+
+/* 批量拒绝的确认文案（两步确认的第一步）。 */
+[data-screen='s5'] .inbox-confirm { font-size: var(--fs-13); color: var(--sem-err); }
+
+/* 批量拒绝部分失败的行内说明（不靠顶部错误条一闪而过）。 */
+[data-screen='s5'] .inbox-batch-note { margin-top: 0; }
+
+/* ===== S6 预算与用量（W-B）=====
+   本屏几乎全用 components.css 现成件（.card.attn / .bar.warn / .grid3 / .stat /
+   .list-row / .panel），这里只补两类它们给不了的东西：金额列的等宽数字，
+   以及右栏、卡内嵌空态的缩排。 */
+
+/* 金额一律走表格数字：排行里的 `$1.13 / $1.50` 比不齐小数点就不像一列数 */
+[data-screen='s6'] .list-row .when,
+[data-screen='s6'] .stat .v,
+[data-screen='s6'] .prow .val {
+  font-variant-numeric: tabular-nums;
+}
+
+/* 右栏面板内的空态：.empty 默认是整屏级的 16px 缩排，嵌在 .panel 里太松 */
+[data-screen='s6'] .panel .empty {
+  padding: 2px 10px 8px;
+}
+
+/* 告警卡的叙述句比普通 card-body 长，行长锁在可读宽度内 */
+[data-screen='s6'] .card.attn .card-body {
+  max-width: 72ch;
+}
 
 /* ===== S7 会话恢复（W-C）===== */
 

@@ -10,11 +10,17 @@
  *  - `stream`（S2 流内，默认）：不显示会话名 —— 你已经在这个会话里了；
  *  - `inbox`（S5 收件箱）：显示会话名与发起者，因为收件箱是跨会话的。
  *
+ * 两个**扩展点**（MU-3 阶段 1 回收 W-A 的需求，由主线补）—— 为什么是口子而不是
+ * 再开一个 variant：卡头的等待标、卡体的附加块，属于「调用方才知道该填什么」的
+ * 信息（等待时长需要一个秒级 tick，cwd 需要查会话）。把它们塞进卡片内部就要让卡片
+ * 去读它不该读的 store，也会把「每秒重渲染」的代价强加给 S2。两个口子都有默认值，
+ * 不传时与抽件前的形态逐像素一致（S2 零变化，四个 data-smoke 钩子不动）。
+ *
  * 抽取时**不改任何外观与 data-smoke 钩子**（既有冒烟依赖 `approval-banner` /
  * `approval-approve` / `approval-reject` / `question-answer` 四个钩子）。
  */
 
-import { useState, type ReactElement } from 'react';
+import { useState, type ReactElement, type ReactNode } from 'react';
 import type { PendingRequest } from '@axon/protocol';
 import { useApp } from '../../state/store.tsx';
 import { Icon } from '../../icons.tsx';
@@ -73,11 +79,25 @@ export function ApprovalCard({
   sessionTitle,
   /** 收件箱用：点标题跳进该会话。 */
   onOpenSession,
+  /**
+   * 卡头右侧的状态标，默认「等待中」。
+   * S5 传入带秒表的「等待 3′12 / 超时 10′」：那个数字需要调用方自己的 tick，
+   * 卡片不该为了它内置一个定时器（S2 流内几十张卡片各起一个定时器是灾难）。
+   */
+  headTag,
+  /**
+   * 插在卡体末尾（消息与穿透链之后）的附加内容。
+   * S5 用它放「发起者 + 完整命令与工作目录」折叠块 —— 那些信息要查会话拿 cwd，
+   * 是收件箱的上下文，不属于卡片本身。
+   */
+  children,
 }: {
   request: PendingRequest;
   variant?: ApprovalVariant;
   sessionTitle?: string;
   onOpenSession?: () => void;
+  headTag?: ReactNode;
+  children?: ReactNode;
 }): ReactElement {
   const { respondApproval } = useApp();
   const args = request.args ? JSON.stringify(request.args) : '';
@@ -96,11 +116,12 @@ export function ApprovalCard({
             {sessionTitle}
           </button>
         ) : null}
-        <span className="tag run">等待中</span>
+        {headTag ?? <span className="tag run">等待中</span>}
       </div>
       <div className="card-body">
         {request.message}
         {request.chain.length > 1 ? <Chain chain={request.chain} /> : null}
+        {children}
       </div>
       {isQuestion ? (
         <QuestionFoot request={request} />
