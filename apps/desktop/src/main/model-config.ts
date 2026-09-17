@@ -91,6 +91,19 @@ export function resolveModelChoice(
     return { kind: 'faux', reason: `defaultModel=${defaultModel} 不在 models 清单里，降级到 faux` };
   }
 
+  // M6：cost 全零告警。cost 字段缺失或全为 0 时 BudgetGuard 永远算不出花费，
+  // 预算熔断静默失效。这里只 warn 不降级——模型可能确实免费，不该强制要求填单价。
+  for (const m of merged) {
+    const c = m.cost;
+    const allZero = !c || Object.values(c).every((v) => !v);
+    if (allZero) {
+      console.warn(
+        `[M6] models[${m.id}] cost 字段全零或缺失，BudgetGuard 将无法触发。` +
+        `请在 ~/.axon/config.json 的 provider.models 里补充 cost（单位：美元/百万 token）。`,
+      );
+    }
+  }
+
   return {
     kind: 'openai-compat',
     providerId: p.id ?? 'axon-gateway',

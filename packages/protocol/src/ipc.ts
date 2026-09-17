@@ -232,6 +232,20 @@ export interface CommandMap {
   };
   /** 打开（或聚焦）设置窗。单例语义在主进程，渲染层只发意图。 */
   'window.openSettings': { payload: Record<string, never>; result: { opened: true } };
+
+  // ── M6：Provider 连接测试 ──
+
+  /**
+   * 测试当前配置的网关连通性。
+   *
+   * 为什么独立一条命令而不复用 config.get：config.get 只是读配置快照，
+   * 不实际发 HTTP 请求；设置窗「测试连接」按钮需要真实的延迟数字和
+   * 可用模型列表，必须对网关发请求才能拿到。
+   */
+  'provider.test': {
+    payload: Record<string, never>;
+    result: { ok: boolean; latencyMs: number; models: string[]; error?: string };
+  };
 }
 
 /** `shell.openPath` 的可达集（主进程解成真路径）。 */

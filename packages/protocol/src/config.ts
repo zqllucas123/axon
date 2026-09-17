@@ -44,6 +44,18 @@ export interface ModelSpec {
   contextWindow?: number;
   maxTokens?: number;
   cost?: Partial<{ input: number; output: number; cacheRead: number; cacheWrite: number }>;
+  /**
+   * OpenAI 兼容网关的方言修正。
+   *
+   * 为什么需要这个字段：pi 的 openai-completions.js:601-605 靠 `model.compat.maxTokensField`
+   * 决定把 maxTokens 发成 `max_tokens` 还是 `max_completion_tokens`。
+   * 缺省时 pi 会「自动探测」，但自定义网关（如 DeepSeek）往往只认 `max_tokens`，
+   * 探测结果错了就导致截断参数静默失效（S2 闸口 4 取证）。
+   * 填上这个字段就能绕过探测，直接告诉 pi 该用哪个字段名。
+   */
+  compat?: {
+    maxTokensField?: 'max_tokens' | 'max_completion_tokens';
+  };
 }
 
 // ─────────────────────────────────────────────────────────────
