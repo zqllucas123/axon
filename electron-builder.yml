@@ -1,0 +1,42 @@
+appId: com.axon.desktop
+productName: Axon
+copyright: Copyright © 2026
+
+# electron-builder 从 dist-staging/ 作为 app 根目录收集产物。
+# staging 目录由 scripts/pack.mjs 在构建前准备好：
+#   - esbuild 产物（main.mjs / preload.mjs / renderer/）
+#   - pi external 包（node_modules/@earendil-works/*，已解引用 bun symlink）
+#   - 最小 package.json（main: ./main.mjs）
+# 这样彻底规避 bun workspace symlink 逃逸 appDir 的问题。
+directories:
+  app: dist-staging
+  output: dist-pack
+
+# staging 目录是干净的纯文件树，不含任何 symlink，直接打包全部内容。
+files:
+  - "**/*"
+
+# pi-ai 在运行时用动态 import 懒加载 44 个 provider。
+# asarUnpack 把整个 @earendil-works/** 解包为真实文件，彻底规避 asar 虚拟路径限制。
+asarUnpack:
+  - node_modules/@earendil-works/**
+
+mac:
+  target:
+    - target: dmg
+      arch: arm64
+  icon: apps/desktop/assets/icon.icns
+  # 无签名/公证（v0.1 人工分发，见 M7-packaging.md §六.1）
+  # 用户安装后需在「系统设置 → 安全性」手动放行，或：
+  #   xattr -cr /Applications/Axon.app
+  identity: null
+
+dmg:
+  title: "Axon ${version}"
+  contents:
+    - x: 130
+      y: 220
+    - x: 410
+      y: 220
+      type: link
+      path: /Applications

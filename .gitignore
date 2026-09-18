@@ -6,6 +6,11 @@ out/
 .DS_Store
 .env.local
 
+# M7 打包产物（DMG / zip）体积大，不进仓
+dist-pack/
+# M7 staging 目录（构建中间产物），不进仓
+dist-staging/
+
 # bun 是唯一包管理器，其他锁文件不允许进仓
 package-lock.json
 yarn.lock

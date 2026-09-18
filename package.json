@@ -25,7 +25,8 @@
     "ui-smoke": "bun run build:desktop && bun scripts/ui-smoke.mjs",
     "example:real": "bun run examples/real-model-spike.ts",
     "example:orchestration": "bun run examples/real-orchestration-spike.ts",
-    "example:dialect": "bun run examples/real-dialect-spike.ts"
+    "example:dialect": "bun run examples/real-dialect-spike.ts",
+    "build:pack": "bun run build:desktop && bun run scripts/pack.mjs"
   },
   "devDependencies": {
     "@earendil-works/pi-agent-core": "0.85.1",
@@ -34,6 +35,7 @@
     "@types/react": "19",
     "@types/react-dom": "19",
     "electron": "33.2.1",
+    "electron-builder": "25.1.8",
     "esbuild": "0.24.2",
     "typescript": "5.7.2",
     "vitest": "2.1.8"
