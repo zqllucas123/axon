@@ -12,10 +12,10 @@
  * 渲染进程只发意图、收事件，不持有 Agent 实例。
  */
 
-import { app, BrowserWindow, ipcMain, shell } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron';
 import { fileURLToPath } from 'node:url';
-import { mkdir, writeFile } from 'node:fs/promises';
-import { dirname, join } from 'node:path';
+import { mkdir, readdir, readFile as fsReadFile, stat, writeFile } from 'node:fs/promises';
+import { dirname, extname, join, resolve, sep } from 'node:path';
 import { homedir } from 'node:os';
 import {
   IPC_COMMAND_CHANNEL,
@@ -45,6 +45,7 @@ import { ALL_ROLES } from './roles.ts';
 import { BUILTIN_TEAMS } from './teams.ts';
 import { RoleBridge } from './role-bridge.ts';
 import { TeamBridge } from './team-bridge.ts';
+import { ProjectStore } from './project-store.ts';
 import { ConfigStore } from './config-store.ts';
 import { openSettingsWindow, settingsWindow } from './windows.ts';
 import { installAppMenu } from './menu.ts';
@@ -80,6 +81,12 @@ const TEAMS_DIR = process.env.AXON_TEAMS_DIR || join(homedir(), '.axon', 'teams'
 const SESSIONS_DIR = process.env.AXON_SESSIONS_DIR || join(homedir(), '.axon', 'sessions');
 
 /**
+ * 用户项目目录。默认 ~/.axon/projects；AXON_PROJECTS_DIR 供开发/冒烟隔离
+ * （与 roles/teams 同理：冒烟不该把真用户的项目库写脏）。
+ */
+const PROJECTS_DIR = process.env.AXON_PROJECTS_DIR || join(homedir(), '.axon', 'projects');
+
+/**
  * `shell.openPath` 枚举 → 真路径。写成函数是因为 CONFIG_PATH 受 AXON_CONFIG
  * 影响，而 env 在测试里会被改 —— 延迟求值比模块加载时固化安全。
  */
@@ -92,6 +99,39 @@ const OPEN_PATHS: Record<OpenPathKind, () => string> = {
 
 /** 冒烟模式：只由 ui-smoke 打开，生产路径完全不受影响。 */
 const SMOKE = !!process.env.AXON_SMOKE_SCRIPT;
+
+// ── 工作区文件浏览（fs.listDir / fs.readFile）的共享设施 ──
+
+/** 预览文件大小上限：超过只回占位，不把内容塞进 IPC。 */
+const FS_PREVIEW_MAX_BYTES = 1024 * 1024;
+
+/** 按扩展名认出图片，供 <img> 直接以 base64 data-uri 渲染。 */
+const IMAGE_MIME: Record<string, string> = {
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.gif': 'image/gif',
+  '.webp': 'image/webp',
+  '.svg': 'image/svg+xml',
+  '.bmp': 'image/bmp',
+  '.ico': 'image/x-icon',
+};
+
+/**
+ * 把 `relPath` 解析成 cwd 沙箱内的绝对路径；越界即抛。
+ *
+ * 渲染进程零 Node，`relPath` 是它唯一能influence 的量。若不校验，一个 `../../`
+ * 就能让主进程 readdir/readFile 到工作区之外的任意文件。规则：resolve 后必须
+ * 等于 cwd 本身，或以 `cwd + sep` 为前缀 —— 与 shell.openPath 的枚举锁同一原则。
+ */
+function resolveInCwd(cwd: string, relPath: string): string {
+  const rootAbs = resolve(cwd);
+  const target = resolve(rootAbs, relPath || '.');
+  if (target !== rootAbs && !target.startsWith(rootAbs + sep)) {
+    throw new Error(`路径越出工作区：${relPath}`);
+  }
+  return target;
+}
 
 /**
  * 实际生效的内置角色集合。
@@ -109,6 +149,7 @@ let host: AxonHost | null = null;
 let storage: SessionPersistence | undefined;
 let roleBridge: RoleBridge | null = null;
 let teamBridge: TeamBridge | null = null;
+let projectStore: ProjectStore | null = null;
 let configStore: ConfigStore | null = null;
 
 // ── 事件投递与节流 ──────────────────────────────────────
@@ -451,6 +492,15 @@ app.whenReady().then(async () => {
   roleBridge.onChanged(() => {
     void teamBridge?.revalidate();
   });
+
+  // 项目层：独立于会话存储的项目元数据（一项目一文件）。
+  // host 只需要「projectId → cwd」解析器来固化项目会话的工作空间。
+  projectStore = new ProjectStore({ dir: PROJECTS_DIR });
+  await projectStore.load();
+  host.setProjectCwdResolver((id) => projectStore!.get(id)?.cwd);
+  projectStore.watch((s) => sendEvent('projects.changed', s));
+  console.log(`[desktop] projects: ${projectStore.current().entries.length} 个，目录 ${PROJECTS_DIR}`);
+
   const state = host.listRoles();
   const teams = teamBridge.list();
   console.log(
@@ -498,6 +548,31 @@ app.whenReady().then(async () => {
           return { id: request.id, ok: true, result };
         }
 
+        // 项目层：ProjectStore（文件 IO）。create 成功后 watch 会补发 projects.changed，
+        // 但这里立即以返回值让 UI 先更新，不等 watch 防抖。
+        if (request.command === 'project.list') {
+          return { id: request.id, ok: true, result: projectStore!.current() };
+        }
+        if (request.command === 'project.create') {
+          const { name, cwd } = request.payload as { name: string; cwd: string };
+          const result = await projectStore!.create({ name, cwd });
+          if (result.accepted) sendEvent('projects.changed', projectStore!.current());
+          return { id: request.id, ok: true, result };
+        }
+        if (request.command === 'project.pickWorkspace') {
+          // 渲染进程零 Node，目录选择器只能在主进程弹；限定为目录选择。
+          const picked = await dialog.showOpenDialog({
+            title: '选择项目工作空间',
+            properties: ['openDirectory', 'createDirectory'],
+          });
+          const path = picked.filePaths[0];
+          const result =
+            picked.canceled || !path
+              ? { cancelled: true }
+              : { cancelled: false, path };
+          return { id: request.id, ok: true, result };
+        }
+
         // 配置层：ConfigStore 是唯一真相（含未知字段保留与环境变量锁）。
         if (request.command === 'config.get') {
           return { id: request.id, ok: true, result: configStore!.snapshot() };
@@ -532,12 +607,78 @@ app.whenReady().then(async () => {
           return { id: request.id, ok: true, result: { opened: true } };
         }
 
+        // 工作区文件浏览（S2 顶部「打开文件」）：sessionId → record.cwd 作沙箱根，
+        // relPath 经 resolveInCwd 校验后必须仍落在根内，否则抛错（防目录穿越）。
+        if (request.command === 'fs.listDir') {
+          const { sessionId, relPath } = request.payload as {
+            sessionId: string;
+            relPath: string;
+          };
+          const cwd = host!.getSession(sessionId)?.record.cwd;
+          if (!cwd) throw new Error(`会话不存在或无工作区：${sessionId}`);
+          const target = resolveInCwd(cwd, relPath);
+          const dirents = await readdir(target, { withFileTypes: true });
+          const entries = await Promise.all(
+            dirents
+              .filter((d) => d.isDirectory() || d.isFile())
+              .map(async (d) => {
+                const kind = d.isDirectory() ? ('dir' as const) : ('file' as const);
+                let size: number | undefined;
+                if (kind === 'file') {
+                  try {
+                    size = (await stat(join(target, d.name))).size;
+                  } catch {
+                    size = undefined;
+                  }
+                }
+                return { name: d.name, kind, size };
+              }),
+          );
+          // 目录在前、各自按名排序：文件树的稳定观感靠这一步，不靠渲染层。
+          entries.sort((a, b) => {
+            if (a.kind !== b.kind) return a.kind === 'dir' ? -1 : 1;
+            return a.name.localeCompare(b.name);
+          });
+          return { id: request.id, ok: true, result: { root: cwd, relPath, entries } };
+        }
+        if (request.command === 'fs.readFile') {
+          const { sessionId, relPath } = request.payload as {
+            sessionId: string;
+            relPath: string;
+          };
+          const cwd = host!.getSession(sessionId)?.record.cwd;
+          if (!cwd) throw new Error(`会话不存在或无工作区：${sessionId}`);
+          const target = resolveInCwd(cwd, relPath);
+          const info = await stat(target);
+          if (!info.isFile()) throw new Error(`不是文件：${relPath}`);
+          const size = info.size;
+          if (size > FS_PREVIEW_MAX_BYTES) {
+            return {
+              id: request.id,
+              ok: true,
+              result: { content: '', encoding: 'utf8', tooLarge: true, size },
+            };
+          }
+          const mime = IMAGE_MIME[extname(target).toLowerCase()];
+          if (mime) {
+            const buf = await fsReadFile(target);
+            return {
+              id: request.id,
+              ok: true,
+              result: { content: buf.toString('base64'), encoding: 'base64', mime, size },
+            };
+          }
+          const content = await fsReadFile(target, 'utf8');
+          return { id: request.id, ok: true, result: { content, encoding: 'utf8', size } };
+        }
+
         // M6: provider.test —— W-B 的 provider-probe.ts 落地后替换 stub 实现。
         // 拦在 host.execute 之前，因为 host 不处理这条命令。
         if (request.command === 'provider.test') {
           try {
             const { probeProvider } = await import('./provider-probe.ts');
-            const result = await probeProvider();
+            const model = (request.payload as { model?: string } | undefined)?.model;
+            const result = await probeProvider(model);
             return { id: request.id, ok: true, result };
           } catch {
             // provider-probe.ts 尚未交付（W-B 阶段）或探针失败时的兜底。
@@ -597,6 +738,7 @@ app.on('will-quit', (event) => {
   quitting = true;
   roleBridge?.dispose();
   teamBridge?.dispose();
+  projectStore?.dispose();
   for (const t of sessionChangedTimers.values()) clearTimeout(t);
   sessionChangedTimers.clear();
   pendingSessionEvents.clear();

@@ -268,6 +268,31 @@ describe('session.create · 三种执行方式', () => {
     expect(() => h.host.createSession({ title: '', executor: 'engine' })).toThrow(/标题不能为空/);
   });
 
+  it('项目会话：以项目工作空间为 cwd 并固化 projectId；无效项目报错', async () => {
+    const h = await harness();
+    h.host.setProjectCwdResolver((id) => (id === 'p-1' ? '/works/proj-1' : undefined));
+
+    // 传 projectId：cwd 用项目工作空间，即便同时传了别的 cwd 也以项目为准。
+    const s = h.host.createSession({
+      title: '项目里干活',
+      executor: 'engine',
+      projectId: 'p-1',
+      cwd: '/somewhere/else',
+    });
+    expect(s.record.projectId).toBe('p-1');
+    expect(s.record.cwd).toBe('/works/proj-1');
+
+    // 无效项目：拒绝创建（不静默落到默认目录）。
+    expect(() =>
+      h.host.createSession({ title: 'x', executor: 'engine', projectId: 'p-ghost' }),
+    ).toThrow(/项目不存在/);
+
+    // 不传 projectId：保持原行为（无归属、走默认 cwd）。
+    const free = h.host.createSession({ title: '自由会话', executor: 'engine', cwd: '/free' });
+    expect(free.record.projectId).toBeUndefined();
+    expect(free.record.cwd).toBe('/free');
+  });
+
   it('标题从首条任务截断（S0 的「例如：把 apps/api 的…」）', async () => {
     const h = await harness();
     const long = '把 apps/api 的支付回调改成幂等。'.repeat(10);

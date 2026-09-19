@@ -29,12 +29,16 @@ import type {
   AgentPath,
   AgentSnapshot,
   BudgetSnapshot,
+  CommandMap,
   ConfigSnapshot,
   CreateSessionPayload,
+  FsEntry,
   LedgerRecord,
   MessageLike,
   OpenPathKind,
   PendingRequest,
+  ProjectIssue,
+  ProjectRecord,
   RoleEntry,
   RoleIssue,
   SessionDetail,
@@ -42,7 +46,10 @@ import type {
   TeamEntry,
   TeamIssue,
 } from '@axon/protocol';
-import type { Screen, SessionView } from './types.ts';
+import type { ProjectContext, RightPanel, Screen, SessionView } from './types.ts';
+
+/** 文件预览结果（`fs.readFile` 返回；直接取协议形状，不另立真相）。 */
+export type FsFile = CommandMap['fs.readFile']['result'];
 import {
   itemsFromMessage,
   replayStream,
@@ -77,6 +84,7 @@ export interface StoreValue {
   agents: Record<AgentPath, AgentSnapshot>;
   roles: { entries: RoleEntry[]; issues: RoleIssue[] };
   teams: { entries: TeamEntry[]; issues: TeamIssue[] };
+  projects: { entries: ProjectRecord[]; issues: ProjectIssue[] };
   pending: PendingRequest[];
   ledger: LedgerRecord[];
   /**
@@ -96,11 +104,29 @@ export interface StoreValue {
   focusPath: AgentPath | null;
   /** 当前会话摘要（无会话时为 null）。 */
   current: SessionSummary | null;
+  /** 「在某项目下新建会话」的临时上下文（进入 S0 时用；null = 普通新建）。 */
+  projectContext: ProjectContext | null;
   // ── 意图 ──
   go: (screen: Screen) => void;
   openSession: (sessionId: string) => void;
   createSession: (payload: CreateSessionPayload) => Promise<SessionSummary | null>;
+  /** 创建项目（仅元数据）。成功后选中项目并进入带项目上下文的 S0。 */
+  createProject: (input: { name: string; cwd: string }) => Promise<{ accepted: boolean; errors: ProjectIssue[] }>;
+  /** 打开原生目录选择器选工作空间；取消返回 null。 */
+  pickProjectWorkspace: () => Promise<string | null>;
+  /** 进入某项目的「新建会话」页（置项目上下文 + 切到 S0）。 */
+  newSessionInProject: (projectId: string) => void;
+  /** 清除项目上下文（回到普通新建会话）。 */
+  clearProjectContext: () => void;
   setSessionView: (view: SessionView) => void;
+  /** 右栏单槽：当前显示哪块（none/props/files）。换会话时重置为 none。 */
+  rightPanel: RightPanel;
+  /** 切右栏槽位；传入已激活的值 = 收起（toggle 语义）。 */
+  setRightPanel: (panel: RightPanel) => void;
+  /** 列出会话工作区某目录（`fs.listDir`），失败返回 null。 */
+  listDir: (relPath: string) => Promise<FsEntry[] | null>;
+  /** 读会话工作区某文件用于预览（`fs.readFile`），失败返回 null。 */
+  readWorkspaceFile: (relPath: string) => Promise<FsFile | null>;
   setFocus: (path: AgentPath) => void;
   prompt: (path: AgentPath, text: string) => Promise<void>;
   interrupt: (path: AgentPath) => Promise<void>;
@@ -117,8 +143,8 @@ export interface StoreValue {
   deleteRole: (name: string) => Promise<boolean>;
   /** 用系统文件管理器打开一个已知位置（`shell.openPath`，MU-3 E-3）。 */
   openPath: (kind: OpenPathKind) => Promise<void>;
-  /** 打开（或聚焦）设置窗（`window.openSettings`）。 */
-  openSettings: () => Promise<void>;
+  /** 打开设置屏（S8，主窗内联）。 */
+  openSettings: () => void;
   /**
    * 本次运行期内已处理的待办流水（S5 「已处理」段，拍板 P-5）。
    *
@@ -150,6 +176,7 @@ export function AppProvider({ children }: { children: ReactNode }): ReactElement
   const [agents, setAgents] = useState<Record<AgentPath, AgentSnapshot>>({});
   const [roles, setRoles] = useState<StoreValue['roles']>({ entries: [], issues: [] });
   const [teams, setTeams] = useState<StoreValue['teams']>({ entries: [], issues: [] });
+  const [projects, setProjects] = useState<StoreValue['projects']>({ entries: [], issues: [] });
   const [pending, setPending] = useState<PendingRequest[]>([]);
   const [ledger, setLedger] = useState<LedgerRecord[]>([]);
   const [streams, setStreams] = useState<Record<AgentPath, StreamItem[]>>({});
@@ -161,7 +188,9 @@ export function AppProvider({ children }: { children: ReactNode }): ReactElement
   const [screen, setScreen] = useState<Screen>('s0');
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [sessionView, setSessionViewState] = useState<SessionView>('chat');
+  const [rightPanel, setRightPanelState] = useState<RightPanel>('none');
   const [focusPath, setFocusPath] = useState<AgentPath | null>(null);
+  const [projectContext, setProjectContext] = useState<ProjectContext | null>(null);
 
   const sessionIdRef = useRef<string | null>(null);
   sessionIdRef.current = sessionId;
@@ -256,11 +285,12 @@ export function AppProvider({ children }: { children: ReactNode }): ReactElement
   useEffect(() => {
     let alive = true;
     void (async () => {
-      const [st, list, rs, ts, ps, bg, cfg] = await Promise.all([
+      const [st, list, rs, ts, prj, ps, bg, cfg] = await Promise.all([
         call(() => window.axon.invoke('storage.status', {})),
         call(() => window.axon.invoke('session.list', {})),
         call(() => window.axon.invoke('role.list', {})),
         call(() => window.axon.invoke('team.list', {})),
+        call(() => window.axon.invoke('project.list', {})),
         call(() => window.axon.invoke('pending.list', {})),
         call(() => window.axon.invoke('budget.get', {})),
         call(() => window.axon.invoke('config.get', {})),
@@ -270,6 +300,7 @@ export function AppProvider({ children }: { children: ReactNode }): ReactElement
       if (list) setSessions(list);
       if (rs) setRoles(rs);
       if (ts) setTeams(ts);
+      if (prj) setProjects(prj);
       if (ps) setPending(ps);
       if (bg) setBudget(bg);
       if (cfg) setConfig(cfg);
@@ -334,6 +365,7 @@ export function AppProvider({ children }: { children: ReactNode }): ReactElement
         return next;
       });
 
+    offs.push(sub('projects.changed', ({ entries, issues }) => setProjects({ entries, issues })));
     offs.push(sub('session.created', ({ summary }) => upsertSession(summary)));
     offs.push(
       sub('session.changed', ({ summary }) => {
@@ -692,6 +724,7 @@ export function AppProvider({ children }: { children: ReactNode }): ReactElement
       setSessionId(id);
       setScreen('s2');
       setSessionViewState('chat');
+      setRightPanelState('none'); // 换会话收起右栏：属性/文件都是当前会话专属
       setFocusPath(known ? known.rootPath : (s?.rootPath ?? null));
       // 懒加载纪律：**只有这里**允许触发 session.get（读树）。
       if (!known) void loadDetail(id);
@@ -711,6 +744,9 @@ export function AppProvider({ children }: { children: ReactNode }): ReactElement
       setFocusPath(s.rootPath);
       setScreen('s2');
       setSessionViewState('chat');
+      setRightPanelState('none');
+      setProjectContext(null); // 会话已建，项目上下文用完即清
+
       void loadDetail(s.record.id);
       void loadMessages(s.rootPath);
       void loadLedger(s.record.id);
@@ -718,6 +754,44 @@ export function AppProvider({ children }: { children: ReactNode }): ReactElement
     },
     [call, loadDetail, loadLedger, loadMessages],
   );
+
+  /**
+   * 创建项目（仅元数据）。成功后立即以项目上下文进入 S0，让用户填首个任务；
+   * 不隐式建空会话（拍板：进入新建会话页）。事件与返回值分别更新列表，去重幂等。
+   */
+  const createProject = useCallback(
+    async (input: { name: string; cwd: string }): Promise<{ accepted: boolean; errors: ProjectIssue[] }> => {
+      const res = await call(() => window.axon.invoke('project.create', input));
+      if (!res) return { accepted: false, errors: [] };
+      if (res.accepted && res.project) {
+        const created = res.project;
+        setProjects((prev) =>
+          prev.entries.some((p) => p.id === created.id)
+            ? prev
+            : { ...prev, entries: [...prev.entries, created] },
+        );
+        setProjectContext({ projectId: created.id });
+        setScreen('s0');
+      }
+      return { accepted: res.accepted, errors: res.errors };
+    },
+    [call],
+  );
+
+  const pickProjectWorkspace = useCallback(async (): Promise<string | null> => {
+    const res = await call(() => window.axon.invoke('project.pickWorkspace', {}));
+    if (!res || res.cancelled || !res.path) return null;
+    return res.path;
+  }, [call]);
+
+  const newSessionInProject = useCallback((projectId: string): void => {
+    setProjectContext({ projectId });
+    setScreen('s0');
+  }, []);
+
+  const clearProjectContext = useCallback((): void => {
+    setProjectContext(null);
+  }, []);
 
   /*
    * 【已删：`removeSession` / `renameSession`，MU-3 切片 8】
@@ -811,9 +885,32 @@ export function AppProvider({ children }: { children: ReactNode }): ReactElement
     [call],
   );
 
-  const openSettings = useCallback(async (): Promise<void> => {
-    await call(() => window.axon.invoke('window.openSettings', {}));
-  }, [call]);
+  const openSettings = useCallback((): void => {
+    setScreen('s8');
+  }, [setScreen]);
+
+  /** 右栏单槽 toggle：点已激活的槽 = 收起。 */
+  const setRightPanel = useCallback((panel: RightPanel): void => {
+    setRightPanelState((prev) => (prev === panel ? 'none' : panel));
+  }, []);
+
+  /** 列会话工作区目录：sessionId 缺失（未进会话）直接回 null，不发无意义 IPC。 */
+  const listDir = useCallback(
+    async (relPath: string): Promise<FsEntry[] | null> => {
+      if (!sessionId) return null;
+      const res = await call(() => window.axon.invoke('fs.listDir', { sessionId, relPath }));
+      return res ? res.entries : null;
+    },
+    [call, sessionId],
+  );
+
+  const readWorkspaceFile = useCallback(
+    async (relPath: string): Promise<FsFile | null> => {
+      if (!sessionId) return null;
+      return (await call(() => window.axon.invoke('fs.readFile', { sessionId, relPath }))) ?? null;
+    },
+    [call, sessionId],
+  );
 
   /*
    * 【已从 context 摘除：`patchConfig`，MU-3 切片 8】
@@ -830,6 +927,7 @@ export function AppProvider({ children }: { children: ReactNode }): ReactElement
     agents,
     roles,
     teams,
+    projects,
     pending,
     ledger,
     streams,
@@ -842,10 +940,19 @@ export function AppProvider({ children }: { children: ReactNode }): ReactElement
     sessionView,
     focusPath,
     current: sessions.find((s) => s.record.id === sessionId) ?? null,
+    projectContext,
     go: setScreen,
     openSession,
     createSession,
+    createProject,
+    pickProjectWorkspace,
+    newSessionInProject,
+    clearProjectContext,
     setSessionView: setSessionViewState,
+    rightPanel,
+    setRightPanel,
+    listDir,
+    readWorkspaceFile,
     setFocus: (path) => {
       setFocusPath(path);
       void loadMessages(path);

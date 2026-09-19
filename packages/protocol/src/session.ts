@@ -167,6 +167,8 @@ export interface SessionRecord {
   title: string;
   /** 工作目录（成员的工具默认落在这里；S0 的「/works/prjs/demo」）。 */
   cwd: string;
+  /** 项目会话的归属；缺省代表历史/自由会话。 */
+  projectId?: string;
   executor: SessionExecutor;
   /** executor='team' 时的团队名（`~/.axon/teams/<name>.json`）。 */
   teamId?: string;
@@ -282,6 +284,11 @@ export interface CreateSessionPayload {
   title: string;
   /** 缺省用 config.defaultCwd 或 process.cwd()。 */
   cwd?: string;
+  /**
+   * 归属项目。传了则主进程以项目工作空间覆盖 cwd 并把 projectId 固化到记录；
+   * 找不到项目时创建失败。
+   */
+  projectId?: string;
   executor: SessionExecutor;
   teamId?: string;
   members?: AdhocMemberSpec[];

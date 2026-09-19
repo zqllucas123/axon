@@ -223,6 +223,12 @@ export class AxonHost {
   /** 团队表（由 TeamBridge 灌入，与 roles 同构）。 */
   private teams = new Map<string, TeamEntry>();
   private teamIssues: TeamIssue[] = [];
+  /**
+   * 项目 cwd 解析器（由 index.ts 注入 ProjectStore.get）。
+   * createSession 收到 projectId 时用它把项目工作空间固化成会话 cwd。
+   * 缺省返回 undefined —— 没接项目层时 projectId 视为无效。
+   */
+  private projectCwdResolver: (projectId: string) => string | undefined = () => undefined;
   /** 会话元数据（落盘挂点见 onSessionChanged；M5 起由构造参数注入初始记录）。 */
   private readonly sessions: SessionStore;
   /**
@@ -440,6 +446,11 @@ export class AxonHost {
     return { entries: [...this.teams.values()], issues: [...this.teamIssues] };
   }
 
+  /** 注入项目 cwd 解析器（index.ts 用 ProjectStore.get 接线）。 */
+  setProjectCwdResolver(resolver: (projectId: string) => string | undefined): void {
+    this.projectCwdResolver = resolver;
+  }
+
   list(): AgentSnapshot[] {
     return this.registry.list();
   }
@@ -558,7 +569,18 @@ export class AxonHost {
     const plan = this.planFor(payload.executor, payload.teamId, payload.members);
     const sessionId = newSessionId();
     const rootPath = sessionRootPath(sessionId);
-    const cwd = payload.cwd ?? this.runtime.defaultCwd ?? process.cwd();
+    // 项目会话：以项目工作空间为准，拒绝客户端用另一个 cwd 伪造归属；
+    // 找不到项目就报错，不静默落到默认目录（否则会创建悬空归属会话）。
+    let projectId: string | undefined;
+    let cwd: string;
+    if (payload.projectId !== undefined) {
+      const projectCwd = this.projectCwdResolver(payload.projectId);
+      if (projectCwd === undefined) throw new Error(`项目不存在：${payload.projectId}`);
+      projectId = payload.projectId;
+      cwd = projectCwd;
+    } else {
+      cwd = payload.cwd ?? this.runtime.defaultCwd ?? process.cwd();
+    }
     // 并发上限：团队档是默认值，会话档**只能更严**（与预算同一条规则）。
     const teamLimit = plan.team.maxConcurrent ?? 0;
     const limit =
@@ -585,6 +607,7 @@ export class AxonHost {
       id: sessionId,
       title,
       cwd,
+      ...(projectId !== undefined ? { projectId } : {}),
       executor: payload.executor,
       status: 'open',
       createdAt: now,

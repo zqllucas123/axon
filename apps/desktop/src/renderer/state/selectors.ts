@@ -13,6 +13,7 @@ import type {
   ContentBlockLike,
   MessageLike,
   PendingRequest,
+  ProjectRecord,
   SessionSummary,
   UsageTotals,
 } from '@axon/protocol';
@@ -106,6 +107,37 @@ export function splitSessions(sessions: SessionSummary[]): {
   const recent: SessionSummary[] = [];
   for (const s of byRecent) (isTerminal(s.status) ? recent : active).push(s);
   return { active, recent };
+}
+
+/** 一个项目及其会话切片（左栏「项目」分组的数据源）。 */
+export interface ProjectSessionGroup {
+  project: ProjectRecord;
+  sessions: SessionSummary[];
+}
+
+/**
+ * 项目 → 会话分组。纯展示：
+ * - 以 projects 顺序生成分组（空项目也在内，返回 sessions: []）；
+ * - 只把 `record.projectId === project.id` 的会话放进对应项目；
+ * - 会话按 updatedAt 倒序（与左栏其它列表口径一致）；
+ * - 不匹配/无 projectId 的会话不在这里出现（仍走全局「进行中/最近」分组）。
+ */
+export function groupSessionsByProject(
+  projects: ProjectRecord[],
+  sessions: SessionSummary[],
+): ProjectSessionGroup[] {
+  const byProject = new Map<string, SessionSummary[]>();
+  for (const s of sessions) {
+    const pid = s.record.projectId;
+    if (pid === undefined) continue;
+    const list = byProject.get(pid) ?? [];
+    list.push(s);
+    byProject.set(pid, list);
+  }
+  return projects.map((project) => ({
+    project,
+    sessions: (byProject.get(project.id) ?? []).sort((a, b) => b.record.updatedAt - a.record.updatedAt),
+  }));
 }
 
 /** 顶栏 chip 的跨会话口径（全局屏用；会话屏一律用 sessionChips）。 */

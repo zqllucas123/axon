@@ -19,6 +19,7 @@ import type {
   UsageTotals,
 } from './agent.ts';
 import type { ConfigIssue, ConfigPatch, ConfigSnapshot } from './config.ts';
+import type { ProjectIssue, ProjectRecord } from './project.ts';
 import type {
   Adoption,
   AdoptionPolicy,
@@ -196,6 +197,27 @@ export interface CommandMap {
   };
   'team.delete': { payload: { name: string }; result: { deleted: boolean; errors: TeamIssue[] } };
 
+  // ── 项目（左栏「项目」模块）──
+
+  /** 项目列表（零会话项目也在内）+ 加载期问题（坏文件等）。 */
+  'project.list': {
+    payload: Record<string, never>;
+    result: { entries: ProjectRecord[]; issues: ProjectIssue[] };
+  };
+  /** 创建项目（仅项目元数据，不隐式建会话）；校验失败 accepted=false 带 errors。 */
+  'project.create': {
+    payload: { name: string; cwd: string };
+    result: { accepted: boolean; errors: ProjectIssue[]; project?: ProjectRecord };
+  };
+  /**
+   * 打开原生目录选择器选项目工作空间。渲染进程零 Node，不能自己弹 dialog；
+   * cancelled=true 表示用户取消（此时 path 缺省，UI 不应改写输入）。
+   */
+  'project.pickWorkspace': {
+    payload: Record<string, never>;
+    result: { cancelled: boolean; path?: string };
+  };
+
   // ── MU-1：配置（S8 设置窗）──
 
   'config.get': { payload: Record<string, never>; result: ConfigSnapshot };
@@ -233,6 +255,38 @@ export interface CommandMap {
   /** 打开（或聚焦）设置窗。单例语义在主进程，渲染层只发意图。 */
   'window.openSettings': { payload: Record<string, never>; result: { opened: true } };
 
+  // ── 工作区文件浏览（S2 顶部「打开文件」）──
+
+  /**
+   * 列出会话工作区（`record.cwd`）下某目录的条目。
+   *
+   * 为什么带 sessionId 而不是任意路径：渲染进程零 Node，绝不能让它指定任意路径
+   * 让主进程去 readdir —— 那等于把整个文件系统暴露给界面层。sessionId 在主进程
+   * 解成 `record.cwd` 作为**沙箱根**，`relPath` 经 resolveInCwd 校验后必须仍落在根内，
+   * 否则拒绝（防 `../` 目录穿越）。与 `shell.openPath` 的枚举同一条安全原则。
+   */
+  'fs.listDir': {
+    payload: { sessionId: string; relPath: string };
+    result: { root: string; relPath: string; entries: FsEntry[] };
+  };
+  /**
+   * 读取会话工作区内某文件用于预览。沙箱校验同 `fs.listDir`。
+   *
+   * 大文件（> 1MB）只回 `tooLarge` 占位、不读内容，避免把几十 MB 的日志/二进制
+   * 塞进 IPC 把渲染层打爆。文本按 utf8，图片按 base64（配 mime）供 <img> 直接渲染，
+   * 其余二进制回 tooLarge=false 且 encoding='base64' 由 UI 决定是否下载。
+   */
+  'fs.readFile': {
+    payload: { sessionId: string; relPath: string };
+    result: {
+      content: string;
+      encoding: 'utf8' | 'base64';
+      tooLarge?: boolean;
+      mime?: string;
+      size: number;
+    };
+  };
+
   // ── M6：Provider 连接测试 ──
 
   /**
@@ -241,15 +295,29 @@ export interface CommandMap {
    * 为什么独立一条命令而不复用 config.get：config.get 只是读配置快照，
    * 不实际发 HTTP 请求；设置窗「测试连接」按钮需要真实的延迟数字和
    * 可用模型列表，必须对网关发请求才能拿到。
+   *
+   * 两种模式：
+   * - `payload = {}`：GET /models 拉取网关可用模型清单（result.models）。
+   * - `payload = { model }`：对该模型发一次极小的 chat/completions 探测。
+   *   /models 探测不可靠——不少 OpenAI 兼容网关根本没实现 /v1/models，
+   *   但 /chat/completions 完全可用；单模型可用性只有真跑一次才作数。
    */
   'provider.test': {
-    payload: Record<string, never>;
+    payload: { model?: string };
     result: { ok: boolean; latencyMs: number; models: string[]; error?: string };
   };
 }
 
 /** `shell.openPath` 的可达集（主进程解成真路径）。 */
 export type OpenPathKind = 'roles' | 'teams' | 'config' | 'sessions';
+
+/** 工作区目录树的一个条目（`fs.listDir` 返回）。 */
+export interface FsEntry {
+  name: string;
+  kind: 'dir' | 'file';
+  /** 仅文件有；目录省略。 */
+  size?: number;
+}
 
 /**
  * 挂起中的待办（审批 / 提问）。
@@ -391,6 +459,8 @@ export interface EventMap {
 
   /** 团队集合变化（保存/删除/外部改文件后热重载）。UI 直接拿 entries 重绘。 */
   'teams.changed': { entries: TeamEntry[]; issues: TeamIssue[] };
+  /** 项目集合变化（创建/外部改文件后热重载）。UI 直接拿 entries 重绘。 */
+  'projects.changed': { entries: ProjectRecord[]; issues: ProjectIssue[] };
   /** 配置落盘成功（含来自其他途径的变更）；UI 全量重绘而不是局部打补丁。 */
   'config.changed': { config: ConfigSnapshot };
 

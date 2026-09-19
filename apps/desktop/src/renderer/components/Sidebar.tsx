@@ -10,8 +10,9 @@
 
 import { useEffect, useState, type ReactElement } from 'react';
 import { useApp } from '../state/store.tsx';
-import { globalChips, sessionMeta, splitSessions, statusDot } from '../state/selectors.ts';
+import { globalChips, groupSessionsByProject, sessionMeta, splitSessions, statusDot } from '../state/selectors.ts';
 import { Icon, type IconName } from '../icons.tsx';
+import { ProjectCreateDialog } from './ProjectCreateDialog.tsx';
 import type { Screen } from '../state/types.ts';
 import type { SessionSummary } from '@axon/protocol';
 
@@ -31,10 +32,21 @@ const NAV: Array<{ id: Screen; icon: IconName; label: string }> = [
 ];
 
 export function Sidebar(): ReactElement {
-  const { screen, go, sessions, sessionId, openSession, pending, openSettings, openPath } = useApp();
+  const { screen, go, sessions, sessionId, openSession, pending, projects, newSessionInProject, openSettings, openPath } = useApp();
   const { active, recent } = splitSessions(sessions);
   const chips = globalChips({ sessions, pending });
+  const projectGroups = groupSessionsByProject(projects.entries, sessions);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [projectDialog, setProjectDialog] = useState(false);
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+
+  const toggleProject = (id: string) =>
+    setCollapsed((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
 
   useEffect(() => {
     if (!menuOpen) return;
@@ -67,11 +79,12 @@ export function Sidebar(): ReactElement {
 
   return (
     <aside className="sidebar">
-      <div className="traffic">
-        <span className="dot r" />
-        <span className="dot y" />
-        <span className="dot g" />
-      </div>
+      {/*
+        原型里的假交通灯（三个红黄绿 `<span className="dot">`）已删：主窗没有设
+        `titleBarStyle`，用的是**原生标题栏**，macOS 自己在左上角画了一组真交通灯。
+        原型是浏览器里的静态稿才需要自绘窗控；这里再画一组，屏幕上就是两组圆点，
+        而假的那组还点不动。（`.traffic` 样式随本次一起删。）
+      */}
 
       {/*
         brand 区只留品牌字。原本这里摆着两个 `opacity:0.5` 的占位图标（搜索 / 通知），
@@ -101,6 +114,71 @@ export function Sidebar(): ReactElement {
       </nav>
 
       <div className="side-scroll">
+        {/* 项目模块：可折叠分组，项目下挂归属会话 + 项目内新建会话 */}
+        <div className="side-section">
+          <span>项目</span>
+          <span className="spacer" />
+          <button className="act" title="新建项目" data-smoke="new-project" onClick={() => setProjectDialog(true)}>
+            <Icon name="plus" size={14} />
+          </button>
+        </div>
+        {projectGroups.length === 0 ? (
+          <div className="empty" style={{ padding: '4px 18px 8px' }}>
+            还没有项目 —— 点右上「+」建一个，指定工作空间后即可在其中新建会话。
+          </div>
+        ) : (
+          projectGroups.map(({ project, sessions: rows }) => {
+            const isOpen = !collapsed.has(project.id);
+            return (
+              <div key={project.id} className="proj-group" data-smoke="project-group" data-project={project.id}>
+                <button
+                  className="proj-head"
+                  aria-expanded={isOpen}
+                  data-smoke="project-head"
+                  onClick={() => toggleProject(project.id)}
+                  title={project.cwd}
+                >
+                  <Icon name={isOpen ? 'chevD' : 'chevR'} size={14} cls="caret" />
+                  <span className="label">{project.name}</span>
+                  <span className="meta">{rows.length}</span>
+                </button>
+                {isOpen ? (
+                  <div className="proj-body">
+                    {rows.length === 0 ? (
+                      <div className="empty" style={{ padding: '2px 18px 4px 30px' }}>
+                        （还没有会话）
+                      </div>
+                    ) : (
+                      rows.map((s) => (
+                        <button
+                          key={s.record.id}
+                          className={`side-row proj-row ${screen === 's2' && s.record.id === sessionId ? 'is-active' : ''}`}
+                          data-smoke="session-row"
+                          data-session={s.record.id}
+                          onClick={() => openSession(s.record.id)}
+                          title={s.record.title}
+                        >
+                          <span className={`sdot ${statusDot(s.status)}`} />
+                          <span className="label">{s.record.title}</span>
+                          <span className="meta">{sessionMeta(s)}</span>
+                        </button>
+                      ))
+                    )}
+                    <button
+                      className="proj-newsession"
+                      data-smoke="project-new-session"
+                      onClick={() => newSessionInProject(project.id)}
+                    >
+                      <Icon name="plus" size={14} />
+                      <span>新建会话</span>
+                    </button>
+                  </div>
+                ) : null}
+              </div>
+            );
+          })
+        )}
+
         <div className="side-section">
           <span>进行中</span>
           <span className="spacer" />
@@ -131,7 +209,7 @@ export function Sidebar(): ReactElement {
       {menuOpen ? (
         <div className="menu menu-up" onClick={(e) => e.stopPropagation()}>
           {/* MU-3：两条死链接上真落点（设置窗单例 / shell.openPath）。 */}
-          <button className="menu-item" data-smoke="menu-settings" onClick={() => void openSettings()}>
+          <button className="menu-item" data-smoke="menu-settings" onClick={() => openSettings()}>
             <Icon name="settings" size={16} />
             <span>设置…</span>
             <span className="mk">⌘,</span>
@@ -167,6 +245,8 @@ export function Sidebar(): ReactElement {
           待批 {chips.pendingAll}
         </button>
       </div>
+
+      {projectDialog ? <ProjectCreateDialog onClose={() => setProjectDialog(false)} /> : null}
     </aside>
   );
 }

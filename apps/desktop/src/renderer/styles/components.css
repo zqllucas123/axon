@@ -23,14 +23,9 @@
   position: relative; /* 账号菜单的定位上下文 */
 }
 
-.traffic {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  height: 44px;
-  padding: 0 14px;
-  flex: none;
-}
+/* `.traffic` / `.traffic .dot` 及三个颜色类已删：主窗用原生标题栏，macOS 已经
+   画了真交通灯，自绘一组只会变成两组圆点（见 Sidebar.tsx 同处注释）。
+   侧栏顶部的留白改由 `.brand` 自己撑。 */
 .traffic .dot { width: 12px; height: 12px; border-radius: 50%; }
 .traffic .r { background: #ff5f57; }
 .traffic .y { background: #febc2e; }
@@ -123,6 +118,125 @@
 .side-row:hover { background: var(--bg-hover); }
 .side-row.is-active { background: var(--bg-active); color: var(--text); }
 .side-row .meta { margin-left: auto; font-size: var(--fs-11); color: var(--text-dim); }
+
+/* ---------- 项目模块（左栏可折叠分组） ---------- */
+.proj-group { margin-top: 2px; }
+.proj-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  margin: 0 10px;
+  padding: 6px 10px;
+  border-radius: var(--r-sm);
+  font-size: var(--fs-14);
+  color: var(--text);
+  text-align: left;
+  width: calc(100% - 20px);
+}
+.proj-head:hover { background: var(--bg-hover); }
+.proj-head .caret { color: var(--text-dim); flex: none; }
+.proj-head .label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
+.proj-head .meta { margin-left: auto; font-size: var(--fs-11); color: var(--text-dim); flex: none; }
+.proj-body { padding: 2px 0 4px; }
+/* 项目内会话行：比顶层会话行多一层缩进，视觉上归到项目下 */
+.side-row.proj-row { margin-left: 22px; margin-right: 10px; }
+.proj-newsession {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 2px 10px 2px 30px;
+  padding: 5px 8px;
+  border-radius: var(--r-sm);
+  font-size: var(--fs-12);
+  color: var(--text-dim);
+  text-align: left;
+}
+.proj-newsession:hover { background: var(--bg-hover); color: var(--text-secondary); }
+.proj-newsession .i { flex: none; }
+
+/* 项目上下文横幅（S0 顶部） */
+.proj-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 16px;
+  padding: 8px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: var(--bg-elev);
+  font-size: var(--fs-13);
+  color: var(--text-secondary);
+}
+.proj-banner .i { color: var(--text-muted); flex: none; }
+.proj-banner .pb-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.proj-banner .spacer { flex: 1; }
+.proj-banner .mono { font-family: var(--font-mono); font-size: var(--fs-11); color: var(--text-dim); }
+.proj-banner .act { color: var(--sem-info); white-space: nowrap; padding: 3px 6px; border-radius: var(--r-xs); }
+.proj-banner .act:hover { background: var(--bg-hover); }
+
+/* ---------- 弹窗（新建项目；可复用的居中模态） ---------- */
+.dialog-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.28);
+}
+.dialog {
+  width: 440px;
+  max-width: calc(100vw - 48px);
+  background: var(--bg-elev);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-md);
+  display: flex;
+  flex-direction: column;
+}
+.dialog-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--line);
+  font-size: var(--fs-14);
+}
+.dialog-head .name { font-weight: 600; }
+.dialog-head .spacer { flex: 1; }
+.dialog-head .act { color: var(--text-dim); padding: 3px; border-radius: var(--r-xs); }
+.dialog-head .act:hover { background: var(--bg-hover); color: var(--text-secondary); }
+.dialog-body { padding: 16px; display: flex; flex-direction: column; gap: 14px; }
+.dialog-field { display: flex; flex-direction: column; gap: 6px; }
+.dialog-label { font-size: var(--fs-12); color: var(--text-secondary); }
+.dialog-field-row { display: flex; gap: 8px; align-items: center; }
+.dialog-field-row .dialog-input { flex: 1; min-width: 0; }
+.dialog-input {
+  height: 32px;
+  padding: 0 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-sm);
+  background: var(--bg-elev);
+  color: var(--text);
+  font-size: var(--fs-13);
+  width: 100%;
+}
+.dialog-input:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px color-mix(in oklch, var(--accent) 20%, transparent);
+}
+.dialog-input.mono { font-family: var(--font-mono); font-size: var(--fs-12); }
+.dialog-hint { font-size: var(--fs-11); color: var(--text-dim); }
+.dialog-errors { display: flex; flex-direction: column; gap: 4px; }
+.dialog-err { font-size: var(--fs-12); color: var(--sem-err); }
+.dialog-foot {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 12px 16px;
+  border-top: 1px solid var(--line);
+}
 
 /* 当前会话的团队条 */
 .team-strip {
@@ -670,3 +784,21 @@ button.stat { display: block; width: 100%; text-align: left; cursor: pointer; }
 button.stat:hover { border-color: var(--line-strong); background: var(--bg-sunken); }
 /* 多行输入（实现新增：.inp 是为单行 input 定的高；textarea 要走自适应高度） */
 textarea.inp-area { height: auto; padding: 8px 10px; line-height: 1.6; resize: vertical; }
+
+/* 顶栏右侧面板开关（文件 / 属性）：默认收起，点亮表示当前展开的右栏 */
+.panel-toggles { display: flex; align-items: center; gap: 6px; margin-right: 10px; }
+.panel-toggles .btn.is-on { background: var(--bg-active); color: var(--text); border-color: var(--line-strong); }
+
+/* 右栏「打开文件」面板：左目录树 + 右预览，比属性栏宽以容纳预览 */
+.ws-panel { flex: none; width: 420px; display: flex; flex-direction: column; min-height: 0; border-left: 1px solid var(--line); }
+.ws-head { display: flex; align-items: center; gap: 8px; padding: 10px 14px; border-bottom: 1px solid var(--line); color: var(--text-muted); font-size: var(--fs-13); }
+.ws-head .ws-root { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl; text-align: left; }
+.ws-body { flex: 1; display: flex; min-height: 0; }
+.ws-tree { width: 168px; flex: none; overflow-y: auto; padding: 6px 4px; border-right: 1px solid var(--line); }
+.ws-preview { flex: 1; min-width: 0; overflow: auto; padding: 14px 16px; font-size: var(--fs-13); }
+.ws-preview pre { margin: 0; white-space: pre-wrap; word-break: break-word; font-family: var(--font-mono); font-size: var(--fs-12); line-height: 1.6; }
+.ws-preview img { max-width: 100%; height: auto; }
+.ws-preview.md { line-height: 1.7; }
+.ws-preview.md pre { background: var(--bg-sunken); padding: 10px 12px; border-radius: var(--r-sm); }
+.ws-preview-empty, .ws-empty { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; height: 100%; color: var(--text-dim); font-size: var(--fs-13); text-align: center; padding: 20px; }
+.ws-empty b { color: var(--text-muted); }

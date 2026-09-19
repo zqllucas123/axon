@@ -27,6 +27,8 @@ let proc = null;
 const rolesDir = launch ? await mkdtemp(join(tmpdir(), 'axon-roles-')) : null;
 // M5：会话落盘根也要隔离（绝不碰 ~/.axon）—— 重启幕必须落在同一个根上。
 const sessionsDir = launch ? await mkdtemp(join(tmpdir(), 'axon-sessions-')) : null;
+// 项目库同样隔离（绝不碰真用户的 ~/.axon/projects）。
+const projectsDir = launch ? await mkdtemp(join(tmpdir(), 'axon-projects-')) : null;
 
 /** 拉起应用（第一次开机与重启幕共用；重启 = 同一份 env 再 spawn 一次）。 */
 function launchApp() {
@@ -40,6 +42,7 @@ function launchApp() {
       ELECTRON_ENABLE_LOGGING: '1',
       AXON_ROLES_DIR: rolesDir,
       AXON_SESSIONS_DIR: sessionsDir,
+      AXON_PROJECTS_DIR: projectsDir,
       // 冒烟绝不允许碰真网关：开发机上 ~/.axon/config.json 往往配了真 key，
       // 而 AXON_SMOKE_SCRIPT 只替换 streamFn —— 靠它「恰好不发请求」是巧合不是保证。
       AXON_PROVIDER: 'faux',
@@ -280,6 +283,13 @@ try {
   log(sessionRow, '左栏选中冒烟会话（session.created → React 重渲染 → 点击选中）');
   if (!sessionRow) exit(1);
 
+  // 右栏默认收起（rightPanel='none'）：属性面板（含成员树 / 账本）改为顶栏「属性」按钮显式打开。
+  // rightPanel 是应用级状态，打开一次后跨会话切换保持，所以只需在这里点一次。
+  const propsToggled = await until(
+    `!!document.querySelector('[data-smoke="toggle-props"]')`,
+  );
+  if (propsToggled) await evalJs(`document.querySelector('[data-smoke="toggle-props"]').click()`);
+
   const rootNode = await until(
     `!!document.querySelector('.inspector [data-smoke="member-row"][data-path="${session.root}"]')`,
   );
@@ -357,6 +367,68 @@ try {
   );
   log(parked, `故意留一条未批的审批（${parkedAgent} 停在 waiting，充当 S5/S7 的标的）`);
   if (!parked) exit(1);
+
+  // ── 6.7 项目模块：创建项目 → 项目上下文新建会话 → 会话归到项目下。
+  //     必须排在烧钱幕**之前**：预算 frozen 是终态，会挡下之后所有 session 创建。
+  //     原生目录选择器无法用 CDP 驱动，工作空间走「路径输入」这条路
+  //     （project.create 直接 invoke，等价于弹窗里手输路径后点「创建项目」）。
+  const projCwd = '/tmp/axon-smoke-project';
+  const proj = await evalJs(
+    `window.axon.invoke('project.create', { name: '冒烟项目', cwd: '${projCwd}' })
+       .then(r => r.accepted ? r.project : null)`,
+  );
+  log(!!proj && !!proj.id, `project.create 成功（${proj?.id}）`);
+  if (!proj || !proj.id) exit(1);
+
+  // projects.changed → React 重渲染 → 左栏出现项目分组（哪怕零会话也在）
+  const projGroup = await until(
+    `!!document.querySelector('[data-smoke="project-group"][data-project="${proj.id}"]')`,
+  );
+  log(projGroup, '左栏「项目」分组出现（projects.changed → 重渲染，零会话也显示）');
+  if (!projGroup) exit(1);
+
+  // 项目内「新建会话」→ 进 S0，且带项目上下文横幅
+  await evalJs(
+    `document.querySelector('[data-smoke="project-group"][data-project="${proj.id}"] [data-smoke="project-new-session"]').click()`,
+  );
+  const projCtx = await until(
+    `!!document.querySelector('[data-smoke="project-context"]') &&
+     !!document.querySelector('[data-smoke="session-task"]')`,
+  );
+  log(projCtx, '项目内「新建会话」→ S0 带项目上下文横幅（工作空间 = 项目 cwd）');
+  if (!projCtx) exit(1);
+
+  // 填任务并开始 → 创建会话（主进程以项目 cwd 固化 projectId），进 S2。
+  // React 受控 textarea：必须用原型上的原生 value setter，否则 React 收不到变更。
+  await evalJs(
+    `(() => { const t = document.querySelector('[data-smoke="session-task"]');
+       const set = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value').set;
+       set.call(t, '项目里的第一个任务');
+       t.dispatchEvent(new Event('input', { bubbles: true })); })()`,
+  );
+  await until(`!document.querySelector('[data-smoke="start-session"]')?.disabled`);
+  await evalJs(`document.querySelector('[data-smoke="start-session"]').click()`);
+
+  // 新会话固化 projectId + 项目工作空间（主进程按项目解析 cwd，防伪造归属）
+  const projSession = await until(
+    `window.axon.invoke('session.list', {}).then(l =>
+       l.some(s => s.record.projectId === '${proj.id}' && s.record.cwd === '${projCwd}'))`,
+  );
+  log(projSession, '项目会话固化 projectId + 项目工作空间（cwd 由主进程按项目解析）');
+  if (!projSession) exit(1);
+
+  // 新会话即时出现在项目分组下（session.created → 按 projectId 归组）
+  const projSessionRow = await until(
+    `!!document.querySelector('[data-smoke="project-group"][data-project="${proj.id}"] [data-smoke="session-row"]')`,
+  );
+  log(projSessionRow, '新会话即时出现在项目分组下（session.created → 按 projectId 归组）');
+  if (!projSessionRow) exit(1);
+
+  // 回到原冒烟会话：烧钱幕要在它的分身 `spawned` 上继续发 prompt。
+  await evalJs(
+    `document.querySelector('.side-scroll [data-smoke="session-row"][data-session="${session.id}"]')?.click()`,
+  );
+  await until(`!!document.querySelector('.inspector [data-smoke="member-row"][data-path="${session.root}"]')`);
 
   // ─ 7. 预算熔断（M3 切片 6 / MU-2 视觉）：含「烧钱」的 prompt×2 走完 warning → frozen。
   //     MU-2 起冻结信号是**顶栏预算 chip 变色**（原型 shell.js:258 的 warn/danger 两档），
@@ -480,9 +552,14 @@ try {
   );
   log(s6, 'S6 预算与用量：三指标 + 按会话排行（只读 session.list 的 usage）');
   if (!s6) exit(1);
+  // 会话档位取真值：全局冻结是事件驱动（即时），而会话 usage 在 turn.end 才聚合，
+  // 两者有一拍时差 —— 轮询到会话档位落到 frozen 为止（单次读会撞上 warning 的中间态）。
+  const tierFrozen = await until(
+    `document.querySelector('[data-smoke="budget-tier"]')?.dataset.tier === 'frozen'`,
+  );
   const tier = await evalJs(`document.querySelector('[data-smoke="budget-tier"]')?.dataset.tier ?? null`);
-  log(tier === 'frozen' || tier === 'hard' || tier === 'soft', `S6 最严会话档位取真值（${tier}）`);
-  if (!tier || tier === 'none') exit(1);
+  log(tierFrozen, `S6 最严会话档位取真值（${tier}）`);
+  if (!tierFrozen) exit(1);
   // 文案自查（拍板 P-8）：BudgetGuard 无日切，全屏不得出现「今日」。
   const noToday = await evalJs(
     `!(document.querySelector('[data-screen="s6"]')?.textContent ?? '').includes('今日')`,
@@ -514,60 +591,41 @@ try {
   );
   if (loadedAfterS7 !== loadedBefore) exit(1);
 
-  // ── 7.7 S8 设置窗：单例 + 双窗同步 + 外观真生效
-  //     这一幕是本片唯一的**跨窗**验收：配置的真相在主进程，两个窗各自订
-  //     `config.changed`。只在设置窗里看自己变了是不够的 —— R-8 就是这么漏掉的：
-  //     当时 `ui.*` 能存能读能同步，就是没人把它写到 DOM 上。
-  const opened = await evalJs(`window.axon.invoke('window.openSettings', {}).then(r => r.opened)`);
-  log(opened === true, '设置窗打开（window.openSettings → 独立 BrowserWindow，拍板 P-2）');
-  if (opened !== true) exit(1);
+  // ── 7.7 S8 设置屏（内嵌主窗，不再是独立 BrowserWindow）
+  //     点左栏菜单「设置…」→ go('s8') → 主窗路由到 SettingsScreen；
+  //     外观配置改完 → applyAppearance 在同一窗生效。
+  //     菜单是条件渲染（menuOpen 为真才在 DOM 里），所以先点账号按钮展开它。
+  await evalJs(`document.querySelector('.side-foot .user-btn').click()`);
+  await until(`!!document.querySelector('[data-smoke="menu-settings"]')`);
+  await evalJs(`document.querySelector('[data-smoke="menu-settings"]').click()`);
+  const s8Ready = await until(`!!document.querySelector('[data-smoke="settings-win"]')`);
+  log(s8Ready, 'S8 设置屏渲染（主窗内嵌，go(\'s8\') 路由到 SettingsScreen）');
+  if (!s8Ready) exit(1);
 
-  const stPage = await getPageTarget((t) => t.url.includes('#settings'));
-  const st = await attach(stPage);
-  const stReady = await (async () => {
-    for (let i = 0; i < 40; i++) {
-      if (await st.ev(`!!document.querySelector('[data-smoke="settings-win"]')`)) return true;
-      await new Promise((r) => setTimeout(r, 250));
-    }
-    return false;
-  })();
-  log(stReady, '设置窗渲染（同一份 renderer.js，按 #settings 分叉到 SettingsApp）');
-  if (!stReady) exit(1);
-
-  // 再发一次开窗：必须还是一个窗（单例）。不然每按一次 ⌘, 开一个，
-  // 而它们共享同一份配置，多窗同时改同一字段就是互相覆盖。
-  await evalJs(`window.axon.invoke('window.openSettings', {})`);
-  await new Promise((r) => setTimeout(r, 500));
-  const stCount = await countSettingsWindows();
-  log(stCount === 1, `重复开窗仍是单例（设置窗 ${stCount} 个）`);
-  if (stCount !== 1) exit(1);
-
-  // 设置窗改外观 → 主窗必须跟着变（不止是读到新值，而是 DOM 真的变了）。
-  await st.ev(
+  // 外观配置改完 → 同一窗 DOM 真生效（R-8）
+  await evalJs(
     `window.axon.invoke('config.patch', { patch: { 'ui.density': 'compact', 'ui.fontSize': 18 } })`,
   );
   const applied = await until(
     `document.body.dataset.density === 'compact' &&
      getComputedStyle(document.body).getPropertyValue('--fs-msg').trim() === '18px'`,
   );
-  log(applied, '设置窗改外观 → 主窗 DOM 真生效（config.changed → applyAppearance，台账 R-8）');
+  log(applied, '设置屏改外观 → 主窗 DOM 真生效（config.changed → applyAppearance，台账 R-8）');
   if (!applied) exit(1);
-  const stApplied = await st.ev(`document.body.dataset.density === 'compact'`);
-  log(stApplied, '设置窗自己也跟着变（否则用户在哪里改就在哪里看不到效果）');
-  if (!stApplied) exit(1);
 
-  // 重置：删白名单叶子而不是逐个置 null（后者会被 env-locked 挡住 ⇒ 「重置了但没
-  // 重置干净」，见 §十三 T-3）。验收点是两个窗都回缺省。
-  await st.ev(`window.axon.invoke('config.reset', {})`);
+  // 重置回缺省
+  await evalJs(`window.axon.invoke('config.reset', {})`);
   const resetOk = await until(
     `document.body.dataset.density === undefined &&
      getComputedStyle(document.body).getPropertyValue('--fs-msg').trim() === '15px'`,
   );
-  log(resetOk, 'config.reset 后两窗外观回缺省（删白名单叶子，不走 patch）');
+  log(resetOk, 'config.reset 后外观回缺省（删白名单叶子，不走 patch）');
   if (!resetOk) exit(1);
-  st.close();
 
-  // 回到会话屏：重启幕的「左栏重新列出会话」断言要在稳定态上跑。
+  // 回到会话屏：S8 是整屏接管（无侧栏），先按设置屏自己的「← 返回应用」退出，
+  // 再点侧栏 nav-s1。重启幕的「左栏重新列出会话」断言要在稳定态上跑。
+  await evalJs(`document.querySelector('[data-smoke="settings-back"]').click()`);
+  await until(`!!document.querySelector('[data-smoke="nav-s1"]')`);
   await evalJs(`document.querySelector('[data-smoke="nav-s1"]').click()`);
 
   // ── 8. 重启恢复（M5 §4.5/§4.6）：同一个落盘根、第二次开机

@@ -10,7 +10,27 @@
  * **S8（设置）不在这里** —— 它是独立窗口（拍板 P-2，见 `main/windows.ts`），
  * 不占主窗的屏位。S4（调试台）已在 MU-2 退役，序号不再回收。
  */
-export type Screen = 's0' | 's1' | 's2' | 's3' | 's5' | 's6' | 's7';
+export type Screen = 's0' | 's1' | 's2' | 's3' | 's5' | 's6' | 's7' | 's8';
 
 /** 会话内视图（会话条 seg；ux 02 §3.6：随会话切换重建）。 */
 export type SessionView = 'chat' | 'ledger' | 'usage';
+
+/**
+ * 右栏单槽（S2 会话屏）。默认 `'none'` —— 右栏收起、主区占满宽。
+ *
+ * 为什么是单槽互斥而非各自常显：右栏窄（`--inspector-w`），四块属性面板 + 文件树
+ * 挤在一起既拥挤又抢注意力（用户 2026-09-19 反馈）。顶栏两枚按钮分别点开
+ * `'props'`（原 Inspector 四面板）与 `'files'`（工作区文件树 + 预览），再点则回 `'none'`。
+ */
+export type RightPanel = 'none' | 'props' | 'files';
+
+/**
+ * 「在某项目下新建会话」的临时上下文（纯 UI，不落盘、不入协议）。
+ *
+ * 用户从项目入口进入 S0 时置上它：S0 据此显示项目名/工作空间，并在创建时
+ * 只传 projectId（cwd 由主进程从项目解析）。从普通「新建会话」入口进入时清空，
+ * 会话不归属任何项目、继续走全局默认工作目录。
+ */
+export interface ProjectContext {
+  projectId: string;
+}

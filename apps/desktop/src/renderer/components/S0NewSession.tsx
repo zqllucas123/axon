@@ -60,7 +60,7 @@ function titleOfTask(task: string): string {
 /** 「今天 / 昨天 / 9-14」口径已归并到 `selectors.relDay`（MU-3 切片 8）。 */
 
 export function S0NewSession(): ReactElement {
-  const { config, teams, sessions, createSession, openSession, go } = useApp();
+  const { config, teams, sessions, projects, projectContext, clearProjectContext, createSession, openSession, go } = useApp();
   const [picked, setPicked] = useState<SessionExecutor | null>(null);
   const [task, setTask] = useState('');
   const [teamId, setTeamId] = useState<string | null>(null);
@@ -68,7 +68,9 @@ export function S0NewSession(): ReactElement {
 
   // 默认选中项来自配置（defaultExecutor）—— S8 改配置要立刻反映到这张屏，不许写死 engine。
   const executor = picked ?? config?.config.defaultExecutor ?? 'engine';
-  const cwd = config?.config.defaultCwd;
+  // 有项目上下文时：工作目录 = 项目工作空间（由主进程按 projectId 解析，这里只做展示）。
+  const project = projectContext ? projects.entries.find((p) => p.id === projectContext.projectId) ?? null : null;
+  const cwd = project ? project.cwd : config?.config.defaultCwd;
   const needTeam = executor === 'team';
   const ready = task.trim().length > 0 && (!needTeam || teamId !== null) && !busy;
   const { recent } = splitSessions(sessions);
@@ -78,7 +80,8 @@ export function S0NewSession(): ReactElement {
     setBusy(true);
     const s = await createSession({
       title: titleOfTask(task),
-      ...(cwd ? { cwd } : {}),
+      // 项目会话只传 projectId，cwd 由主进程从项目解析（防伪造归属）；否则用默认目录。
+      ...(project ? { projectId: project.id } : cwd ? { cwd } : {}),
       executor,
       ...(needTeam && teamId ? { teamId } : {}),
       initialPrompt: task.trim(),
@@ -99,6 +102,19 @@ export function S0NewSession(): ReactElement {
                 中途发现做不动了再叫人。
               </p>
             </div>
+
+            {project ? (
+              <div className="proj-banner" data-smoke="project-context">
+                <Icon name="folder" size={14} />
+                <span className="pb-text">
+                  正在 <b>{project.name}</b> 项目下新建会话 · <span className="mono">{project.cwd}</span>
+                </span>
+                <span className="spacer" />
+                <button className="act" onClick={clearProjectContext} data-smoke="project-context-exit">
+                  退出项目
+                </button>
+              </div>
+            ) : null}
 
             <div className="composer" style={{ maxWidth: 'none', marginBottom: 22 }}>
               <textarea
