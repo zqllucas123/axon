@@ -14,6 +14,7 @@ import { S3Teams } from './S3Teams.tsx';
 import { S5Inbox } from './S5Inbox.tsx';
 import { S6Budget } from './S6Budget.tsx';
 import { S7Sessions } from './S7Sessions.tsx';
+import { SettingsScreen } from '../settings/SettingsApp.tsx';
 import { Icon } from '../icons.tsx';
 
 function Screen(): ReactElement {
@@ -31,6 +32,7 @@ function Screen(): ReactElement {
       return <S6Budget />;
     case 's7':
       return <S7Sessions />;
+    // 's8' 不在这里：它在 Shell 里整屏接管，不进主区路由。
     // 's0' 落在 default：它是启动屏，也是任何意外值的兼底。
     default:
       return <S0NewSession />;
@@ -57,6 +59,13 @@ function ErrorBar(): ReactElement | null {
 }
 
 export function Shell(): ReactElement {
+  const { screen } = useApp();
+
+  // S8 设置屏**整屏接管**：它自带一套左导航（`.st-sidebar`），再叠主窗 Sidebar
+  // 就是两条侧栏并列；而且设置没有会话上下文，Topbar 那排会话胶囊（预算/待批/
+  // 活跃会话）在这里语义为空。返回靠设置屏自己的「← 返回」（SettingsApp.tsx）。
+  if (screen === 's8') return <SettingsScreen />;
+
   return (
     <div className="window">
       <Sidebar />

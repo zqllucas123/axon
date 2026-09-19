@@ -346,7 +346,7 @@ export function S6Budget(): ReactElement {
               </div>
               <div className="card-foot">
                 <span className="spacer" />
-                <button className="btn sm ghost" data-smoke="budget-to-settings" onClick={() => void openSettings()}>
+                <button className="btn sm ghost" data-smoke="budget-to-settings" onClick={() => openSettings()}>
                   <Icon name="settings" size={14} />
                   去设置改全局上限
                 </button>

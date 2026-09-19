@@ -19,6 +19,7 @@
  */
 
 import { useState, type ReactElement } from 'react';
+import { useApp } from '../state/store.tsx';
 import { SettingsProvider, useSettings } from './SettingsStore.tsx';
 import { GeneralPane } from './panes/General.tsx';
 import { AppearancePane } from './panes/Appearance.tsx';
@@ -53,11 +54,15 @@ function paneOf(id: PaneId): ReactElement {
 
 function SettingsShell(): ReactElement {
   const { error, dismissError } = useSettings();
+  const { go } = useApp();
   const [pane, setPane] = useState<PaneId>('general');
 
   return (
     <div className="st-win" data-smoke="settings-win">
       <aside className="st-sidebar">
+        <button type="button" className="st-back" data-smoke="settings-back" onClick={() => go('s0')}>
+          ← 返回应用
+        </button>
         <div className="st-nav">
           <div className="st-group">个人</div>
           {PANES.slice(0, 4).map((p) => (
@@ -73,11 +78,23 @@ function SettingsShell(): ReactElement {
           ))}
 
           <div className="st-group">在主窗里管</div>
-          {/* 不做成可点项：没有「设置窗 → 主窗」的导航协议（见文件头）。 */}
-          <p className="st-navnote">
-            团队与角色、预算与用量都在主窗：左栏「团队」进角色与编队，顶栏预算胶囊进用量明细。
-            这里只放影响全局默认值的设置。
-          </p>
+          {/* 现在设置是主窗内的一屏（S8），go() 就能跳——不再需要降级为说明文字。 */}
+          <button
+            type="button"
+            className="st-item"
+            data-smoke="settings-to-teams"
+            onClick={() => go('s3')}
+          >
+            团队与角色 ↗
+          </button>
+          <button
+            type="button"
+            className="st-item"
+            data-smoke="settings-to-budget"
+            onClick={() => go('s6')}
+          >
+            预算与用量 ↗
+          </button>
 
           <div className="st-group">其他</div>
           <button
@@ -110,6 +127,19 @@ function SettingsShell(): ReactElement {
 }
 
 export function SettingsApp(): ReactElement {
+  return (
+    <SettingsProvider>
+      <SettingsShell />
+    </SettingsProvider>
+  );
+}
+
+/**
+ * S8 设置屏 —— 主窗内嵌版（不带独立 BrowserWindow 壳）。
+ * Shell.tsx 路由 s8 时渲染这个，`SettingsProvider` 在这里挂。
+ * 返回主窗靠 Sidebar 的 go()；这里不需要交通灯。
+ */
+export function SettingsScreen(): ReactElement {
   return (
     <SettingsProvider>
       <SettingsShell />

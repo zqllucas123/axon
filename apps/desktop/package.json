@@ -6,6 +6,8 @@
   "main": "./dist/main.mjs",
   "dependencies": {
     "@axon/kernel": "workspace:*",
-    "@axon/protocol": "workspace:*"
+    "@axon/protocol": "workspace:*",
+    "highlight.js": "11.10.0",
+    "marked": "14.1.3"
   }
 }

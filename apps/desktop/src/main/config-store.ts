@@ -237,9 +237,11 @@ export class ConfigStore {
     };
   }
 
-  /** 当前模型解析结论（顶栏「faux（未配置…）」与设置界面共用）。 */
+  /** 当前模型解析结论（顶栏「faux（未配置…）」与设置界面共用）。
+   * 用 rawConfig()（含 keychain 解密的 apiKey）而非 this.raw：keychain 迁移后
+   * this.raw 里已无明文 apiKey，直接解析会误判「未配置 apiKey」而降级到 faux。 */
   modelChoice(): ReturnType<typeof resolveModelChoice> {
-    return resolveModelChoice(this.raw as AxonConfig, this.env);
+    return resolveModelChoice(this.rawConfig(), this.env);
   }
 
   /** 被环境变量实际覆盖的字段（只算「env 真的有值」的那些）。 */
