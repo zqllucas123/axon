@@ -10,12 +10,14 @@ import { useApp } from '../state/store.tsx';
 import { VIEW_LABEL } from '../state/selectors.ts';
 import { Icon } from '../icons.tsx';
 import { Inspector } from './Inspector.tsx';
+import { WorkspacePanel } from './WorkspacePanel.tsx';
 import { MessageStream } from './MessageStream.tsx';
 import { EscalateSheet, LedgerView, UsageView } from './S2Views.tsx';
 import type { SessionView } from '../state/types.ts';
 
 export function S2Session(): ReactElement {
-  const { current, details, sessionView, setSessionView, focusPath, prompt, interrupt, agents } = useApp();
+  const { current, details, sessionView, setSessionView, focusPath, prompt, interrupt, agents, rightPanel } =
+    useApp();
   const [text, setText] = useState('');
   const [sheet, setSheet] = useState(false);
 
@@ -155,7 +157,11 @@ export function S2Session(): ReactElement {
         </section>
       )}
         </div>
-        <Inspector onEscalate={() => setSheet(true)} />
+        {rightPanel === 'props' ? (
+          <Inspector onEscalate={() => setSheet(true)} />
+        ) : rightPanel === 'files' ? (
+          <WorkspacePanel />
+        ) : null}
       </div>
 
       {sheet ? <EscalateSheet onClose={() => setSheet(false)} /> : null}

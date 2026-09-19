@@ -8,9 +8,10 @@
 import type { ReactElement } from 'react';
 import { useApp } from '../state/store.tsx';
 import { Chips } from './Chips.tsx';
+import { Icon } from '../icons.tsx';
 
 export function Topbar(): ReactElement {
-  const { screen, current, focusPath } = useApp();
+  const { screen, current, focusPath, rightPanel, setRightPanel } = useApp();
 
   const title =
     screen === 's0'
@@ -30,6 +31,28 @@ export function Topbar(): ReactElement {
         </span>
       ) : null}
       <span className="spacer" />
+      {screen === 's2' && current ? (
+        <span className="panel-toggles">
+          <button
+            className={`btn sm ghost${rightPanel === 'files' ? ' is-on' : ''}`}
+            data-smoke="toggle-files"
+            title="打开文件（工作区目录树）"
+            onClick={() => setRightPanel(rightPanel === 'files' ? 'none' : 'files')}
+          >
+            <Icon name="folder" size={14} />
+            文件
+          </button>
+          <button
+            className={`btn sm ghost${rightPanel === 'props' ? ' is-on' : ''}`}
+            data-smoke="toggle-props"
+            title="会话属性（成员 / 账本 / 协作动作）"
+            onClick={() => setRightPanel(rightPanel === 'props' ? 'none' : 'props')}
+          >
+            <Icon name="list" size={14} />
+            属性
+          </button>
+        </span>
+      ) : null}
       <Chips />
     </div>
   );
