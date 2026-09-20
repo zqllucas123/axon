@@ -1,25 +1,25 @@
 /**
  * S2 会话屏（团队 / 单兵两态）。
  *
- * 本切片先立骨架：会话条（ident + seg + 动作）+ 消息流容器 + 输入区。
- * 六元件渲染与右栏细节在切片 3/4 补齐；缺口一律「拿不到就不渲染」（MU-2 §4.6）。
+ * 骨架：消息流容器 + 输入区（+ 右栏按需面板）。原「会话条」（引擎行 / 对话·账本·用量
+ * 分段 / 叫人）已并入顶栏一行：标题 / 文件 / 属性 / 叫人 全在 Topbar，本屏不再自带头条。
+ * 「叫人」弹层的开关态提到 store（escalateOpen），顶栏按钮开、本屏渲染 EscalateSheet。
+ * 账本 / 用量视图仍在（sessionView 切换），入口从 S1 统计卡进；缺口一律「拿不到就不渲染」。
  */
 
 import { useState, type ReactElement } from 'react';
 import { useApp } from '../state/store.tsx';
-import { VIEW_LABEL } from '../state/selectors.ts';
 import { Icon } from '../icons.tsx';
 import { Inspector } from './Inspector.tsx';
 import { WorkspacePanel } from './WorkspacePanel.tsx';
 import { MessageStream } from './MessageStream.tsx';
+import { ModelPicker } from './ModelPicker.tsx';
 import { EscalateSheet, LedgerView, UsageView } from './S2Views.tsx';
-import type { SessionView } from '../state/types.ts';
 
 export function S2Session(): ReactElement {
-  const { current, details, sessionView, setSessionView, focusPath, prompt, interrupt, agents, rightPanel } =
+  const { current, sessionView, focusPath, prompt, interrupt, agents, rightPanel, escalateOpen, setEscalateOpen } =
     useApp();
   const [text, setText] = useState('');
-  const [sheet, setSheet] = useState(false);
 
   if (!current) {
     return (
@@ -32,11 +32,8 @@ export function S2Session(): ReactElement {
     );
   }
 
-  const detail = details[current.record.id];
-  const solo = !current.team;
   const focus = focusPath ? agents[focusPath] : undefined;
   const running = focus?.status === 'running';
-  const views: SessionView[] = ['chat', 'ledger', 'usage'];
 
   const send = () => {
     const t = text.trim();
@@ -47,64 +44,6 @@ export function S2Session(): ReactElement {
 
   return (
     <>
-      <div className="session-bar">
-        <Icon name={solo ? 'spark' : 'users'} size={14} />
-        <span>
-          {solo ? (
-            <>
-              未组队 · 由 <b style={{ color: 'var(--text)' }}>Axon 内置引擎</b> 直接执行
-            </>
-          ) : (
-            <>
-              团队 <b style={{ color: 'var(--text)' }}>{current.team?.name ?? ''}</b> · {current.team?.memberCount ?? 0} 成员已实例化
-              {current.team?.tempCount ? ` +${current.team.tempCount} 临时` : ''}
-            </>
-          )}
-        </span>
-
-        <span className="seg" style={{ marginLeft: 6 }}>
-          {views.map((v) => {
-            const dead = v === 'ledger' && solo;
-            const n =
-              v === 'chat'
-                ? String((detail?.counts.members ?? current.counts.members) + 1)
-                : v === 'ledger'
-                  ? dead
-                    ? '—'
-                    : current.counts.ledger
-                      ? String(current.counts.ledger)
-                      : '—'
-                  : `$${(current.usage.costUsd ?? 0).toFixed(2)}`;
-            return (
-              <button
-                key={v}
-                className={sessionView === v ? 'is-on' : ''}
-                disabled={dead}
-                data-smoke={`view-${v}`}
-                title={dead ? '单兵会话没有协作，自然没有账本' : undefined}
-                onClick={() => setSessionView(v)}
-              >
-                {VIEW_LABEL[v]}
-                <span className="n">{n}</span>
-              </button>
-            );
-          })}
-        </span>
-
-        <span className="spacer" />
-        {solo ? (
-          <button className="btn sm" data-smoke="escalate" title="升级为团队会话（消息不丢）" onClick={() => setSheet(true)}>
-            <Icon name="users" size={14} />
-            叫人（升级为团队会话）
-          </button>
-        ) : (
-          <button className="btn sm ghost" disabled title="临时加人（M4 后）">
-            <Icon name="plus" size={14} />
-            临时加人
-          </button>
-        )}
-      </div>
-
       <div className="body">
         <div className="col">
       {sessionView === 'chat' ? (
@@ -140,6 +79,7 @@ export function S2Session(): ReactElement {
                     中断
                   </button>
                 ) : null}
+                {focusPath ? <ModelPicker focusPath={focusPath} /> : null}
                 <button className="send" onClick={send} title="发送（Enter）" disabled={!focusPath}>
                   <Icon name="arrowUp" size={16} />
                 </button>
@@ -158,13 +98,13 @@ export function S2Session(): ReactElement {
       )}
         </div>
         {rightPanel === 'props' ? (
-          <Inspector onEscalate={() => setSheet(true)} />
+          <Inspector onEscalate={() => setEscalateOpen(true)} />
         ) : rightPanel === 'files' ? (
           <WorkspacePanel />
         ) : null}
       </div>
 
-      {sheet ? <EscalateSheet onClose={() => setSheet(false)} /> : null}
+      {escalateOpen ? <EscalateSheet onClose={() => setEscalateOpen(false)} /> : null}
     </>
   );
 }

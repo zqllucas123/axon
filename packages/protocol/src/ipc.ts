@@ -11,6 +11,7 @@ import type {
   AgentSnapshot,
   AgentStatus,
   ApprovalMode,
+  AxonThinkingLevel,
   ForkModeSpec,
   MessageLike,
   RoleDefinition,
@@ -125,6 +126,17 @@ export interface CommandMap {
   'agent.messages': { payload: { path: AgentPath }; result: MessageLike[] };
   'agent.prompt': { payload: { path: AgentPath; text: string }; result: { accepted: true } };
   'agent.interrupt': { payload: { path: AgentPath }; result: { accepted: true } };
+  /**
+   * 运行时切换该 Agent 后续轮次的模型 / 推理深度（会话输入区选择器）。
+   *
+   * 两个字段都可选：只换模型、只换档位、或都换。作用于内存中的活引擎
+   * （pi 的 `state.model` / `state.thinkingLevel` 皆「for future turns」），
+   * 不改角色档、不持久化 —— 重启后引擎按角色/默认模型重建。
+   */
+  'agent.setModel': {
+    payload: { path: AgentPath; model?: string; thinkingLevel?: AxonThinkingLevel };
+    result: { accepted: true };
+  };
   /** 级联删除整棵子树。 */
   'agent.remove': { payload: { path: AgentPath }; result: { removed: AgentPath[] } };
 
@@ -372,6 +384,8 @@ export interface EventMap {
   'agent.created': { snapshot: AgentSnapshot };
   'agent.status': { path: AgentPath; status: AgentStatus; error?: string };
   'agent.removed': { paths: AgentPath[] };
+  /** 该 Agent 的当前模型 / 推理深度已切换（`agent.setModel` 后下发，渲染层据此更新 snapshot）。 */
+  'agent.model.changed': { path: AgentPath; model?: string; thinkingLevel?: AxonThinkingLevel };
 
   /** 流式输出三段式：start → delta* → end。 */
   'agent.message.start': { messageId: string };

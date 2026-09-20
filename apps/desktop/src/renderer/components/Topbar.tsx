@@ -11,7 +11,7 @@ import { Chips } from './Chips.tsx';
 import { Icon } from '../icons.tsx';
 
 export function Topbar(): ReactElement {
-  const { screen, current, focusPath, rightPanel, setRightPanel } = useApp();
+  const { screen, current, focusPath, rightPanel, setRightPanel, setEscalateOpen } = useApp();
 
   const title =
     screen === 's0'
@@ -51,9 +51,27 @@ export function Topbar(): ReactElement {
             <Icon name="list" size={14} />
             属性
           </button>
+          {!current.team ? (
+            <button
+              className="btn sm"
+              data-smoke="escalate"
+              title="升级为团队会话（消息不丢）"
+              onClick={() => setEscalateOpen(true)}
+            >
+              <Icon name="users" size={14} />
+              叫人（升级为团队会话）
+            </button>
+          ) : (
+            <button className="btn sm ghost" disabled title="临时加人（M4 后）">
+              <Icon name="plus" size={14} />
+              临时加人
+            </button>
+          )}
         </span>
       ) : null}
-      <Chips />
+      {/* 会话屏（S2）顶栏只保留标题 / 文件 / 属性 / 叫人 一行；chip 口径在会话屏
+          由右栏「属性」承担，全局屏才在顶栏挂状态 chip。 */}
+      {screen === 's2' ? null : <Chips />}
     </div>
   );
 }

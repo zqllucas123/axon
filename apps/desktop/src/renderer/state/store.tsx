@@ -28,6 +28,7 @@ import { applyAppearance } from '../appearance.ts';
 import type {
   AgentPath,
   AgentSnapshot,
+  AxonThinkingLevel,
   BudgetSnapshot,
   CommandMap,
   ConfigSnapshot,
@@ -123,6 +124,9 @@ export interface StoreValue {
   rightPanel: RightPanel;
   /** 切右栏槽位；传入已激活的值 = 收起（toggle 语义）。 */
   setRightPanel: (panel: RightPanel) => void;
+  /** 「叫人」升级弹层是否打开（纯 UI 态：顶栏按钮开、会话屏渲染，换会话重置）。 */
+  escalateOpen: boolean;
+  setEscalateOpen: (open: boolean) => void;
   /** 列出会话工作区某目录（`fs.listDir`），失败返回 null。 */
   listDir: (relPath: string) => Promise<FsEntry[] | null>;
   /** 读会话工作区某文件用于预览（`fs.readFile`），失败返回 null。 */
@@ -130,6 +134,8 @@ export interface StoreValue {
   setFocus: (path: AgentPath) => void;
   prompt: (path: AgentPath, text: string) => Promise<void>;
   interrupt: (path: AgentPath) => Promise<void>;
+  /** 会话输入区模型选择器：换当前焦点 Agent 后续轮次的模型 / 推理深度（不传 = 不改该项）。 */
+  setModel: (path: AgentPath, model?: string, thinkingLevel?: AxonThinkingLevel) => Promise<void>;
   respondApproval: (requestId: string, approved: boolean) => Promise<void>;
   answerQuestion: (requestId: string, answer: string) => Promise<void>;
   adopt: (id: string, adoption: 'adopted' | 'rejected') => Promise<void>;
@@ -189,6 +195,7 @@ export function AppProvider({ children }: { children: ReactNode }): ReactElement
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [sessionView, setSessionViewState] = useState<SessionView>('chat');
   const [rightPanel, setRightPanelState] = useState<RightPanel>('none');
+  const [escalateOpen, setEscalateOpen] = useState(false);
   const [focusPath, setFocusPath] = useState<AgentPath | null>(null);
   const [projectContext, setProjectContext] = useState<ProjectContext | null>(null);
 
@@ -447,6 +454,22 @@ export function AppProvider({ children }: { children: ReactNode }): ReactElement
         });
         // 只有失败带原因时才进流；成功/空闲是噪声。错误卡是一次性事件件，不随重渲染回放。
         if (status === 'failed' && err) pushItem(path, { kind: 'error', id: `err-${Date.now()}`, text: err });
+      }),
+    );
+    offs.push(
+      sub('agent.model.changed', ({ path, model, thinkingLevel }) => {
+        setAgents((prev) => {
+          const cur = prev[path];
+          if (!cur) return prev;
+          return {
+            ...prev,
+            [path]: {
+              ...cur,
+              ...(model !== undefined ? { model } : {}),
+              ...(thinkingLevel !== undefined ? { thinkingLevel } : {}),
+            },
+          };
+        });
       }),
     );
     offs.push(
@@ -725,6 +748,7 @@ export function AppProvider({ children }: { children: ReactNode }): ReactElement
       setScreen('s2');
       setSessionViewState('chat');
       setRightPanelState('none'); // 换会话收起右栏：属性/文件都是当前会话专属
+      setEscalateOpen(false); // 换会话收起「叫人」弹层
       setFocusPath(known ? known.rootPath : (s?.rootPath ?? null));
       // 懒加载纪律：**只有这里**允许触发 session.get（读树）。
       if (!known) void loadDetail(id);
@@ -745,6 +769,7 @@ export function AppProvider({ children }: { children: ReactNode }): ReactElement
       setScreen('s2');
       setSessionViewState('chat');
       setRightPanelState('none');
+      setEscalateOpen(false);
       setProjectContext(null); // 会话已建，项目上下文用完即清
 
       void loadDetail(s.record.id);
@@ -812,6 +837,14 @@ export function AppProvider({ children }: { children: ReactNode }): ReactElement
   const interrupt = useCallback(
     async (path: AgentPath) => {
       await call(() => window.axon.invoke('agent.interrupt', { path }));
+    },
+    [call],
+  );
+
+  /** 会话输入区的模型选择器：换焦点 Agent 的活引擎模型 / 推理深度（不重建引擎）。 */
+  const setModel = useCallback(
+    async (path: AgentPath, model?: string, thinkingLevel?: AxonThinkingLevel) => {
+      await call(() => window.axon.invoke('agent.setModel', { path, model, thinkingLevel }));
     },
     [call],
   );
@@ -951,6 +984,8 @@ export function AppProvider({ children }: { children: ReactNode }): ReactElement
     setSessionView: setSessionViewState,
     rightPanel,
     setRightPanel,
+    escalateOpen,
+    setEscalateOpen,
     listDir,
     readWorkspaceFile,
     setFocus: (path) => {
@@ -959,6 +994,7 @@ export function AppProvider({ children }: { children: ReactNode }): ReactElement
     },
     prompt,
     interrupt,
+    setModel,
     respondApproval,
     answerQuestion,
     adopt,

@@ -264,3 +264,60 @@ describe('契约：steer（message 工具的承载）', () => {
     expect(json).toContain('"timestamp":1');
   });
 });
+
+describe('契约：setModel / setThinkingLevel（会话输入区模型选择器的落点）', () => {
+  it('setModel 换的是下一轮请求用的 model，且不打断当前 transcript', async () => {
+    const faux = fauxProvider({ provider: 'contract', api: 'faux' });
+    const models = createModels();
+    models.setProvider(faux.provider);
+    faux.setResponses([fauxAssistantMessage('第一轮')]);
+
+    const modelA = faux.getModel();
+    const modelB = { ...modelA, id: 'contract-model-b' };
+
+    const engine = createAxonEngine({
+      systemPrompt: 'contract test',
+      model: modelA,
+      messages: [],
+      tools: [] as never,
+      streamFn: (m, context, opts) => models.stream(m, context, opts),
+    });
+
+    await engine.prompt('go');
+    await engine.waitForIdle();
+
+    // pi 的 AgentState.model 是「for future turns」的活字段，可直接赋值切换。
+    engine.setModel(modelB as never);
+
+    faux.setResponses([fauxAssistantMessage('第二轮')]);
+    await engine.prompt('继续');
+    await engine.waitForIdle();
+
+    // 换模型不应清空/改写既有 transcript —— 只影响之后的请求。
+    const transcript = engine.messages();
+    expect(JSON.stringify(transcript)).toContain('第一轮');
+    expect(JSON.stringify(transcript)).toContain('第二轮');
+  });
+
+  it('setThinkingLevel 不抛错、不影响后续 prompt 正常收敛', async () => {
+    const faux = fauxProvider({ provider: 'contract', api: 'faux' });
+    const models = createModels();
+    models.setProvider(faux.provider);
+    faux.setResponses([fauxAssistantMessage('答复')]);
+
+    const engine = createAxonEngine({
+      systemPrompt: 'contract test',
+      model: faux.getModel(),
+      messages: [],
+      tools: [] as never,
+      streamFn: (m, context, opts) => models.stream(m, context, opts),
+    });
+
+    expect(() => engine.setThinkingLevel('high')).not.toThrow();
+
+    await engine.prompt('go');
+    await engine.waitForIdle();
+
+    expect(JSON.stringify(engine.messages())).toContain('答复');
+  });
+});

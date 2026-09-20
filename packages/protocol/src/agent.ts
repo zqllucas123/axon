@@ -287,6 +287,16 @@ export interface UsageTotals {
   costUsd: number;
 }
 
+/**
+ * 推理深度档位（会话输入区「推理深度」选择器）。
+ *
+ * 值与 pi 的 `ThinkingLevel` 同名子集，kernel 侧直接透传。pi 另有 `'max'`
+ * （仅个别模型族支持），暂不暴露给界面 —— 与其给一个多数模型点了没反应的档位，
+ * 不如只留通用的六档（对应界面：关/极简/低/中/高/极高）。
+ * 与 `ModelSpec` 同理：类型定义在协议层，不反向依赖 kernel/pi。
+ */
+export type AxonThinkingLevel = 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh';
+
 export interface AgentSnapshot {
   path: AgentPath;
   role: string;
@@ -307,4 +317,12 @@ export interface AgentSnapshot {
   forkMode?: ForkModeSpec;
   /** 当前在等哪些后代（waits 图的出边）；空表示没在等人。 */
   waitingOn?: AgentPath[];
+  /**
+   * 当前生效的模型 id。spawn 时按「角色声明 / provider 默认」解析写入；
+   * 用户在会话输入区切换模型后随之更新（`agent.model.changed` 事件下发）。
+   * 未接真 provider（faux）时缺省。
+   */
+  model?: string;
+  /** 当前推理深度档位；缺省视为 'off'。 */
+  thinkingLevel?: AxonThinkingLevel;
 }

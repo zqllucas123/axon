@@ -478,8 +478,7 @@ try {
 
   await evalJs(`document.querySelector('[data-smoke="stat-ledger"]').click()`);
   const toLedger = await until(
-    `!!document.querySelector('[data-smoke="view-ledger"]') &&
-     !!document.querySelector('[data-smoke="ledger-row"]')`,
+    `!!document.querySelector('[data-smoke="ledger-row"]')`,
   );
   log(toLedger, 'S1 统计卡「协作落账」→ S2 账本视图（发意图，不是 href）');
   if (!toLedger) exit(1);

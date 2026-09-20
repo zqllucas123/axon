@@ -27,11 +27,12 @@ import type {
   AgentTool,
   AgentToolResult,
   StreamFn,
+  ThinkingLevel,
 } from '@earendil-works/pi-agent-core';
 import type { Model } from '@earendil-works/pi-ai';
 import type { MessageLike } from '@axon/protocol';
 
-export type { AgentEvent, AgentTool, AgentToolResult, AgentMessage, StreamFn, Model };
+export type { AgentEvent, AgentTool, AgentToolResult, AgentMessage, StreamFn, Model, ThinkingLevel };
 
 /**
  * Axon 编排层看到的引擎面 —— **刻意小于 `Agent` 的全部能力**。
@@ -46,6 +47,15 @@ export interface AxonEngine {
   waitForIdle(): Promise<void>;
   /** 中断当前轮。 */
   abort(): void;
+  /**
+   * 换下一轮起生效的模型（同网关切模型）。
+   *
+   * pi 的 `state.model` 语义是「Active model used for future turns」——赋值即改，
+   * 不影响正在跑的那一轮。会话输入区的模型选择器走这条通路。
+   */
+  setModel(model: Model<any>): void;
+  /** 换下一轮起生效的推理深度（`state.thinkingLevel`，同样是 future turns 语义）。 */
+  setThinkingLevel(level: ThinkingLevel): void;
   /** 订阅事件流；返回退订函数。监听器被**串行 await**，这是编排层挂起的手段之一。 */
   subscribe(listener: (event: AgentEvent) => void | Promise<void>): () => void;
   /** 当前 transcript 快照（拷贝）。 */
@@ -135,6 +145,12 @@ export function wrapEngine(agent: Agent): AxonEngine {
     prompt: (text) => agent.prompt(text),
     waitForIdle: () => agent.waitForIdle(),
     abort: () => agent.abort(),
+    setModel: (model) => {
+      agent.state.model = model;
+    },
+    setThinkingLevel: (level) => {
+      agent.state.thinkingLevel = level;
+    },
     subscribe: (listener) => agent.subscribe(listener),
     messages: () => snapshotMessages(agent),
     steer: (text) =>

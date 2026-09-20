@@ -197,6 +197,90 @@ describe('AxonHost —— 分身创建', () => {
   });
 });
 
+describe('AxonHost —— 运行时换模型（会话输入区的模型选择器）', () => {
+  /** 带 selectModel 的 modelSource——模拟真实网关（faux 本身不支持按 id 切模型）。 */
+  async function harnessWithModels(): Promise<Harness & { modelIds: string[] }> {
+    const base = await createFauxSource();
+    const modelIds = ['model-a', 'model-b'];
+    const models = new Map(modelIds.map((id) => [id, { ...base.model, id }]));
+    const events: Harness['events'] = [];
+    const calls: string[] = [];
+    const selectModel = (id: string) => {
+      const m = models.get(id);
+      if (!m) throw new Error(`模型 ${id} 不在清单里`);
+      return { model: m, streamFn: base.streamFn };
+    };
+    // 源自身的默认模型也对齐 modelIds[0]，这样「spawn 时写入默认模型」的断言
+    // 测的是真实解析路径（pickModelSource 无 role.model 时直接用 modelSource.model），
+    // 不是 selectModel 的分支。
+    const host = new AxonHost({
+      modelSource: { ...base, model: models.get(modelIds[0]!)!, selectModel },
+      roles: ROLES,
+      tools: makeTools(calls),
+      emit: (event, _payload, source) => events.push({ event, source }),
+    });
+    const root = host.createSession({ title: '测试会话', executor: 'engine' }).rootPath;
+    return {
+      host,
+      root,
+      spawn: (spec) => host.spawn({ parent: root, ...spec }),
+      events,
+      calls,
+      setResponses: (r) => base.setResponses(r as never),
+      modelIds,
+    };
+  }
+
+  it('换模型：更新 snapshot.model 并发出 agent.model.changed', async () => {
+    const h = await harnessWithModels();
+    const boss = h.spawn({ role: 'boss' });
+
+    h.host.setModel(boss.path, 'model-b');
+
+    expect(h.host.get(boss.path)?.model).toBe('model-b');
+    const evt = h.events.find((e) => e.event === 'agent.model.changed');
+    expect(evt?.source).toBe(boss.path);
+  });
+
+  it('换推理深度：更新 snapshot.thinkingLevel', async () => {
+    const h = await harnessWithModels();
+    const boss = h.spawn({ role: 'boss' });
+
+    h.host.setModel(boss.path, undefined, 'high');
+
+    expect(h.host.get(boss.path)?.thinkingLevel).toBe('high');
+  });
+
+  it('模型 id 不在清单里：静默忽略，不改 snapshot，不抛错', async () => {
+    const h = await harnessWithModels();
+    const boss = h.spawn({ role: 'boss' });
+
+    expect(() => h.host.setModel(boss.path, 'no-such-model')).not.toThrow();
+    expect(h.host.get(boss.path)?.model).not.toBe('no-such-model');
+  });
+
+  it('modelSource 不支持 selectModel（如 faux）：换模型静默忽略，保留 spawn 时的值', async () => {
+    const h = await harness();
+    const boss = h.spawn({ role: 'boss' });
+    const spawnedModel = h.host.get(boss.path)?.model;
+
+    expect(() => h.host.setModel(boss.path, 'anything')).not.toThrow();
+    // 忽略换模型请求：值不变（不是被清空成 undefined）。
+    expect(h.host.get(boss.path)?.model).toBe(spawnedModel);
+  });
+
+  it('路径不存在或无引擎：静默忽略', async () => {
+    const h = await harnessWithModels();
+    expect(() => h.host.setModel(`${h.root}/ghost-1`, 'model-b')).not.toThrow();
+  });
+
+  it('spawn 时 snapshot.model 已写入解析出的默认模型', async () => {
+    const h = await harnessWithModels();
+    const boss = h.spawn({ role: 'boss' });
+    expect(h.host.get(boss.path)?.model).toBe(h.modelIds[0]);
+  });
+});
+
 describe('AxonHost —— 权限只能减不能加', () => {
   it('角色白名单外的工具被闸门拦下', async () => {
     const h = await harness();

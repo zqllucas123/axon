@@ -20,6 +20,7 @@ export {
   type AgentToolResult,
   type StreamFn,
   type Model,
+  type ThinkingLevel,
 } from './engine.ts';
 
 export {

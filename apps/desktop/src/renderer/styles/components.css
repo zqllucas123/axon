@@ -568,6 +568,36 @@
 }
 .send:hover { background: var(--accent-hover); }
 
+/* 会话输入区的模型选择器（composer 发送按钮左边），触发按钮沿用 `.composer .mode` 的低调风格。 */
+.model-pick {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: var(--fs-13); color: var(--text-muted);
+  padding: 4px 8px; border-radius: var(--r-sm);
+  max-width: 180px;
+}
+.model-pick span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.model-pick:hover, .model-pick.is-on { background: var(--bg-hover); color: var(--text-secondary); }
+.model-pick .caret { transition: transform .15s ease; }
+.model-pick.is-on .caret { transform: rotate(180deg); }
+
+/* 下拉本体复用 `.menu`；定位在触发按钮正上方（会话输入区在屏幕下方，menu-up 同一套向上开的思路）。 */
+.model-menu {
+  position: absolute; right: 0; bottom: calc(100% + 8px);
+  width: 260px; max-height: 360px; overflow-y: auto;
+}
+.model-menu-group {
+  padding: 6px 10px 4px; font-size: var(--fs-11); color: var(--text-dim);
+}
+.model-menu .menu-item { justify-content: space-between; }
+.model-think-row { display: flex; gap: 4px; padding: 2px 6px 4px; }
+.model-think-btn {
+  flex: 1; padding: 6px 0; border-radius: var(--r-xs);
+  font-size: var(--fs-12); color: var(--text-secondary);
+  background: var(--bg-sunken);
+}
+.model-think-btn:hover { background: var(--bg-hover); }
+.model-think-btn.is-on { background: var(--accent); color: #fff; }
+
 /* ---------- 7. 右侧检视面板 ---------- */
 .inspector {
   flex: none;
@@ -677,17 +707,7 @@ table.tbl td.num { font-family: var(--font-mono); color: var(--text); }
 .mode-card .mc-d { font-size: var(--fs-12); color: var(--text-muted); line-height: 1.6; }
 .mode-card .mc-m { font-size: var(--fs-11); color: var(--text-dim); }
 
-/* 会话顶部的团队条 */
-.session-bar {
-  flex: none; display: flex; align-items: center; gap: 10px;
-  padding: 8px 28px 10px; border-bottom: 1px solid var(--line);
-  font-size: var(--fs-12); color: var(--text-muted); background: var(--bg-canvas);
-}
-.session-bar .spacer { flex: 1; }
-.session-bar .seg button { padding: 4px 11px; font-size: var(--fs-12); }
-.session-bar .seg button:disabled { color: var(--text-dim); cursor: not-allowed; }
-.session-bar .seg button .n { color: var(--text-dim); margin-left: 5px; }
-.session-bar .seg button.is-on .n { color: var(--text-muted); }
+/* 会话顶部的团队条（S2 顶栏合并为一行后移除；「叫人」按钮上移进 .topbar） */
 
 /* 面板内精简账本（右侧检视区） */
 .led-mini { display: flex; flex-direction: column; }

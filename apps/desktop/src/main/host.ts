@@ -50,6 +50,7 @@ import {
   type AgentStatus,
   type ApprovalMode,
   type AxonConfig,
+  type AxonThinkingLevel,
   type BudgetSnapshot,
   type BudgetTier,
   CONFIG_DEFAULTS,
@@ -412,6 +413,44 @@ export class AxonHost {
       }
     }
     return this.modelSource;
+  }
+
+  /**
+   * 运行时换模型 / 推理深度（会话输入区的模型选择器）。
+   *
+   * 只改**活引擎**的 `state.model` / `state.thinkingLevel`（pi 语义：
+   * for future turns），不重建引擎、不落配置——重启后仍按角色/默认模型
+   * 重建（与既有引擎重建纪律一致）。目标不存在或无引擎时静默忽略：
+   * 焦点在切换/会话已关闭时点了旧按钮，不该炸。
+   */
+  setModel(path: AgentPath, model?: string, thinkingLevel?: AxonThinkingLevel): void {
+    const node = this.registry.get(path);
+    if (!node?.engine) return;
+
+    if (model !== undefined) {
+      if (!this.modelSource.selectModel) {
+        console.warn('[axon] setModel: 当前 modelSource 不支持按 id 切模型（faux/无 selectModel）');
+      } else {
+        try {
+          const picked = this.modelSource.selectModel(model);
+          node.engine.setModel(picked.model);
+          node.snapshot.model = model;
+        } catch (err) {
+          console.warn(`[axon] setModel: 模型 "${model}" 不在清单里 —— ${err instanceof Error ? err.message : String(err)}`);
+        }
+      }
+    }
+
+    if (thinkingLevel !== undefined) {
+      node.engine.setThinkingLevel(thinkingLevel);
+      node.snapshot.thinkingLevel = thinkingLevel;
+    }
+
+    this.emit(
+      'agent.model.changed',
+      { path, model: node.snapshot.model, thinkingLevel: node.snapshot.thinkingLevel },
+      path,
+    );
   }
 
   /** M6 流式看门狗轮询体：每 500ms 被 setInterval 调用。 */
@@ -779,6 +818,8 @@ export class AxonHost {
     // attachEngine 覆盖旧的：升级路径靠这一句完成「换引擎不换会话」。
     this.registry.attachEngine(rootPath, engine);
     this.wire(rootPath, engine);
+    const rootNode = this.registry.get(rootPath);
+    if (rootNode) rootNode.snapshot.model = ms0.model.id;
     return engine;
   }
 
@@ -1164,6 +1205,8 @@ export class AxonHost {
       });
       this.registry.attachEngine(snap.path, engine);
       this.wire(snap.path, engine);
+      const node1 = this.registry.get(snap.path);
+      if (node1) node1.snapshot.model = ms1.model.id;
     }
   }
 
@@ -1637,6 +1680,14 @@ export class AxonHost {
 
     this.registry.attachEngine(snapshot.path, engine);
     this.wire(snapshot.path, engine);
+    // 记下 spawn 时解析出的模型 id，供输入区的模型选择器读取「当前用的是哪个」。
+    // 只有真按 id 选中的模型才有确定 id；faux/未命中 per-role 映射时 ms2.model.id
+    // 仍是一个真实值（faux 也有 id），所以这里不做兜底判断，直接写。
+    const liveNode = this.registry.get(snapshot.path);
+    if (liveNode) {
+      liveNode.snapshot.model = ms2.model.id;
+      snapshot.model = ms2.model.id;
+    }
     this.persistAgentHeader(snapshot);
     this.emit('agent.created', { snapshot }, snapshot.path);
     this.touchSession(sessionId);
@@ -2201,6 +2252,11 @@ export class AxonHost {
       case 'agent.interrupt':
         this.interrupt((payload as { path: AgentPath }).path);
         return { accepted: true } as never;
+      case 'agent.setModel': {
+        const p = payload as { path: AgentPath; model?: string; thinkingLevel?: AxonThinkingLevel };
+        this.setModel(p.path, p.model, p.thinkingLevel);
+        return { accepted: true } as never;
+      }
       case 'agent.remove':
         return { removed: this.remove((payload as { path: AgentPath }).path) } as never;
       case 'role.list':
