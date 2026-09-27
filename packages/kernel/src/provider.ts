@@ -332,6 +332,210 @@ export function scriptedSource(
   };
 }
 
+// ────────────────────────────────────────────────────────────────────────────
+// DeepSeek DSML 工具调用兼容层
+// ────────────────────────────────────────────────────────────────────────────
+
+/**
+ * 解析 DeepSeek 原生工具调用格式（DSML special token），把它重建为
+ * pi 的标准 ToolCall 内容块。
+ *
+ * 背景：部分网关（vLLM/SGLang 未开 tool-call-parser 时）直接把 DeepSeek
+ * 的 special token 透传为明文，形如：
+ *
+ *   <｜DSML｜calls>
+ *     <｜DSML｜invoke name="Bash">
+ *       <｜DSML｜parameter name="command" string="true">pwd</｜DSML｜parameter>
+ *     </｜DSML｜invoke>
+ *   </｜DSML｜calls>
+ *
+ * pi 的 openai-completions 解析器只认标准 `tool_calls` 字段，看不懂这段，
+ * 于是它落入 text 块，原样渲染给用户。
+ *
+ * 这一层在 done 事件里拦截 assistant message，把 DSML 段从 text 块里抠出来，
+ * 转成 ToolCall[]，再把 content 和 stopReason 修正后放行。
+ *
+ * 正则说明：
+ * - `<｜DSML｜calls>` 是 DeepSeek tokenizer 的特殊边界符（U+FF5C 全角竖线）。
+ * - `invoke name="…"` 是工具名，`parameter name="…"` 里的文本是参数值。
+ * - 同一次调用可有多个 parameter 块，每个是一个命名参数。
+ * - 一条回复可能包含多个 invoke（虽然 DeepSeek V3/R1 通常只吐一个）。
+ */
+
+// 分隔符 `<｜DSML｜` 后模型常插入一个空格（真实产出为 `<｜DSML｜ calls>`），
+// 故所有标记都以 `\s*` 容忍空白。闭合标签也允许 `</｜DSML｜ calls>` 变体。
+const DSML_CALLS_OPEN = /<｜DSML｜\s*calls\s*>/;
+// calls 块：闭合缺失（流被截断）时退化到字符串结尾，尽量多解析。
+const DSML_CALLS_BLOCK = /<｜DSML｜\s*calls\s*>([\s\S]*?)(?:<\/｜DSML｜\s*calls\s*>|$)/g;
+// invoke 开标签：只锚定开标签。实测模型会吐出畸形闭合（如
+// `</｜DSML｜<｜DSML｜ invoke>`），所以不依赖闭合标签，改用「下一个 invoke
+// 开标签 / calls 块结束」来切分 invoke 体。
+const DSML_INVOKE_OPEN = /<｜DSML｜\s*invoke\s+name="([^"]+)"\s*>/g;
+// parameter 块：这一层实测闭合正常（`</｜DSML｜ parameter>`）。
+const DSML_PARAM = /<｜DSML｜\s*parameter\s+name="([^"]+)"[^>]*>([\s\S]*?)<\/｜DSML｜\s*parameter\s*>/g;
+
+/** 从一段文本里解析出所有 DSML 工具调用，返回 ToolCall 数组（无匹配则空）。 */
+function parseDsmlCalls(text: string): import('@earendil-works/pi-ai').ToolCall[] {
+  const calls: import('@earendil-works/pi-ai').ToolCall[] = [];
+  const callsBlockRe = new RegExp(DSML_CALLS_BLOCK.source, 'g');
+  let callsMatch: RegExpExecArray | null;
+
+  while ((callsMatch = callsBlockRe.exec(text)) !== null) {
+    const block = callsMatch[1]!;
+    if (callsMatch[0].length === 0) break; // 防空匹配死循环
+
+    // 先收集块内所有 invoke 开标签的位置，再按相邻开标签切分 invoke 体，
+    // 完全绕开畸形的 invoke 闭合标签。
+    const opens: { name: string; bodyStart: number; tagStart: number }[] = [];
+    const invokeRe = new RegExp(DSML_INVOKE_OPEN.source, 'g');
+    let im: RegExpExecArray | null;
+    while ((im = invokeRe.exec(block)) !== null) {
+      opens.push({ name: im[1]!, bodyStart: im.index + im[0].length, tagStart: im.index });
+    }
+
+    for (let i = 0; i < opens.length; i++) {
+      const bodyEnd = i + 1 < opens.length ? opens[i + 1]!.tagStart : block.length;
+      const body = block.slice(opens[i]!.bodyStart, bodyEnd);
+      const args: Record<string, unknown> = {};
+      const paramRe = new RegExp(DSML_PARAM.source, 'g');
+      let pm: RegExpExecArray | null;
+      while ((pm = paramRe.exec(body)) !== null) {
+        const pName = pm[1]!;
+        const pVal = pm[2]!;
+        // 尝试解析为 JSON；失败则保留原始字符串。
+        try {
+          args[pName] = JSON.parse(pVal);
+        } catch {
+          args[pName] = pVal;
+        }
+      }
+
+      calls.push({
+        type: 'toolCall',
+        id: `dsml-${Date.now()}-${calls.length}`,
+        // 模型对工具名大小写不稳定（实测 `bash` 与 `Bash` 都出现过），
+        // 而 agent-loop 按 `t.name === toolCall.name` 精确匹配、axon 注册的
+        // 工具 id 全为小写，故统一转小写以确保命中。
+        name: opens[i]!.name.toLowerCase(),
+        arguments: args,
+      });
+    }
+  }
+
+  return calls;
+}
+
+/** 如果 text 里包含 DSML 工具调用标记，返回 true。 */
+function hasDsmlCalls(text: string): boolean {
+  return DSML_CALLS_OPEN.test(text);
+}
+
+/**
+ * 把 assistant message 里 text 块中的 DSML 工具调用抠出来，
+ * 重建为 ToolCall 内容块，更新 stopReason。
+ *
+ * 文本块里 DSML 标记之外的部分（通常是空字符串或少量前导文字）
+ * 保留为 text 块；如果变成空字符串则丢弃。
+ */
+function patchDsmlMessage(message: AssistantMessage): AssistantMessage {
+  // 只有真正带 DSML 标记才处理，避免不必要的拷贝。
+  const needsPatch = message.content.some(
+    (b) => b.type === 'text' && hasDsmlCalls((b as { text?: string }).text ?? ''),
+  );
+  if (!needsPatch) return message;
+
+  const newContent: AssistantMessage['content'] = [];
+  let toolCallCount = 0;
+
+  for (const block of message.content) {
+    if (block.type !== 'text') {
+      newContent.push(block);
+      continue;
+    }
+    const text = (block as { text?: string }).text ?? '';
+    if (!hasDsmlCalls(text)) {
+      newContent.push(block);
+      continue;
+    }
+
+    const parsed = parseDsmlCalls(text);
+    // 带 DSML 标记却一个调用都没解析出来（格式又变体了）：不裁剪、不改
+    // stopReason，原样保留 text 块，避免把正文吞掉或给 agent-loop 一个空
+    // 的 toolUse 轮次。宁可暂时显示原文，也不制造更坏的状态。
+    if (parsed.length === 0) {
+      newContent.push(block);
+      continue;
+    }
+
+    // DSML 标记之前的文字（如有）
+    const beforeCalls = text.replace(/<｜DSML｜\s*calls\s*>[\s\S]*$/, '').trim();
+    if (beforeCalls) {
+      newContent.push({ type: 'text', text: beforeCalls });
+    }
+
+    for (const call of parsed) {
+      newContent.push(call);
+      toolCallCount++;
+    }
+
+    // DSML 标记之后的文字（如有）。闭合缺失时不裁剪，避免误删正文。
+    const afterCalls = /<\/｜DSML｜\s*calls\s*>/.test(text)
+      ? text.replace(/^[\s\S]*<\/｜DSML｜\s*calls\s*>/, '').trim()
+      : '';
+    if (afterCalls) {
+      newContent.push({ type: 'text', text: afterCalls });
+    }
+  }
+
+  // 没有任何调用被重建时，保持原消息语义不变。
+  if (toolCallCount === 0) return message;
+
+  return {
+    ...message,
+    content: newContent,
+    // agent-loop 靠 stopReason=toolUse 决定是否回调工具；没有这个它不会执行。
+    stopReason: 'toolUse',
+  } as AssistantMessage;
+}
+
+/**
+ * DSML 兼容垫片：包在任意 ModelSource 外层，对 done 事件做原地修补。
+ *
+ * 当网关未开启 DeepSeek tool-call parser 时挂上这层即可；
+ * 若某天网关修好了，直接把 `withDsmlParsing(source)` 换回 `source`。
+ */
+export function withDsmlParsing(source: ModelSource): ModelSource {
+  return {
+    model: source.model,
+    streamFn: async (model, context, options) => {
+      const inner = await source.streamFn(model, context, options);
+      const outer = createAssistantMessageEventStream();
+      void (async () => {
+        let final: AssistantMessage | undefined;
+        try {
+          for await (const ev of inner) {
+            if (ev.type === 'done') {
+              const patched = patchDsmlMessage(ev.message);
+              final = patched;
+              outer.push({ ...ev, message: patched });
+              continue;
+            }
+            outer.push(ev);
+          }
+          outer.end(final ?? (await inner.result()));
+        } catch {
+          outer.push({
+            type: 'error',
+            reason: 'error',
+            error: new Error('withDsmlParsing 包装的流中断'),
+          } as unknown as AssistantMessageEvent);
+        }
+      })();
+      return outer;
+    },
+  };
+}
+
 /** 把一条现成消息包成模型流（done + end 即可，agent-loop 自行播 message_start/end）。 */
 function singleMessageStream(
   message: AssistantMessage,

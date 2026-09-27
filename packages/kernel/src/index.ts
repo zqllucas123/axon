@@ -28,6 +28,7 @@ export {
   createFauxSource,
   createOpenAICompatSource,
   withTurnCost,
+  withDsmlParsing,
   scriptedSource,
   lastUserText,
   streamFnOf,
@@ -66,3 +67,19 @@ export {
   type RegisterSpec,
   type RegistryOptions,
 } from './registry.ts';
+
+export {
+  createLeafTools,
+  createLocalOps,
+  LEAF_TOOL_NAMES,
+  READ_ONLY_LEAF_TOOLS,
+  WRITE_LEAF_TOOLS,
+  PathEscapeError,
+  resolveWithinCwd,
+  truncateHead,
+  formatSize,
+  type LeafToolName,
+  type LeafOperations,
+  type BashResult,
+  type BashExecOptions,
+} from './tools/index.ts';
