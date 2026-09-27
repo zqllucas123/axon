@@ -1,0 +1,278 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<title>Axon · 活跃会话</title>
+<link rel="stylesheet" href="assets/tokens.css" />
+<style>
+.shell { height: calc(100vh - 52px); }
+</style>
+</head>
+<body>
+<div class="window">
+
+  <!-- titlebar -->
+  <div class="titlebar">
+    <div class="traffic"><span class="t-close"></span><span class="t-min"></span><span class="t-max"></span></div>
+    <div class="app-name">Axon <span style="color:var(--text-muted);font-size:10px">&#x25BE;</span></div>
+    <div class="titlebar-spacer"></div>
+    <div class="titlebar-actions">
+      <button class="icon-btn" title="搜索"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><circle cx="7" cy="7" r="4.5"/><line x1="10.5" y1="10.5" x2="14" y2="14"/></svg></button>
+      <button class="icon-btn" title="通知"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M8 2a4.5 4.5 0 0 1 4.5 4.5c0 2.5.7 3.5 1.5 4H2c.8-.5 1.5-1.5 1.5-4A4.5 4.5 0 0 1 8 2z"/><line x1="6.5" y1="14" x2="9.5" y2="14"/></svg></button>
+    </div>
+  </div>
+
+  <div class="shell">
+
+    <!-- sidebar -->
+    <aside class="sidebar">
+      <nav class="sidebar-nav">
+        <div class="nav-item"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M2 12 8 4l6 8"/></svg>新建会话</div>
+        <div class="nav-item"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><rect x="2" y="2" width="12" height="12" rx="2"/><line x1="5" y1="6" x2="11" y2="6"/><line x1="5" y1="9" x2="9" y2="9"/></svg>收件箱<span style="margin-left:auto"><span class="badge">3</span></span></div>
+        <div class="nav-item"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><circle cx="8" cy="8" r="6"/><line x1="8" y1="5" x2="8" y2="8.5"/><line x1="8" y1="8.5" x2="10" y2="10.5"/></svg>定时任务</div>
+        <div class="nav-item"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><circle cx="8" cy="8" r="2.5"/><path d="M8 2v1.5M8 12.5V14M2 8h1.5M12.5 8H14"/></svg>插件</div>
+      </nav>
+      <div class="sidebar-section-label">项目</div>
+      <div class="sidebar-sessions">
+        <div class="session-group">
+          <div class="session-group-header"><svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M3 5l4 4 4-4"/></svg>axon</div>
+          <div class="session-item active"><span class="session-dot run"></span>支付回调幂等改造</div>
+          <div class="session-item"><span class="session-dot ok"></span>Electron 打包修复</div>
+        </div>
+        <div class="session-group">
+          <div class="session-group-header"><svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M5 4l4 3-4 3"/></svg>kotei</div>
+          <div class="session-item"><span class="session-dot wait"></span>API 压测方案</div>
+        </div>
+        <div class="recents-label">最近</div>
+        <div class="recent-item">解决 Git push 到受保护分支被拒绝</div>
+        <div class="recent-item">帮我实现一个贪吃蛇游戏</div>
+      </div>
+    </aside>
+
+    <!-- main -->
+    <main class="main">
+      <!-- topbar -->
+      <header class="topbar">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><rect x="2" y="3" width="12" height="10" rx="2"/><line x1="5" y1="7" x2="11" y2="7"/><line x1="5" y1="10" x2="8" y2="10"/></svg>
+        <span class="topbar-title">支付回调幂等改造</span>
+        <span class="tag run"><span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--hue-run);margin-right:4px"></span>进行中</span>
+        <div class="topbar-chips">
+          <button class="chip">&#36; $0.12</button>
+          <button class="chip attn">审批 <span class="badge" style="background:var(--hue-err);font-size:10px;min-width:14px;height:14px">1</span></button>
+          <button class="chip info">账本 8</button>
+        </div>
+        <button class="icon-btn" title="切换右栏"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><rect x="2" y="2" width="12" height="12" rx="2"/><line x1="11" y1="2" x2="11" y2="14"/></svg></button>
+      </header>
+
+      <!-- session sub-tabs -->
+      <div class="session-bar">
+        <div class="sbar-tab active">对话</div>
+        <div class="sbar-tab">账本</div>
+        <div class="sbar-tab">用量</div>
+      </div>
+
+      <div class="body">
+        <div class="col">
+          <section class="canvas">
+            <div class="stream">
+
+              <!-- history restore -->
+              <div class="activity">
+                <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><circle cx="7" cy="7" r="5.5"/><path d="M7 4v3l2 2"/></svg>
+                <span>已恢复 12 条历史消息</span>
+              </div>
+
+              <!-- user bubble -->
+              <div class="bubble-row">
+                <div class="bubble">把 <code>apps/api</code> 的支付回调改成幂等，回调表加唯一键，重复回调直接短路返回。</div>
+              </div>
+              <div class="bubble-meta"><span>15:23</span></div>
+
+              <!-- thinking fold -->
+              <details class="fold" open>
+                <summary>
+                  <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><path d="M7 2a5 5 0 1 1 0 10A5 5 0 0 1 7 2z"/><line x1="7" y1="5" x2="7" y2="7.5"/><circle cx="7" cy="9.5" r=".5" fill="currentColor" stroke="none"/></svg>
+                  <span>思考 12 秒</span>
+                  <span style="flex:1"></span>
+                  <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M3 5l3 3 3-3"/></svg>
+                </summary>
+                <div class="fold-body">幂等键选择：(provider, provider_txn_id) 唯一索引，重复回调走 ON CONFLICT DO NOTHING，返回 duplicated:true。先读现有 callback.ts 确认落库路径再动 schema。</div>
+              </details>
+
+              <!-- assistant text -->
+              <div class="assistant">
+                <p>先确认现有回调落库路径，再决定唯一键列组合。分三步走：</p>
+                <ul>
+                  <li>读 <code>apps/api/src/payment/callback.ts</code> 与回调表 schema；</li>
+                  <li>加 <code>(provider, provider_txn_id)</code> 唯一索引 + 冲突短路；</li>
+                  <li>重复回调统一返回 200 + <code>duplicated</code>。</li>
+                </ul>
+              </div>
+
+              <!-- tool card: done -->
+              <div class="card">
+                <div class="card-head">
+                  <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><rect x="2" y="2" width="10" height="10" rx="1.5"/><line x1="4" y1="5" x2="10" y2="5"/><line x1="4" y1="8" x2="8" y2="8"/></svg>
+                  <span class="name">read_file</span>
+                  <span class="path">apps/api/src/payment/callback.ts</span>
+                  <span class="spacer"></span>
+                  <span class="tag ok">ok · 128 行</span>
+                </div>
+              </div>
+
+              <!-- tool card: running -->
+              <div class="card">
+                <div class="card-head">
+                  <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><rect x="2" y="2" width="10" height="10" rx="1.5"/><path d="M5 5l4 2-4 2V5z" fill="currentColor" stroke="none"/></svg>
+                  <span class="name">bash</span>
+                  <span class="path">bun test apps/api/test/callback.test.ts</span>
+                  <span class="spacer"></span>
+                  <span class="tag run">running · 6s</span>
+                </div>
+                <div class="card-body mono">$ bun test apps/api/test/callback.test.ts
+✓ 首次回调写入流水
+✓ 重复回调返回 duplicated
+› 并发回调只落一条 …</div>
+                <div class="card-foot">
+                  <div class="bar" style="flex:1"><span style="width:55%"></span></div>
+                  <button class="btn sm ghost">中断</button>
+                </div>
+              </div>
+
+              <!-- approval card -->
+              <div class="card attn">
+                <div class="card-head">
+                  <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><path d="M7 2l1.5 3h3l-2.5 2 1 3L7 8.5 4 10l1-3L2.5 5h3z"/></svg>
+                  <span class="name">需要你批准</span>
+                  <span class="path">bash · bunx prisma migrate dev</span>
+                  <span class="spacer"></span>
+                  <span class="tag run">等待 00:42</span>
+                </div>
+                <div class="card-body">
+                  该命令会改数据库结构（新增唯一索引）。审批档 <strong>always_ask</strong>，已沿父链穿透：
+                  <div class="chain" style="margin-top:10px">
+                    <span class="node">后端实现 #2</span>
+                    <span class="arr">→</span>
+                    <span class="node">架构师 #1</span>
+                    <span class="arr">→</span>
+                    <span class="node">Axon5 主控</span>
+                    <span class="arr">→</span>
+                    <span class="node you">你</span>
+                  </div>
+                </div>
+                <div class="card-foot">
+                  <button class="btn sm">查看完整命令</button>
+                  <span class="spacer"></span>
+                  <button class="btn sm danger">拒绝</button>
+                  <button class="btn sm primary">批准一次</button>
+                </div>
+              </div>
+
+              <!-- collab card -->
+              <div class="card">
+                <div class="card-head">
+                  <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><path d="M2 7h6M6 4l3 3-3 3"/><circle cx="11" cy="7" r="1.5"/></svg>
+                  <span class="name">delegate → 测试工程师 #3</span>
+                  <span class="spacer"></span>
+                  <span class="tag info">context: none</span>
+                  <span class="tag wait">adoption 待表态</span>
+                </div>
+                <div class="card-body">「补一组并发回调的回归用例，覆盖同一 <code>provider_txn_id</code> 的 5 并发。」</div>
+                <div class="card-foot">
+                  <button class="btn sm ghost">跳到该会话</button>
+                  <span class="spacer"></span>
+                  <button class="btn sm">驳回</button>
+                  <button class="btn sm primary">采纳</button>
+                </div>
+              </div>
+
+              <!-- assistant final -->
+              <div class="assistant">
+                <p>唯一索引已加在 <code>(provider, provider_txn_id)</code>，重复回调走 <code>ON CONFLICT DO NOTHING</code> 后直接返回 <code>{ ok:true, duplicated:true }</code>。并发用例交给测试工程师 #3，等结果回来再动 settlement 链路。</p>
+              </div>
+              <div class="msg-actions">
+                <button class="icon-btn"><svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><rect x="4" y="2" width="8" height="10" rx="1.5"/><path d="M2 4v8a1.5 1.5 0 0 0 1.5 1.5H10"/></svg></button>
+                <button class="icon-btn"><svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><path d="M2 9l3-3 2 2 3-4 2 2"/></svg></button>
+                <span class="cost">1,842 in · 613 out · $0.031</span>
+              </div>
+
+              <div class="activity">
+                <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><circle cx="7" cy="7" r="5.5"/><line x1="7" y1="4" x2="7" y2="7.5"/><line x1="7" y1="7.5" x2="9" y2="9.5"/></svg>
+                <span>本轮用时 55 秒 · 3 次工具调用</span>
+              </div>
+
+            </div>
+          </section>
+
+          <!-- composer -->
+          <div class="composer-wrap">
+            <div class="composer">
+              <textarea class="composer-input" rows="1" placeholder="对「后端实现 #2」说点什么…"></textarea>
+              <div class="composer-row">
+                <button class="icon-btn"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M13 8.5l-5 5a4.24 4.24 0 0 1-6-6L7.5 3a2.83 2.83 0 0 1 4 4L6 12.5a1.41 1.41 0 0 1-2-2L9.5 5"/></svg></button>
+                <button class="chip">always_ask</button>
+                <button class="chip">后端实现 #2</button>
+                <span style="flex:1"></span>
+                <button class="send-btn" title="发送"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="8" y1="13" x2="8" y2="3"/><path d="M4 7l4-4 4 4"/></svg></button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- right inspector -->
+        <aside class="inspector">
+          <div class="inspector-header">
+            <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><circle cx="5" cy="4" r="2.5"/><circle cx="9" cy="10" r="2.5"/><line x1="7" y1="4" x2="14" y2="4" stroke-width="1" opacity=".3"/><line x1="0" y1="10" x2="7" y2="10" stroke-width="1" opacity=".3"/></svg>
+            <span>会话成员</span>
+            <span style="flex:1"></span>
+            <span class="tag run" style="font-size:10px">3 运行中</span>
+          </div>
+          <div class="inspector-tabs">
+            <div class="inspector-tab active">成员树</div>
+            <div class="inspector-tab">成员详情</div>
+            <div class="inspector-tab">账本</div>
+          </div>
+          <div class="inspector-body">
+
+            <!-- agent tree -->
+            <div class="agent-node">
+              <span style="color:var(--hue-run)"><svg width="8" height="8" viewBox="0 0 8 8"><circle cx="4" cy="4" r="4" fill="currentColor"/></svg></span>
+              <span class="ident" style="font-weight:500">Axon5 · 主控</span>
+            </div>
+            <div class="agent-node" style="padding-left:24px">
+              <span style="color:var(--n-300);margin-right:2px;font-size:10px">└</span>
+              <span style="color:var(--hue-run)"><svg width="8" height="8" viewBox="0 0 8 8"><circle cx="4" cy="4" r="4" fill="currentColor"/></svg></span>
+              <span class="ident">架构师 #1</span>
+            </div>
+            <div class="agent-node selected" style="padding-left:44px">
+              <span style="color:var(--n-300);margin-right:2px;font-size:10px">└</span>
+              <span style="color:var(--hue-run)"><svg width="8" height="8" viewBox="0 0 8 8"><circle cx="4" cy="4" r="4" fill="currentColor"/></svg></span>
+              <span class="ident">后端实现 #2</span>
+            </div>
+            <div class="agent-node" style="padding-left:44px">
+              <span style="color:var(--n-300);margin-right:2px;font-size:10px">└</span>
+              <span style="color:var(--hue-wait)"><svg width="8" height="8" viewBox="0 0 8 8"><circle cx="4" cy="4" r="4" fill="currentColor"/></svg></span>
+              <span class="ident">测试工程师 #3</span>
+              <span class="tag wait" style="font-size:10px;margin-left:auto">等待</span>
+            </div>
+
+            <div style="height:1px;background:var(--line);margin:var(--sp-3) 0"></div>
+
+            <!-- selected agent detail -->
+            <div style="font-size:var(--text-xs);font-weight:600;color:var(--text-muted);margin-bottom:var(--sp-2)">后端实现 #2</div>
+            <div class="detail-row"><span class="detail-key">角色</span><span class="detail-val">backend-engineer</span></div>
+            <div class="detail-row"><span class="detail-key">模型</span><span class="detail-val">qwen3-max</span></div>
+            <div class="detail-row"><span class="detail-key">ForkMode</span><span class="detail-val">none</span></div>
+            <div class="detail-row"><span class="detail-key">工具</span><span class="detail-val">6 个已授权</span></div>
+            <div class="detail-row"><span class="detail-key">审批档</span><span class="detail-val">always_ask</span></div>
+            <div class="detail-row"><span class="detail-key">用量</span><span class="detail-val" style="font-family:var(--font-mono)">$0.031</span></div>
+            <div class="detail-row"><span class="detail-key">状态</span><span class="detail-val"><span class="tag run">运行中</span></span></div>
+          </div>
+        </aside>
+
+      </div>
+    </main>
+  </div>
+</div>
+</body>
+</html>

@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<title>Axon · 首屏 / 空态</title>
+<link rel="stylesheet" href="assets/tokens.css" />
+<style>
+.suggest-grid { display:grid; grid-template-columns:1fr 1fr; gap:var(--sp-2); max-width:480px; width:100%; margin-top:var(--sp-4); }
+.suggest-pill { padding:var(--sp-3) var(--sp-4); border:1px solid var(--line); border-radius:var(--r-lg); background:var(--bg-card); font-size:var(--text-sm); color:var(--text-dim); cursor:pointer; text-align:left; line-height:var(--lh-base); transition:background var(--dur-fast) var(--ease),border-color var(--dur-fast) var(--ease),color var(--dur-fast) var(--ease); }
+.suggest-pill:hover { background:var(--bg-hover); border-color:var(--n-300); color:var(--text); }
+.suggest-pill strong { display:block; color:var(--text); font-weight:500; margin-bottom:2px; }
+.exec-mode { display:flex; gap:var(--sp-2); align-items:center; flex-wrap:wrap; }
+.exec-pill { display:flex; align-items:center; gap:var(--sp-1); height:26px; padding:0 var(--sp-3); border-radius:var(--r-pill); border:1px solid var(--line); background:transparent; font-size:var(--text-sm); color:var(--text-dim); cursor:pointer; transition:all var(--dur-fast) var(--ease); }
+.exec-pill:hover { border-color:var(--n-400); color:var(--text); }
+.exec-pill.active { background:var(--n-100); border-color:var(--n-400); color:var(--text); font-weight:500; }
+</style>
+</head>
+<body>
+<div class="window">
+  <div class="titlebar">
+    <div class="traffic"><span class="t-close"></span><span class="t-min"></span><span class="t-max"></span></div>
+    <div class="app-name">Axon <span class="chevron" style="color:var(--text-muted);font-size:10px">&#x25BE;</span></div>
+    <div class="titlebar-spacer"></div>
+    <div class="titlebar-actions">
+      <button class="icon-btn" title="搜索"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><circle cx="7" cy="7" r="4.5"/><line x1="10.5" y1="10.5" x2="14" y2="14"/></svg></button>
+      <button class="icon-btn" title="通知"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M8 2a4.5 4.5 0 0 1 4.5 4.5c0 2.5.7 3.5 1.5 4H2c.8-.5 1.5-1.5 1.5-4A4.5 4.5 0 0 1 8 2z"/><line x1="6.5" y1="14" x2="9.5" y2="14"/></svg></button>
+    </div>
+  </div>
+  <div class="shell">
+    <aside class="sidebar">
+      <nav class="sidebar-nav">
+        <div class="nav-item active"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M2 12 8 4l6 8"/></svg>新建会话</div>
+        <div class="nav-item"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><rect x="2" y="2" width="12" height="12" rx="2"/><line x1="5" y1="6" x2="11" y2="6"/><line x1="5" y1="9" x2="9" y2="9"/></svg>收件筱<span style="margin-left:auto"><span class="badge">3</span></span></div>
+        <div class="nav-item"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><circle cx="8" cy="8" r="6"/><line x1="8" y1="5" x2="8" y2="8.5"/><line x1="8" y1="8.5" x2="10" y2="10.5"/></svg>定时任务</div>
+        <div class="nav-item"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><circle cx="8" cy="8" r="2.5"/><path d="M8 2v1.5M8 12.5V14M2 8h1.5M12.5 8H14"/></svg>插件</div>
+      </nav>
+      <div class="sidebar-section-label">项目</div>
+      <div class="sidebar-sessions">
+        <div class="session-group">
+          <div class="session-group-header"><svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M5 4l4 3-4 3"/></svg>axon</div>
+          <div class="session-item active"><span class="session-dot run"></span>支付回调幂等改造</div>
+          <div class="session-item"><span class="session-dot ok"></span>Electron 打包修复</div>
+        </div>
+        <div class="session-group">
+          <div class="session-group-header"><svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M5 4l4 3-4 3"/></svg>kotei</div>
+          <div class="session-item"><span class="session-dot wait"></span>API 压测方案</div>
+        </div>
+        <div class="recents-label">最近</div>
+        <div class="recent-item">解决 Git push 到受保护分支被拒绝</div>
+        <div class="recent-item">帮我实现一个贪吃蛇游戏</div>
+        <div class="recent-item">端口 1420 被占用导致 dev 启动失败</div>
+      </div>
+    </aside>
+    <main class="main">
+      <div class="empty-state">
+        <svg class="empty-icon" viewBox="0 0 64 64" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M20 44c-4-2-8-7-8-14a20 20 0 0 1 40 0c0 7-4 12-8 14"/>
+          <path d="M24 52h16M32 44v8"/>
+          <circle cx="25" cy="30" r="2" fill="currentColor" stroke="none"/>
+          <circle cx="39" cy="30" r="2" fill="currentColor" stroke="none"/>
+        </svg>
+        <div class="empty-headline">你想让 Axon 做什么？</div>
+        <div class="empty-sub">描述任务，选择执行方式，让 Agent 团队开始工作</div>
+        <div class="suggest-grid">
+          <button class="suggest-pill"><strong>修复 Bug</strong>定位并修复代码中的问题</button>
+          <button class="suggest-pill"><strong>开发新功能</strong>从需求到可运行代码</button>
+          <button class="suggest-pill"><strong>代码审查</strong>分析质量、安全与性能</button>
+          <button class="suggest-pill"><strong>重构优化</strong>改善结构不改变行为</button>
+        </div>
+      </div>
+      <div class="composer-wrap">
+        <div class="composer">
+          <div style="font-size:var(--text-base);color:var(--text-muted);min-height:22px;">描述你的任务…</div>
+          <div class="composer-row">
+            <button class="icon-btn" title="附加文件"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M13 8.5l-5 5a4.24 4.24 0 0 1-6-6L7.5 3a2.83 2.83 0 0 1 4 4L6 12.5a1.41 1.41 0 0 1-2-2L9.5 5"/></svg></button>
+            <div class="exec-mode">
+              <button class="exec-pill active">内置引擎</button>
+              <button class="exec-pill">指定团队</button>
+              <button class="exec-pill">临时编队</button>
+            </div>
+            <div style="flex:1"></div>
+            <span class="chip">axon</span>
+            <span class="chip">本地</span>
+            <span class="chip">develop</span>
+            <button class="send-btn" disabled title="发送"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="8" y1="13" x2="8" y2="3"/><path d="M4 7l4-4 4 4"/></svg></button>
+          </div>
+        </div>
+      </div>
+    </main>
+  </div>
+</div>
+</body>
+</html>

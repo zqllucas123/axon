@@ -9,7 +9,7 @@
  * 过大 / 二进制回占位，不塞进 IPC（见 ipc.ts `fs.readFile`）。
  */
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ReactElement } from 'react';
 import hljs from 'highlight.js';
 import { marked } from 'marked';
@@ -39,13 +39,70 @@ function highlight(code: string): string {
   }
 }
 
-export function WorkspacePanel(): ReactElement {
+export function WorkspacePanel({
+  width,
+  onWidthChange,
+}: {
+  width: number;
+  onWidthChange: (width: number) => void;
+}): ReactElement {
   const { sessionId, current, listDir, readWorkspaceFile } = useApp();
   const [cache, setCache] = useState<DirCache>({});
   const [open, setOpen] = useState<Set<string>>(new Set());
   const [sel, setSel] = useState<string | null>(null);
   const [file, setFile] = useState<FsFile | null>(null);
   const [loading, setLoading] = useState(false);
+
+  // 树区域宽度（像素），初始值与 CSS 的 168px 对齐。
+  const [treeWidth, setTreeWidth] = useState(168);
+  // 面板宽度属于 Shell 的共享右列；树宽仍是文件浏览器内部状态。
+  const dragState = useRef<{ startX: number; startWidth: number } | null>(null);
+
+  // 通用拖拽：按下记起点，move 按增量更新宽度，up 清理监听。
+  // dir=1 表示往右拖变宽（树的右侧手柄）；dir=-1 表示往左拖变宽（面板的左边界）。
+  const startDrag = useCallback(
+    (
+      e: React.MouseEvent,
+      startWidth: number,
+      dir: 1 | -1,
+      min: number,
+      max: number,
+      apply: (w: number) => void,
+    ) => {
+      e.preventDefault();
+      dragState.current = { startX: e.clientX, startWidth };
+      // 拖拽期间禁用整页文本选择（否则手柄和周边内容会被选中，显示成深色高亮条），
+      // 并把光标锁成左右箭头，避免掠过文字时变回文本光标。
+      const prevUserSelect = document.body.style.userSelect;
+      const prevCursor = document.body.style.cursor;
+      document.body.style.userSelect = 'none';
+      document.body.style.cursor = 'col-resize';
+      const onMove = (ev: MouseEvent) => {
+        if (!dragState.current) return;
+        const delta = (ev.clientX - dragState.current.startX) * dir;
+        apply(Math.max(min, Math.min(max, dragState.current.startWidth + delta)));
+      };
+      const onUp = () => {
+        dragState.current = null;
+        document.body.style.userSelect = prevUserSelect;
+        document.body.style.cursor = prevCursor;
+        window.removeEventListener('mousemove', onMove);
+        window.removeEventListener('mouseup', onUp);
+      };
+      window.addEventListener('mousemove', onMove);
+      window.addEventListener('mouseup', onUp);
+    },
+    [],
+  );
+
+  const onTreeHandleMouseDown = useCallback(
+    (e: React.MouseEvent) => startDrag(e, treeWidth, -1, 100, 400, setTreeWidth),
+    [startDrag, treeWidth],
+  );
+  const onPanelHandleMouseDown = useCallback(
+    (e: React.MouseEvent) => startDrag(e, width, -1, 280, 900, onWidthChange),
+    [onWidthChange, startDrag, width],
+  );
 
   // 换会话：清空全部本地态，从根重新拉。
   useEffect(() => {
@@ -94,6 +151,7 @@ export function WorkspacePanel(): ReactElement {
   if (!sessionId) {
     return (
       <div className="ws-panel">
+        <div className="ws-resize-edge" title="拖拽调整面板宽度" onMouseDown={onPanelHandleMouseDown} />
         <div className="ws-empty">
           <Icon name="folder" />
           <b>打开文件</b>
@@ -105,14 +163,15 @@ export function WorkspacePanel(): ReactElement {
 
   return (
     <div className="ws-panel">
-      <header className="ws-head">
-        <Icon name="folder" />
-        <span className="ws-root mono" title={current?.record.cwd ?? ''}>
-          {current?.record.cwd ?? '工作区'}
-        </span>
-      </header>
+      <div className="ws-resize-edge" title="拖拽调整面板宽度" onMouseDown={onPanelHandleMouseDown} />
       <div className="ws-body">
-        <div className="ws-tree tree">
+        <FilePreview rel={sel} file={file} loading={loading} />
+        <div
+          className="ws-resize-handle"
+          title="拖拽调整宽度"
+          onMouseDown={onTreeHandleMouseDown}
+        />
+        <div className="ws-tree tree" style={{ width: treeWidth }}>
           <FsList
             dir=""
             depth={0}
@@ -123,7 +182,6 @@ export function WorkspacePanel(): ReactElement {
             onOpen={openFile}
           />
         </div>
-        <FilePreview rel={sel} file={file} loading={loading} />
       </div>
     </div>
   );
@@ -196,7 +254,7 @@ function FilePreview({ rel, file, loading }: FilePreviewProps): ReactElement {
     return (
       <div className="ws-preview ws-preview-empty">
         <Icon name="file" />
-        <span>从左侧目录树选择文件预览</span>
+        <span>从右侧目录树选择文件预览</span>
       </div>
     );
   }

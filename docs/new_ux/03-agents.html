@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<title>Axon · 团队与 Agent 管理</title>
+<link rel="stylesheet" href="assets/tokens.css" />
+<style>
+.page-body { display:flex; flex:1; overflow:hidden; }
+.list-panel { width:240px; flex-shrink:0; border-right:1px solid var(--line); display:flex; flex-direction:column; overflow:hidden; }
+.list-header { height:44px; display:flex; align-items:center; padding:0 var(--sp-3); gap:var(--sp-2); border-bottom:1px solid var(--line); font-size:var(--text-sm); font-weight:500; }
+.list-body { flex:1; overflow-y:auto; padding:var(--sp-2); }
+.list-item { display:flex; align-items:center; gap:var(--sp-2); height:36px; padding:0 var(--sp-2); border-radius:var(--r-md); font-size:var(--text-sm); cursor:pointer; transition:background var(--dur-fast); }
+.list-item:hover { background:var(--bg-hover); }
+.list-item.active { background:var(--bg-active); font-weight:500; }
+.list-item .meta { font-size:var(--text-xs); color:var(--text-muted); margin-left:auto; }
+.detail-panel { flex:1; overflow-y:auto; padding:var(--sp-6); }
+.detail-header { display:flex; align-items:flex-start; gap:var(--sp-4); margin-bottom:var(--sp-6); }
+.detail-avatar { width:48px; height:48px; border-radius:var(--r-lg); background:var(--n-100); border:1px solid var(--line); display:flex; align-items:center; justify-content:center; color:var(--text-dim); flex-shrink:0; }
+.detail-title { font-size:var(--text-xl); font-weight:600; }
+.detail-sub { font-size:var(--text-sm); color:var(--text-dim); margin-top:2px; }
+.section-title { font-size:var(--text-sm); font-weight:600; margin-bottom:var(--sp-3); }
+.field-group { display:flex; flex-direction:column; gap:var(--sp-3); margin-bottom:var(--sp-6); }
+.field { display:flex; flex-direction:column; gap:var(--sp-1); }
+.field-label { font-size:var(--text-xs); color:var(--text-muted); font-weight:500; }
+.field-input { height:32px; border:1px solid var(--line); border-radius:var(--r-md); padding:0 var(--sp-3); font:inherit; font-size:var(--text-sm); background:var(--bg-card); color:var(--text); outline:none; }
+.field-input:focus { border-color:var(--line-focus); }
+.field-textarea { border:1px solid var(--line); border-radius:var(--r-md); padding:var(--sp-2) var(--sp-3); font:inherit; font-size:var(--text-sm); background:var(--bg-card); color:var(--text); outline:none; resize:vertical; min-height:72px; }
+.field-textarea:focus { border-color:var(--line-focus); }
+.tool-grid { display:flex; flex-wrap:wrap; gap:var(--sp-2); }
+.tool-chip { display:flex; align-items:center; gap:var(--sp-1); height:28px; padding:0 var(--sp-3); border:1px solid var(--line); border-radius:var(--r-md); font-size:var(--text-sm); background:var(--bg-card); cursor:pointer; transition:all var(--dur-fast); }
+.tool-chip.on { border-color:var(--hue-ok); background:var(--bg-ok); color:var(--hue-ok); }
+.tool-chip:hover { border-color:var(--n-400); }
+.approval-select { height:32px; border:1px solid var(--line); border-radius:var(--r-md); padding:0 var(--sp-3); font:inherit; font-size:var(--text-sm); background:var(--bg-card); color:var(--text); outline:none; }
+.member-row { display:flex; align-items:center; gap:var(--sp-3); padding:var(--sp-2) 0; border-bottom:1px solid var(--n-150); }
+.member-row:last-child { border-bottom:none; }
+.member-avatar { width:28px; height:28px; border-radius:var(--r-sm); background:var(--n-200); display:flex; align-items:center; justify-content:center; font-size:var(--text-xs); font-weight:600; color:var(--text-dim); flex-shrink:0; }
+.member-name { font-size:var(--text-sm); flex:1; }
+.member-role { font-size:var(--text-xs); color:var(--text-muted); }
+</style>
+</head>
+<body>
+<div class="window">
+  <div class="titlebar">
+    <div class="traffic"><span class="t-close"></span><span class="t-min"></span><span class="t-max"></span></div>
+    <div class="app-name">Axon <span style="color:var(--text-muted);font-size:10px">&#x25BE;</span></div>
+    <div class="titlebar-spacer"></div>
+    <div class="titlebar-actions">
+      <button class="icon-btn" title="搜索"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><circle cx="7" cy="7" r="4.5"/><line x1="10.5" y1="10.5" x2="14" y2="14"/></svg></button>
+    </div>
+  </div>
+  <div class="shell">
+    <aside class="sidebar">
+      <nav class="sidebar-nav">
+        <div class="nav-item"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M2 12 8 4l6 8"/></svg>新建会话</div>
+        <div class="nav-item"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><rect x="2" y="2" width="12" height="12" rx="2"/><line x1="5" y1="6" x2="11" y2="6"/><line x1="5" y1="9" x2="9" y2="9"/></svg>收件箱<span style="margin-left:auto"><span class="badge">3</span></span></div>
+        <div class="nav-item active"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><circle cx="8" cy="5" r="2.5"/><circle cx="8" cy="11" r="2.5"/><line x1="4" y1="8" x2="12" y2="8" stroke-width="1" opacity=".4"/></svg>团队与 Agent</div>
+        <div class="nav-item"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><circle cx="8" cy="8" r="2.5"/><path d="M8 2v1.5M8 12.5V14M2 8h1.5M12.5 8H14"/></svg>插件</div>
+      </nav>
+      <div class="sidebar-section-label">项目</div>
+      <div class="sidebar-sessions">
+        <div class="session-group">
+          <div class="session-group-header"><svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M3 5l4 4 4-4"/></svg>axon</div>
+          <div class="session-item"><span class="session-dot run"></span>支付回调幂等改造</div>
+          <div class="session-item"><span class="session-dot ok"></span>Electron 打包修复</div>
+        </div>
+      </div>
+    </aside>
+    <main class="main">
+      <header class="topbar">
+        <span class="topbar-title">团队与 Agent 管理</span>
+        <div class="topbar-chips">
+          <button class="btn sm">
+            <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5"><line x1="6" y1="1" x2="6" y2="11"/><line x1="1" y1="6" x2="11" y2="6"/></svg>
+            新建团队
+          </button>
+        </div>
+      </header>
+
+      <div class="session-bar">
+        <div class="sbar-tab active">团队</div>
+        <div class="sbar-tab">Agent 类型</div>
+        <div class="sbar-tab">角色配置</div>
+      </div>
+
+      <div class="page-body">
+        <!-- team list -->
+        <div class="list-panel">
+          <div class="list-header">
+            <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><circle cx="5" cy="5" r="2.5"/><circle cx="9" cy="9" r="2.5"/></svg>
+            团队列表
+          </div>
+          <div class="list-body">
+            <div class="list-item active">
+              <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><rect x="2" y="2" width="10" height="10" rx="2"/></svg>
+              全栈开发团队
+              <span class="meta">4 成员</span>
+            </div>
+            <div class="list-item">
+              <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><rect x="2" y="2" width="10" height="10" rx="2"/></svg>
+              代码审查团队
+              <span class="meta">3 成员</span>
+            </div>
+            <div class="list-item">
+              <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><rect x="2" y="2" width="10" height="10" rx="2"/></svg>
+              Axon5 内置
+              <span class="meta tag info" style="font-size:10px">内置</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- team detail -->
+        <div class="detail-panel">
+          <div class="detail-header">
+            <div class="detail-avatar">
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><circle cx="9" cy="8" r="3"/><circle cx="15" cy="8" r="3"/><path d="M3 20c0-4 3-6 6-6h6c3 0 6 2 6 6"/></svg>
+            </div>
+            <div>
+              <div class="detail-title">全栈开发团队</div>
+              <div class="detail-sub">4 个 Agent · 最近使用于 支付回调幂等改造</div>
+            </div>
+            <div style="margin-left:auto;display:flex;gap:var(--sp-2)">
+              <button class="btn sm ghost">复制</button>
+              <button class="btn sm">保存修改</button>
+            </div>
+          </div>
+
+          <!-- basic info -->
+          <div class="section-title">基本信息</div>
+          <div class="field-group">
+            <div class="field">
+              <div class="field-label">团队名称</div>
+              <input class="field-input" value="全栈开发团队" />
+            </div>
+            <div class="field">
+              <div class="field-label">描述</div>
+              <textarea class="field-textarea">适合全栈功能开发任务，包含架构师、后端、前端与测试工程师角色。</textarea>
+            </div>
+            <div class="field">
+              <div class="field-label">编队策略</div>
+              <select class="approval-select">
+                <option>固定编队（按团队定义生成）</option>
+                <option>动态编队（主控自主决定）</option>
+              </select>
+            </div>
+          </div>
+
+          <!-- members -->
+          <div class="section-title">成员列表</div>
+          <div style="border:1px solid var(--line);border-radius:var(--r-lg);overflow:hidden;margin-bottom:var(--sp-6)">
+            <div style="padding:var(--sp-3) var(--sp-4)">
+              <div class="member-row">
+                <div class="member-avatar">架</div>
+                <div><div class="member-name">架构师</div><div class="member-role">architect · qwen3-max · always_ask</div></div>
+                <span class="tag info">主控</span>
+                <button class="icon-btn"><svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><path d="M2 7h10M7 2l5 5-5 5"/></svg></button>
+              </div>
+              <div class="member-row">
+                <div class="member-avatar">后</div>
+                <div><div class="member-name">后端工程师</div><div class="member-role">backend-engineer · qwen3-max · auto</div></div>
+                <button class="icon-btn"><svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><path d="M2 7h10M7 2l5 5-5 5"/></svg></button>
+              </div>
+              <div class="member-row">
+                <div class="member-avatar">前</div>
+                <div><div class="member-name">前端工程师</div><div class="member-role">frontend-engineer · qwen3-max · auto</div></div>
+                <button class="icon-btn"><svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><path d="M2 7h10M7 2l5 5-5 5"/></svg></button>
+              </div>
+              <div class="member-row">
+                <div class="member-avatar">测</div>
+                <div><div class="member-name">测试工程师</div><div class="member-role">tester · deepseek-r1 · always_ask</div></div>
+                <button class="icon-btn"><svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><path d="M2 7h10M7 2l5 5-5 5"/></svg></button>
+              </div>
+            </div>
+            <div style="padding:var(--sp-2) var(--sp-4);border-top:1px solid var(--line)">
+              <button class="btn sm ghost">
+                <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5"><line x1="6" y1="1" x2="6" y2="11"/><line x1="1" y1="6" x2="11" y2="6"/></svg>
+                添加成员
+              </button>
+            </div>
+          </div>
+
+          <!-- budget -->
+          <div class="section-title">预算设置</div>
+          <div class="field-group">
+            <div class="field">
+              <div class="field-label">软限额（警告阈值）</div>
+              <input class="field-input" value="$1.00" style="width:160px" />
+            </div>
+            <div class="field">
+              <div class="field-label">硬限额（强制停止）</div>
+              <input class="field-input" value="$5.00" style="width:160px" />
+            </div>
+          </div>
+        </div>
+      </div>
+    </main>
+  </div>
+</div>
+</body>
+</html>

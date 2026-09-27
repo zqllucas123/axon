@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<title>Axon · New UX — Screen Index</title>
+<link rel="stylesheet" href="assets/tokens.css" />
+<style>
+body { display:flex; align-items:center; justify-content:center; min-height:100vh; background:var(--bg-base); }
+.index-card {
+  width: 480px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-xl);
+  background: var(--bg-card);
+  overflow: hidden;
+}
+.index-header {
+  padding: var(--sp-5) var(--sp-6);
+  border-bottom: 1px solid var(--line);
+}
+.index-header h1 { font-size: var(--text-xl); font-weight: 600; margin-bottom: 4px; }
+.index-header p  { font-size: var(--text-sm); color: var(--text-dim); }
+.index-list { padding: var(--sp-3) var(--sp-4); display:flex; flex-direction:column; gap: var(--sp-1); }
+.index-item {
+  display:flex; align-items:center; gap: var(--sp-3);
+  padding: var(--sp-3) var(--sp-3);
+  border-radius: var(--r-md);
+  cursor:pointer;
+  text-decoration:none;
+  color: var(--text);
+  transition: background var(--dur-fast) var(--ease);
+}
+.index-item:hover { background: var(--bg-hover); }
+.index-num {
+  width: 28px; height: 28px;
+  border-radius: var(--r-md);
+  background: var(--n-100);
+  border: 1px solid var(--line);
+  display:flex; align-items:center; justify-content:center;
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--text-dim);
+  flex-shrink:0;
+}
+.index-label { font-size: var(--text-base); font-weight: 500; }
+.index-desc  { font-size: var(--text-sm); color: var(--text-dim); margin-top:1px; }
+.index-footer {
+  padding: var(--sp-4) var(--sp-6);
+  border-top: 1px solid var(--line);
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+}
+</style>
+</head>
+<body>
+<div class="index-card">
+  <div class="index-header">
+    <h1>Axon · New UX</h1>
+    <p>Codex 风格设计语言 · 高保真原型索引</p>
+  </div>
+  <div class="index-list">
+    <a class="index-item" href="01-home.html">
+      <div class="index-num">1</div>
+      <div>
+        <div class="index-label">首屏 / 空态</div>
+        <div class="index-desc">新建会话入口，Codex 风格空态 + 底栏输入</div>
+      </div>
+    </a>
+    <a class="index-item" href="02-session.html">
+      <div class="index-num">2</div>
+      <div>
+        <div class="index-label">活跃会话</div>
+        <div class="index-desc">消息流 + 工具卡 + 审批卡 + 右栏 Agent 检视</div>
+      </div>
+    </a>
+    <a class="index-item" href="03-agents.html">
+      <div class="index-num">3</div>
+      <div>
+        <div class="index-label">团队与 Agent 管理</div>
+        <div class="index-desc">团队列表 / Agent 类型编辑器 / 角色配置</div>
+      </div>
+    </a>
+    <a class="index-item" href="04-approval.html">
+      <div class="index-num">4</div>
+      <div>
+        <div class="index-label">收件箱 · 审批流</div>
+        <div class="index-desc">跨会话审批聚合 + 父链穿透可视化</div>
+      </div>
+    </a>
+    <a class="index-item" href="05-settings.html">
+      <div class="index-num">5</div>
+      <div>
+        <div class="index-label">设置</div>
+        <div class="index-desc">独立设置窗 · 模型 / 网关 / 编排 / 外观</div>
+      </div>
+    </a>
+  </div>
+  <div class="index-footer">参照 Codex 桌面端设计语言 · docs/new_ux/ · 2026-09-27</div>
+</div>
+</body>
+</html>

@@ -48,21 +48,26 @@
   overflow: hidden;
   background: var(--bg-sidebar);
   border-right: 1px solid var(--line);
+  /* hiddenInset 的交通灯内嵌在左上角（约 y≤22px），把「← 返回应用」往下让开。 */
+  padding-top: 20px;
 }
 
 /* 导航项。
    `.st-back`（← 返回应用）重新加回：设置从独立窗改成主窗内的一屏（S8）后，
-   它是唯一的退路——主窗 Sidebar 在这一屏不渲染。值照 `docs/ux/mockups/assets/axon.css`。 */
+   它是唯一的退路——主窗 Sidebar 在这一屏不渲染。放在侧栏底部，与导航之间用发丝线隔开。 */
 .st-win .st-back {
   display: flex;
   align-items: center;
   gap: 8px;
-  margin: 10px 10px 4px;
+  margin: 10px;
   padding: 7px 10px;
   border-radius: var(--r-sm);
   font-size: var(--fs-13);
   color: var(--text-secondary);
   flex: none;
+  border-top: 1px solid var(--line);
+  padding-top: 14px;
+  margin-top: 6px;
 }
 .st-win .st-back:hover { background: var(--bg-hover); color: var(--text); }
 
@@ -223,11 +228,13 @@
 .st-win .card.err .t { font-size: var(--fs-13); color: var(--sem-err); flex: none; }
 .st-win .card.err .d { flex: 1; min-width: 0; font-size: var(--fs-12); color: var(--text-muted); }
 
-/* 滚动条（原型：设置窗要能整页滚）。 */
-.st-win .st-main::-webkit-scrollbar,
-.st-win .st-nav::-webkit-scrollbar { width: 9px; }
-.st-win .st-main::-webkit-scrollbar-thumb,
-.st-win .st-nav::-webkit-scrollbar-thumb { background: rgba(0, 0, 0, 0.1); border-radius: 5px; }
+/* 滚动条（原型：设置窗要能整页滚）——只给右侧正文，侧栏不显示滚动条。 */
+.st-win .st-main::-webkit-scrollbar { width: 9px; }
+.st-win .st-main::-webkit-scrollbar-thumb { background: rgba(0, 0, 0, 0.1); border-radius: 5px; }
+
+/* 侧栏导航：仍可在极窄窗口下滚动，但不渲染滚动条槽（拖拽条）。 */
+.st-win .st-nav { scrollbar-width: none; }
+.st-win .st-nav::-webkit-scrollbar { width: 0; height: 0; }
 
 /* ═══════════════ 实现新增（原型没有的态，逐条写明原因）═══════════════ */
 

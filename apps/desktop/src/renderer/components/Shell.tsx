@@ -3,13 +3,13 @@
  * 屏幕是纯 UI 状态（state/types.ts）：导航只改 store.screen，不做 URL/history。
  */
 
-import type { ReactElement } from 'react';
+import { useCallback, useEffect, useState, type CSSProperties, type ReactElement } from 'react';
 import { useApp } from '../state/store.tsx';
 import { Sidebar } from './Sidebar.tsx';
-import { Topbar } from './Topbar.tsx';
+import { Topbar, SessionTopbarSide } from './Topbar.tsx';
 import { S0NewSession } from './S0NewSession.tsx';
 import { S1Workbench } from './S1Workbench.tsx';
-import { S2Session } from './S2Session.tsx';
+import { SessionMain, SessionRightPanel } from './S2Session.tsx';
 import { S3Teams } from './S3Teams.tsx';
 import { S5Inbox } from './S5Inbox.tsx';
 import { S6Budget } from './S6Budget.tsx';
@@ -22,8 +22,6 @@ function Screen(): ReactElement {
   switch (screen) {
     case 's1':
       return <S1Workbench />;
-    case 's2':
-      return <S2Session />;
     case 's3':
       return <S3Teams />;
     case 's5':
@@ -59,23 +57,61 @@ function ErrorBar(): ReactElement | null {
 }
 
 export function Shell(): ReactElement {
-  const { screen } = useApp();
+  const { screen, rightPanel } = useApp();
+  const [rightPanelWidth, setRightPanelWidth] = useState(420);
+
+  // 侧栏收起态（纯 UI，不入协议 / store）：只影响外壳的两列骨架，故就近放在 Shell。
+  // 记忆到 localStorage，重开窗保留；⌘B / Ctrl+B 全局切换（对齐 VS Code「切换侧边栏」）。
+  const [collapsed, setCollapsed] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem('axon.sidebarCollapsed') === '1';
+    } catch {
+      return false;
+    }
+  });
+  const toggleSidebar = useCallback(() => {
+    setCollapsed((v) => {
+      const next = !v;
+      try {
+        localStorage.setItem('axon.sidebarCollapsed', next ? '1' : '0');
+      } catch {
+        /* 隐私模式下 localStorage 可能抛错：切换仍生效，只是不记忆。 */
+      }
+      return next;
+    });
+  }, []);
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey && (e.key === 'b' || e.key === 'B')) {
+        e.preventDefault();
+        toggleSidebar();
+      }
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [toggleSidebar]);
 
   // S8 设置屏**整屏接管**：它自带一套左导航（`.st-sidebar`），再叠主窗 Sidebar
   // 就是两条侧栏并列；而且设置没有会话上下文，Topbar 那排会话胶囊（预算/待批/
   // 活跃会话）在这里语义为空。返回靠设置屏自己的「← 返回」（SettingsApp.tsx）。
   if (screen === 's8') return <SettingsScreen />;
 
+  const showRightPanel = screen === 's2' && rightPanel !== 'none';
+  const layoutStyle = { '--right-panel-w': `${showRightPanel ? rightPanelWidth : 0}px` } as CSSProperties;
+
   return (
-    <div className="window">
+    <div className={`window${collapsed ? ' sidebar-collapsed' : ''}`}>
       <Sidebar />
-      <div className="main">
-        <Topbar />
-        <ErrorBar />
-        {/* 主区以下由各屏自己排（原型就是这么分的）：S0/S2 是 `.body > .col + .inspector`，
-            S1/S3 是 `.body > .canvas + .inspector`，S2 还在 body 之上多一条 session-bar。
-            外壳硬套一层 .col/.canvas 会逼各屏往外抠，反而失真。 */}
-        <Screen />
+      <div className={`main app-layout${showRightPanel ? ' has-right-panel' : ''}`} style={layoutStyle}>
+        <Topbar sidebarCollapsed={collapsed} onToggleSidebar={toggleSidebar} />
+        <div className="topbar-side">{showRightPanel ? <SessionTopbarSide /> : null}</div>
+        <div className="screen-main">
+          <ErrorBar />
+          {screen === 's2' ? <SessionMain /> : <Screen />}
+        </div>
+        <div className="screen-side">
+          {showRightPanel ? <SessionRightPanel width={rightPanelWidth} onWidthChange={setRightPanelWidth} /> : null}
+        </div>
       </div>
     </div>
   );

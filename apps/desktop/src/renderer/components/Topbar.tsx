@@ -5,13 +5,41 @@
  * 缺口处置（MU-2 §4.6）：原型顶栏的「正在：…」任务文本拿不到（快照无 task）⇒ 整块不渲染。
  */
 
-import type { ReactElement } from 'react';
+import { useEffect, useRef, useState, type ReactElement } from 'react';
 import { useApp } from '../state/store.tsx';
 import { Chips } from './Chips.tsx';
 import { Icon } from '../icons.tsx';
 
-export function Topbar(): ReactElement {
+export function Topbar({
+  sidebarCollapsed,
+  onToggleSidebar,
+}: {
+  sidebarCollapsed: boolean;
+  onToggleSidebar: () => void;
+}): ReactElement {
   const { screen, current, focusPath, rightPanel, setRightPanel, setEscalateOpen } = useApp();
+  const [actionsOpen, setActionsOpen] = useState(false);
+  const actionsRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!actionsOpen) return;
+    const onMouseDown = (event: MouseEvent): void => {
+      if (actionsRef.current && !actionsRef.current.contains(event.target as Node)) setActionsOpen(false);
+    };
+    const onKeyDown = (event: KeyboardEvent): void => {
+      if (event.key === 'Escape') setActionsOpen(false);
+    };
+    document.addEventListener('mousedown', onMouseDown);
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('mousedown', onMouseDown);
+      document.removeEventListener('keydown', onKeyDown);
+    };
+  }, [actionsOpen]);
+
+  useEffect(() => {
+    if (screen !== 's2' || !current) setActionsOpen(false);
+  }, [screen, current]);
 
   const title =
     screen === 's0'
@@ -24,6 +52,17 @@ export function Topbar(): ReactElement {
 
   return (
     <div className="topbar">
+      {/* 侧栏切换：收起时按钮留在主区顶栏，仍是唯一重新展开的入口（对齐 VS Code ⌘B）。 */}
+      <button
+        className={`sidebar-toggle${sidebarCollapsed ? ' is-collapsed' : ''}`}
+        data-smoke="toggle-sidebar"
+        title={`${sidebarCollapsed ? '展开' : '收起'}侧边栏 (⌘B)`}
+        aria-label="切换侧边栏"
+        aria-pressed={!sidebarCollapsed}
+        onClick={onToggleSidebar}
+      >
+        <Icon name="panel" size={18} />
+      </button>
       <span className="title">{title}</span>
       {screen === 's2' && focusPath ? (
         <span className="tag mono" title="当前焦点分身（点右栏成员切换）">
@@ -42,36 +81,73 @@ export function Topbar(): ReactElement {
             <Icon name="folder" size={14} />
             文件
           </button>
-          <button
-            className={`btn sm ghost${rightPanel === 'props' ? ' is-on' : ''}`}
-            data-smoke="toggle-props"
-            title="会话属性（成员 / 账本 / 协作动作）"
-            onClick={() => setRightPanel(rightPanel === 'props' ? 'none' : 'props')}
-          >
-            <Icon name="list" size={14} />
-            属性
-          </button>
-          {!current.team ? (
+          <div ref={actionsRef} className="session-actions">
             <button
-              className="btn sm"
-              data-smoke="escalate"
-              title="升级为团队会话（消息不丢）"
-              onClick={() => setEscalateOpen(true)}
+              className={`btn sm ghost session-actions-trigger${actionsOpen || rightPanel === 'props' ? ' is-on' : ''}`}
+              data-smoke="session-actions"
+              title="会话操作"
+              aria-label="会话操作"
+              aria-haspopup="menu"
+              aria-expanded={actionsOpen}
+              onClick={() => setActionsOpen((open) => !open)}
             >
-              <Icon name="users" size={14} />
-              叫人（升级为团队会话）
+              <Icon name="sliders" size={14} />
             </button>
-          ) : (
-            <button className="btn sm ghost" disabled title="临时加人（M4 后）">
-              <Icon name="plus" size={14} />
-              临时加人
-            </button>
-          )}
+            {actionsOpen ? (
+              <div className="menu session-actions-menu" role="menu">
+                <button
+                  className={`menu-item${rightPanel === 'props' ? ' is-on' : ''}`}
+                  data-smoke="toggle-props"
+                  role="menuitem"
+                  title="会话属性（成员 / 账本 / 协作动作）"
+                  onClick={() => {
+                    setRightPanel('props');
+                    setActionsOpen(false);
+                  }}
+                >
+                  <Icon name="list" size={16} />
+                  <span>属性</span>
+                  {rightPanel === 'props' ? <span className="mk">已打开</span> : null}
+                </button>
+              </div>
+            ) : null}
+          </div>
         </span>
       ) : null}
-      {/* 会话屏（S2）顶栏只保留标题 / 文件 / 属性 / 叫人 一行；chip 口径在会话屏
-          由右栏「属性」承担，全局屏才在顶栏挂状态 chip。 */}
+      {/* 会话屏（S2）的工作区面包屑和「叫人」在 Shell 的共享右列顶栏渲染；
+          这里仅保留文件与会话属性控制，避免整宽顶栏与右面板错位。 */}
       {screen === 's2' ? null : <Chips />}
+    </div>
+  );
+}
+
+/** 会话右列的独立顶栏：与下方 Inspector / WorkspacePanel 共用同一 Grid 列。 */
+export function SessionTopbarSide(): ReactElement | null {
+  const { current, setEscalateOpen } = useApp();
+  if (!current) return null;
+
+  return (
+    <div className="session-topbar-side" data-smoke="session-topbar-side">
+      <div className="workspace-crumb" data-smoke="workspace-crumb" title={current.record.cwd}>
+        <Icon name="folder" size={16} />
+        <span className="mono">{current.record.cwd}</span>
+      </div>
+      {!current.team ? (
+        <button
+          className="btn sm"
+          data-smoke="escalate"
+          title="升级为团队会话（消息不丢）"
+          onClick={() => setEscalateOpen(true)}
+        >
+          <Icon name="users" size={14} />
+          叫人（升级为团队会话）
+        </button>
+      ) : (
+        <button className="btn sm ghost" disabled title="临时加人（M4 后）">
+          <Icon name="plus" size={14} />
+          临时加人
+        </button>
+      )}
     </div>
   );
 }

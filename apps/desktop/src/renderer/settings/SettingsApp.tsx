@@ -9,10 +9,10 @@
  *    有原生交通灯，再画一套只会变成两排按钮。（它的 `.st-back` 样式已随 MU-3
  *    切片 8 一起删掉 —— 为一个被否决的元素存样式，只会让下一个人以为它只是
  *    暂时没渲染；真要做时从原型 `assets/axon.css` 重抵六行即可。）
- * 2. **「团队与角色 ↗」「预算与用量 ↗」两个跳回主窗的入口**：协议里只有
- *    `window.openSettings`（主窗 → 设置窗的单向），没有反向的聚焦/导航命令。
- *    用户拍板「这两项不用从设置窗跳回主窗」，所以它们降级为导航里的一段
- *    **说明文字**（`.st-navnote`）——告诉你去哪儿找，而不是给一个点了没反应的项。
+ * 2. **「团队与角色」「预算与用量」两项不进设置左导航**：用户拍板它们只归主窗
+ *    一级导航（Sidebar 的「团队管理」「预算与用量」），设置窗不再复制一个跳回
+ *    主窗的入口 ——「在主窗里管」那一整组连同两个 `↗` 跳板一起删。少一处「点了
+ *    就跳走」的项，设置左导航就只剩「在这一屏里能改的东西」这一种语义。
  *
  * 错误条：`config.patch` 的**字段级**错误在各自行内标红（fields.tsx），这里只接
  * 传输/命令级错误（IPC 断了、命令抛异常），所以它是一条可关闭的横幅而不是行内红字。
@@ -60,9 +60,6 @@ function SettingsShell(): ReactElement {
   return (
     <div className="st-win" data-smoke="settings-win">
       <aside className="st-sidebar">
-        <button type="button" className="st-back" data-smoke="settings-back" onClick={() => go('s0')}>
-          ← 返回应用
-        </button>
         <div className="st-nav">
           <div className="st-group">个人</div>
           {PANES.slice(0, 4).map((p) => (
@@ -77,24 +74,11 @@ function SettingsShell(): ReactElement {
             </button>
           ))}
 
-          <div className="st-group">在主窗里管</div>
-          {/* 现在设置是主窗内的一屏（S8），go() 就能跳——不再需要降级为说明文字。 */}
-          <button
-            type="button"
-            className="st-item"
-            data-smoke="settings-to-teams"
-            onClick={() => go('s3')}
-          >
-            团队与角色 ↗
-          </button>
-          <button
-            type="button"
-            className="st-item"
-            data-smoke="settings-to-budget"
-            onClick={() => go('s6')}
-          >
-            预算与用量 ↗
-          </button>
+          {/*
+            「在主窗里管」那组（团队与角色 ↗ / 预算与用量 ↗）已删：它们是跳回主窗
+            一级导航的跳板，而不是本屏能改的设置。用户拍板这两项只归主窗（Sidebar
+            的「团队管理」「预算与用量」），设置左导航不再复制一个「点了就跳走」的入口。
+          */}
 
           <div className="st-group">其他</div>
           <button
@@ -106,6 +90,9 @@ function SettingsShell(): ReactElement {
             关于
           </button>
         </div>
+        <button type="button" className="st-back" data-smoke="settings-back" onClick={() => go('s0')}>
+          ← 返回应用
+        </button>
       </aside>
 
       <main className="st-main">

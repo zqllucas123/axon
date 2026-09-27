@@ -283,12 +283,44 @@ try {
   log(sessionRow, '左栏选中冒烟会话（session.created → React 重渲染 → 点击选中）');
   if (!sessionRow) exit(1);
 
-  // 右栏默认收起（rightPanel='none'）：属性面板（含成员树 / 账本）改为顶栏「属性」按钮显式打开。
-  // rightPanel 是应用级状态，打开一次后跨会话切换保持，所以只需在这里点一次。
-  const propsToggled = await until(
-    `!!document.querySelector('[data-smoke="toggle-props"]')`,
+  const uniqueFileToggle = await until(
+    `document.querySelectorAll('[data-smoke="toggle-files"]').length === 1`,
   );
-  if (propsToggled) await evalJs(`document.querySelector('[data-smoke="toggle-props"]').click()`);
+  log(uniqueFileToggle, '文件切换入口唯一');
+  if (!uniqueFileToggle) exit(1);
+
+  await evalJs(`document.querySelector('[data-smoke="toggle-files"]').click()`);
+  const fileLayout = await until(
+    `!!document.querySelector('.app-layout.has-right-panel .topbar-side') && !!document.querySelector('.screen-side .ws-panel')`,
+  );
+  log(fileLayout, '文件右顶栏与文件面板同时出现');
+  if (!fileLayout) exit(1);
+  const aligned = await evalJs(`(() => {
+    const top = document.querySelector('.topbar-side')?.getBoundingClientRect();
+    const body = document.querySelector('.screen-side')?.getBoundingClientRect();
+    return !!top && !!body && Math.abs(top.left - body.left) <= 1 && Math.abs(top.right - body.right) <= 1 && Math.abs(top.bottom - body.top) <= 1;
+  })()`);
+  log(aligned, '右顶栏与右面板共享同一列边界');
+  if (!aligned) exit(1);
+  await evalJs(`document.querySelector('[data-smoke="toggle-files"]').click()`);
+  const fileClosed = await until(`!document.querySelector('.screen-side .ws-panel')`);
+  log(fileClosed, '文件面板可关闭');
+  if (!fileClosed) exit(1);
+
+  // 右栏默认收起（rightPanel='none'）：属性面板（含成员树 / 账本）从顶栏会话操作菜单显式打开。
+  const actionsReady = await until(`!!document.querySelector('[data-smoke="session-actions"]')`);
+  log(actionsReady, '会话操作入口出现');
+  if (!actionsReady) exit(1);
+  await evalJs(`document.querySelector('[data-smoke="session-actions"]').click()`);
+
+  const propsToggled = await until(`!!document.querySelector('[data-smoke="toggle-props"]')`);
+  log(propsToggled, '会话操作菜单展开并显示属性入口');
+  if (!propsToggled) exit(1);
+  await evalJs(`document.querySelector('[data-smoke="toggle-props"]').click()`);
+
+  const menuClosed = await until(`!document.querySelector('[data-smoke="toggle-props"]')`);
+  log(menuClosed, '选择属性后会话操作菜单关闭');
+  if (!menuClosed) exit(1);
 
   const rootNode = await until(
     `!!document.querySelector('.inspector [data-smoke="member-row"][data-path="${session.root}"]')`,
