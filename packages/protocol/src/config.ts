@@ -62,6 +62,26 @@ export interface ModelSpec {
 // 配置文件形状
 // ─────────────────────────────────────────────────────────────
 
+// ─────────────────────────────────────────────────────────────
+// 网络代理
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * 应用级网络代理配置。
+ *
+ * 生效范围：引擎所有出站请求（LLM 调用、工具网络请求）都走主进程 fetch，
+ * 通过 `node:undici` 的全局 dispatcher 统一代理，无需各处单独注入。
+ */
+export interface ProxyConfig {
+  /** 代理地址，形如 `http://host:port` 或 `socks5://host:port`。留空 = 不用代理。 */
+  url?: string;
+  /**
+   * 不走代理的主机列表，逗号分隔。
+   * 支持精确主机名（`localhost`）和后缀通配（`.internal` 匹配所有 .internal 子域）。
+   */
+  noProxy?: string;
+}
+
 export interface ProviderConfig {
   id?: string;
   name?: string;
@@ -105,6 +125,8 @@ export interface AxonConfig {
   defaultExecutor?: SessionExecutor;
   /** 界面偏好（MU-3 拍板 P-3：落在 config 而不是 localStorage，理由见 UiPreferences）。 */
   ui?: UiPreferences;
+  /** 应用级网络代理。引擎所有出站请求统一走此代理（undici 全局 dispatcher）。 */
+  proxy?: ProxyConfig;
 }
 
 /**
@@ -226,7 +248,9 @@ export type ConfigPatchPath =
   | 'ui.density'
   | 'ui.fontSize'
   | 'ui.reduceMotion'
-  | 'ui.annotations';
+  | 'ui.annotations'
+  | 'proxy.url'
+  | 'proxy.noProxy';
 
 export type ConfigFieldKind = 'string' | 'number' | 'enum' | 'json' | 'boolean';
 
@@ -268,6 +292,9 @@ export const CONFIG_FIELD_SPECS: readonly ConfigFieldSpec[] = Object.freeze([
   { path: 'ui.fontSize', kind: 'number', min: 12, max: 20, note: '会话正文字号（px）；缺省 15' },
   { path: 'ui.reduceMotion', kind: 'enum', values: ['system', 'always'], note: '减弱动态效果：跟随系统 prefers-reduced-motion 或始终减弱' },
   { path: 'ui.annotations', kind: 'boolean', note: '在界面上标出每项数据来自哪个协议事件/命令（字段已就绪，渲染层的标注系统待 G11.13）' },
+  // proxy.*：引擎出站流量代理（undici 全局 dispatcher）。
+  { path: 'proxy.url', kind: 'string', note: '代理地址，形如 http://host:port 或 socks5://host:port；留空不用代理' },
+  { path: 'proxy.noProxy', kind: 'string', note: '不走代理的主机列表，逗号分隔，支持后缀通配（.internal）' },
 ]);
 
 const SPEC_BY_PATH = new Map<string, ConfigFieldSpec>(

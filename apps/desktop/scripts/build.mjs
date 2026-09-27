@@ -30,6 +30,7 @@ const EXTERNAL = [
   '@earendil-works/pi-ai',
   '@earendil-works/pi-agent-core',
   '@earendil-works/chord',
+  'undici',
 ];
 
 /** workspace 内部包走别名，源码直接参与打包（它们是纯 TS，无副作用）。 */

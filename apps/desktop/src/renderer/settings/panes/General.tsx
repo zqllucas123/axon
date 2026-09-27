@@ -125,6 +125,30 @@ export function GeneralPane(): ReactElement {
           smoke="set-configPath"
         />
       </div>
+
+      <div className="st-sec">网络</div>
+      <div className="grp">
+        <InputField
+          path="proxy.url"
+          title="代理服务器"
+          desc="引擎所有出站请求（LLM 调用等）走此代理。留空 = 不用代理。支持 http://、https:// 与 socks5:// 协议，格式如 http://127.0.0.1:7890。"
+          value={c.proxy?.url}
+          placeholder="http://127.0.0.1:7890"
+          mono
+          smoke="set-proxyUrl"
+        />
+
+        <InputField
+          path="proxy.noProxy"
+          title="代理例外"
+          desc="不走代理的主机名，逗号分隔。支持精确匹配（localhost）和后缀通配（.internal 匹配所有 .internal 子域）。代理服务器未配置时此项无效。"
+          value={c.proxy?.noProxy}
+          placeholder="localhost,.internal,192.168.0.0/16"
+          mono
+          smoke="set-proxyNoProxy"
+        />
+      </div>
     </section>
   );
 }
+

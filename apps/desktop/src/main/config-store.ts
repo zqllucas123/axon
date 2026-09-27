@@ -125,6 +125,15 @@ function validateValue(path: string, value: unknown, raw: Record<string, unknown
         message: `${path} 必须是 ${(spec.values ?? []).join(' | ')}，收到 ${JSON.stringify(value)}`,
       });
     }
+  } else if (spec.kind === 'string' && path === 'proxy.url' && typeof value === 'string' && value !== '') {
+    try {
+      const u = new URL(value);
+      if (!['http:', 'https:', 'socks5:'].includes(u.protocol)) {
+        issues.push({ path, code: 'invalid-value', message: 'proxy.url 协议须为 http://、https:// 或 socks5://' });
+      }
+    } catch {
+      issues.push({ path, code: 'invalid-value', message: 'proxy.url 不是合法 URL，请填 http://host:port 形式' });
+    }
   } else if (spec.kind === 'json') {
     if (typeof value !== 'object' || value === null) {
       issues.push({ path, code: 'invalid-type', message: `${path} 必须是对象或数组` });
@@ -346,7 +355,7 @@ export class ConfigStore {
     for (const path of CONFIG_PATCH_PATHS) deletePath(draft, path);
     // 删完叶子后别留下 `"ui": {}` 这种空壳：它会让下次读盘看起来「配过」。
     // 但容器里还有未知键（如 provider.id）时必须保留容器本身。
-    for (const key of ['provider', 'ui']) {
+    for (const key of ['provider', 'ui', 'proxy']) {
       const nested = draft[key];
       if (typeof nested === 'object' && nested !== null && Object.keys(nested).length === 0) {
         delete draft[key];
