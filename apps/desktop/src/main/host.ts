@@ -86,6 +86,8 @@ import {
   BudgetGuard,
   Ledger,
   createAxonEngine,
+  createLeafTools,
+  createLocalOps,
   forkMessages,
   repairMessages,
   fromMessageLike,
@@ -93,6 +95,7 @@ import {
   type AgentEvent,
   type AxonEngine,
   type BudgetState,
+  type LeafOperations,
   type ModelSource,
 } from '@axon/kernel';
 import {
@@ -143,6 +146,11 @@ export interface HostOptions {
   roles: RoleDefinition[];
   /** 工具全集。角色的白名单在此之上做交集，只能减不能加。 */
   tools?: unknown[];
+  /**
+   * 叶子工具的底层操作（文件系统 + 子进程）。缺省 = 本地实现。
+   * 测试/冒烟可注入假实现，避免真读盘、真起进程。
+   */
+  leafOps?: LeafOperations;
   maxConcurrent?: number;
   /** 分身树最大深度（会话根为 0）；缺省 2。 */
   maxDepth?: number;
@@ -245,6 +253,10 @@ export class AxonHost {
   /** 模型来源。config.patch 改了 provider 后会整体替换（见 setModelSource）。 */
   private modelSource: ModelSource & { selectModel?: (id: string) => ModelSource };
   private readonly tools: unknown[];
+  /** 叶子工具的底层操作，按会话 cwd 现造工具时复用同一份。 */
+  private readonly leafOps: LeafOperations;
+  /** 叶子工具按 cwd 缓存（工具是无状态闭包，同一 cwd 复用同一批实例）。 */
+  private readonly leafToolCache = new Map<string, unknown[]>();
   // ── M3：闸门 / 预算 / 活性 ──────────────────────────────
   private readonly budget: BudgetGuard;
   private idleTimeoutMs: number;
@@ -298,6 +310,7 @@ export class AxonHost {
     this.emit = options.emit;
     this.modelSource = options.modelSource;
     this.tools = options.tools ?? [];
+    this.leafOps = options.leafOps ?? createLocalOps();
     this.registry = new AgentRegistry({
       maxConcurrent: options.maxConcurrent ?? 6,
       maxDepth: options.maxDepth ?? 2,
@@ -665,6 +678,7 @@ export class AxonHost {
     const roster = plan.members.length > 0 ? rosterPrompt(sessionId, spawned) : undefined;
     this.buildRootEngine(rootPath, sessionId, plan.lead, {
       orchestration: plan.members.length > 0,
+      cwd,
       ...(roster !== undefined ? { systemPromptExtra: roster } : {}),
     });
 
@@ -795,14 +809,16 @@ export class AxonHost {
     lead: MemberPlan,
     opts: {
       orchestration: boolean;
+      cwd?: string;
       systemPromptExtra?: string;
       messages?: MessageLike[];
     },
   ): AxonEngine {
     const allowSet = lead.role.tools ? new Set(lead.role.tools) : undefined;
     const ms0 = this.pickModelSource(lead.role.model);
+    const cwdLine = opts.cwd ? `工作目录：${opts.cwd}` : undefined;
     const engine = createAxonEngine({
-      systemPrompt: [lead.role.instructions, opts.systemPromptExtra].filter(Boolean).join('\n\n'),
+      systemPrompt: [lead.role.instructions, cwdLine, opts.systemPromptExtra].filter(Boolean).join('\n\n'),
       model: ms0.model,
       streamFn: ms0.streamFn,
       messages: fromMessageLike(opts.messages ?? []),
@@ -1003,6 +1019,7 @@ export class AxonHost {
     const roster = rosterPrompt(sessionId, spawned);
     this.buildRootEngine(rootPath, sessionId, plan.lead, {
       orchestration: true,
+      cwd: record.cwd,
       systemPromptExtra: roster,
       ...(carry ? { messages: this.messagesOf(rootPath) } : {}),
     });
@@ -1180,6 +1197,7 @@ export class AxonHost {
         const roster = nodes.length > 1 ? rosterPrompt(sessionId, entries) : undefined;
         this.buildRootEngine(rootPath, sessionId, plan, {
           orchestration: record.executor !== 'engine',
+          cwd: record.cwd,
           messages,
           ...(roster !== undefined ? { systemPromptExtra: roster } : {}),
         });
@@ -2005,12 +2023,27 @@ export class AxonHost {
     allowSet?: Set<string>,
     opts: { orchestration?: boolean } = {},
   ): unknown[] {
+    // 候选叶子工具 = 注入的 universe（如冒烟的 smoke_echo）+ 按会话 cwd 现造的
+    // read/edit/bash… cwd 解析不到（会话记录已删/无归属）就只给 universe，
+    // 免得拿 process.cwd() 兜底把工具指到进程目录去误伤别的盘。
+    const cwd = this.recordOf(path)?.cwd;
+    const candidates = cwd ? [...this.tools, ...this.leafToolsFor(cwd)] : [...this.tools];
     const leaves = allowSet
-      ? this.tools.filter((t) => (t as { name?: unknown }).name !== undefined
+      ? candidates.filter((t) => (t as { name?: unknown }).name !== undefined
           && allowSet.has((t as { name: string }).name))
-      : [...this.tools];
+      : candidates;
     if (opts.orchestration === false) return leaves;
     return [...leaves, ...this.orchestrationToolsFor(path, allowSet)];
+  }
+
+  /** 按 cwd 现造整套叶子工具，同一 cwd 复用（工具是无状态闭包，缓存安全）。 */
+  private leafToolsFor(cwd: string): unknown[] {
+    let tools = this.leafToolCache.get(cwd);
+    if (!tools) {
+      tools = createLeafTools(cwd, this.leafOps);
+      this.leafToolCache.set(cwd, tools);
+    }
+    return tools;
   }
 
   /** 把宿主能力收窄成编排工具需要的驱动面（调用者身份在此 bind）。 */
