@@ -15,7 +15,7 @@
  * L3 纪律：本组件只做「渲染 + 发意图」，任何状态判断都在 `state/selectors.ts`。
  */
 
-import type { ReactElement } from 'react';
+import { useState, type ReactElement } from 'react';
 import { useApp } from '../state/store.tsx';
 import { Icon, type IconName } from '../icons.tsx';
 import { inlineSegments, parseProse, type StreamItem } from '../state/selectors.ts';
@@ -94,9 +94,29 @@ function ToolCard({ item }: { item: Extract<StreamItem, { kind: 'tool' }> }): Re
   const state =
     item.state === 'lost' && (agentStatus === 'running' || agentStatus === 'waiting') ? 'running' : item.state;
   const done = state !== 'running';
+  // 工具详情默认收起：只有存在结果体、且用户点击卡头时才展开（见截图反馈）。
+  const [open, setOpen] = useState(false);
+  const hasBody = done && !!item.result;
   return (
     <div className={state === 'err' ? 'card err' : 'card'} data-smoke="tool-card" data-tool={item.name}>
-      <div className="card-head">
+      <div
+        className={hasBody ? 'card-head toggle' : 'card-head'}
+        role={hasBody ? 'button' : undefined}
+        tabIndex={hasBody ? 0 : undefined}
+        aria-expanded={hasBody ? open : undefined}
+        onClick={hasBody ? () => setOpen((v) => !v) : undefined}
+        onKeyDown={
+          hasBody
+            ? (e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault();
+                  setOpen((v) => !v);
+                }
+              }
+            : undefined
+        }
+      >
+        {hasBody ? <Icon name={open ? 'chevD' : 'chevR'} size={14} /> : null}
         <Icon name={TOOL_ICONS[item.name] ?? 'terminal'} size={16} />
         <span className="name">{item.name}</span>
         {item.args ? <span className="path">{item.args}</span> : null}
@@ -111,7 +131,7 @@ function ToolCard({ item }: { item: Extract<StreamItem, { kind: 'tool' }> }): Re
                 : '未记录结果'}
         </span>
       </div>
-      {done && item.result ? <div className="card-body mono">{clip(item.result)}</div> : null}
+      {hasBody && open ? <div className="card-body mono">{clip(item.result)}</div> : null}
       {state === 'running' ? (
         <div className="card-foot">
           <span className="spacer" />

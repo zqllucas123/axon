@@ -471,6 +471,8 @@
   font-size: var(--fs-13);
   color: var(--text-secondary);
 }
+.card-head.toggle { cursor: pointer; user-select: none; }
+.card-head.toggle:hover { background: var(--surface-hover, rgba(0, 0, 0, 0.03)); }
 .card-head .name { color: var(--text); font-weight: 500; }
 .card-head .path { font-family: var(--font-mono); font-size: var(--fs-12); color: var(--text-muted); }
 .card-head .spacer { flex: 1; }
