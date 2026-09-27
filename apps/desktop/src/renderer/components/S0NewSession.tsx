@@ -5,15 +5,14 @@
  * 让人为起名再写一遍是多余的；题目仍可事后改（S2 会话条、S6 列表）。
  *
  * 缺口处置（MU-2 §4.6）：
- *   - 原型右栏「最近用过」是**频次统计**（今天 3 次 / 昨天），协议里没有计数 ⇒
- *     换成「最近会话」（updatedAt 倒序），标题同步改 —— 不编假频次；
- *   - 「临时编队」当面挑人属 M4 之后的协作动作 ⇒ 卡片置灰而不删（它标出三档的存在）；
- *   - 数据来源标注（.ann）是 §十二 台账 C-7，本片不渲染。
+ *   - 右栏「会话 = 一等公民 / 最近会话」信息面已按产品要求整屏移除 —— 新建会话页
+ *     只留「说任务 → 选目录 → 选执行方式」的主流程，不再堆叠说明性信息；
+ *   - 工作空间选择器从输入框内移到框外（独立可点条），点击弹系统目录选择器挑运行路径；
+ *   - 「临时编队」当面挑人属 M4 之后的协作动作 ⇒ 卡片置灰而不删（它标出三档的存在）。
  */
 
 import { useState, type ReactElement } from 'react';
 import { useApp } from '../state/store.tsx';
-import { splitSessions, relDay } from '../state/selectors.ts';
 import { Icon, type IconName } from '../icons.tsx';
 import type { SessionExecutor } from '@axon/protocol';
 
@@ -57,23 +56,27 @@ function titleOfTask(task: string): string {
   return first.length > 30 ? `${first.slice(0, 30)}…` : first;
 }
 
-/** 「今天 / 昨天 / 9-14」口径已归并到 `selectors.relDay`（MU-3 切片 8）。 */
-
 export function S0NewSession(): ReactElement {
-  const { config, teams, sessions, projects, projectContext, clearProjectContext, createSession, openSession, go } = useApp();
+  const { config, teams, projects, projectContext, clearProjectContext, createSession, pickProjectWorkspace, go } = useApp();
   const [picked, setPicked] = useState<SessionExecutor | null>(null);
   const [task, setTask] = useState('');
   const [teamId, setTeamId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // 用户为这次会话手选的工作空间（未选则回落到配置默认目录）。项目会话不用它——目录锁在项目上。
+  const [pickedCwd, setPickedCwd] = useState<string | null>(null);
 
   // 默认选中项来自配置（defaultExecutor）—— S8 改配置要立刻反映到这张屏，不许写死 engine。
   const executor = picked ?? config?.config.defaultExecutor ?? 'engine';
   // 有项目上下文时：工作目录 = 项目工作空间（由主进程按 projectId 解析，这里只做展示）。
   const project = projectContext ? projects.entries.find((p) => p.id === projectContext.projectId) ?? null : null;
-  const cwd = project ? project.cwd : config?.config.defaultCwd;
+  const cwd = project ? project.cwd : pickedCwd ?? config?.config.defaultCwd;
+
+  const chooseWorkspace = async () => {
+    const path = await pickProjectWorkspace();
+    if (path) setPickedCwd(path);
+  };
   const needTeam = executor === 'team';
   const ready = task.trim().length > 0 && (!needTeam || teamId !== null) && !busy;
-  const { recent } = splitSessions(sessions);
 
   const start = async () => {
     if (!ready) return;
@@ -131,10 +134,6 @@ export function S0NewSession(): ReactElement {
                 rows={2}
               />
               <div className="row">
-                <span className="mode" title="工作目录（S8 设置窗里改默认值）">
-                  <Icon name="folder" size={14} />
-                  {cwd ?? '进程默认目录'}
-                </span>
                 <span className="spacer" />
                 <button
                   className="btn sm primary"
@@ -147,6 +146,26 @@ export function S0NewSession(): ReactElement {
                 </button>
               </div>
             </div>
+
+            {/* 工作空间选择器：移到输入框外，点击弹系统目录选择器挑这次会话的运行路径。
+                项目会话的目录锁在项目上（上方 proj-banner 已展示），这里不重复给入口。 */}
+            {project ? null : (
+              <button
+                className="ws-picker"
+                onClick={() => void chooseWorkspace()}
+                data-smoke="session-cwd"
+                title="选择这次会话运行的工作路径"
+              >
+                <Icon name="folder" size={14} />
+                <span className="ws-label">工作空间</span>
+                <span className="ws-path">{cwd ?? '进程默认目录 —— 点击选择'}</span>
+                <span className="spacer" />
+                <span className="ws-act">
+                  {cwd ? '更改' : '选择'}
+                  <Icon name="chevR" size={14} />
+                </span>
+              </button>
+            )}
 
             <div className="side-section" style={{ paddingLeft: 0, paddingTop: 4 }}>
               <span>怎么执行</span>
@@ -243,61 +262,6 @@ export function S0NewSession(): ReactElement {
           </div>
         </section>
       </div>
-
-      <aside className="inspector">
-        <div className="panel">
-          <div className="panel-title">
-            <span>会话 = 一等公民</span>
-          </div>
-          <div className="prow sub">
-            <span>任务</span>
-            <span className="val">会话的题目</span>
-          </div>
-          <div className="prow sub">
-            <span>执行方式</span>
-            <span className="val">引擎 / 团队 / 临时</span>
-          </div>
-          <div className="prow sub">
-            <span>工作目录</span>
-            <span className="val">{cwd ?? '进程默认'}</span>
-          </div>
-          <div className="prow sub">
-            <span>预算</span>
-            <span className="val">
-              {config?.config.budgetUsd ? `全局 $${config.config.budgetUsd.toFixed(2)}` : '继承团队或全局'}
-            </span>
-          </div>
-          <div className="hint" style={{ padding: '2px 10px 8px' }}>
-            团队是<b>模板</b>，会话是<b>实例</b>。改团队不影响已开的会话（合成发生在 session.create 时，与 spawn 同理）。
-          </div>
-        </div>
-
-        <div className="panel">
-          <div className="panel-title">
-            <span>最近会话</span>
-          </div>
-          {recent.length === 0 ? (
-            <div className="empty" style={{ padding: '2px 12px 8px' }}>
-              （还没有已结束的会话）
-            </div>
-          ) : (
-            recent.slice(0, 4).map((s) => (
-              <button
-                key={s.record.id}
-                className="prow sub"
-                data-smoke="recent-session"
-                onClick={() => openSession(s.record.id)}
-              >
-                <span className="ava" style={{ width: 20, height: 20 }}>
-                  {s.record.title.slice(0, 1)}
-                </span>
-                <span>{s.record.title}</span>
-                <span className="val">{relDay(s.record.updatedAt)}</span>
-              </button>
-            ))
-          )}
-        </div>
-      </aside>
     </div>
   );
 }

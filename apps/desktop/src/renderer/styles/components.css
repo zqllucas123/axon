@@ -11,6 +11,12 @@
   height: 100vh;
   overflow: hidden;
   background: var(--bg-canvas);
+  transition: grid-template-columns 0.18s ease;
+}
+/* 侧栏收起：把左列压到 0（`.sidebar` 自带 overflow:hidden，内容随之裁掉），
+   主区顶栏里的 `.sidebar-toggle` 成为重新展开的唯一入口。 */
+.window.sidebar-collapsed {
+  grid-template-columns: 0 1fr;
 }
 
 /* ---------- 3. 侧栏 ---------- */
@@ -39,7 +45,10 @@
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 2px 16px 14px;
+  /* 顶部留白避开 hiddenInset 内嵌的交通灯（约 y≤22px）：品牌字下移到灯带之下，
+     和右侧顶栏一起构成那条贴顶通栏。整块可拖拽窗口。 */
+  padding: 26px 16px 14px;
+  -webkit-app-region: drag;
 }
 .brand .name {
   font-size: var(--fs-20);
@@ -334,7 +343,47 @@
 .menu-sep { height: 1px; background: var(--line); margin: 5px 0; }
 
 /* ---------- 4. 主区 ---------- */
-.main { display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden; background: var(--bg-canvas); }
+.main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--bg-canvas);
+}
+/* 会话右栏是与顶栏共享轨道的 Grid 右列：分栏线从窗口顶沿连续到底部，
+   面包屑/叫人在右上格，属性或文件面板在右下格。 */
+.app-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) var(--right-panel-w, 0px);
+  grid-template-rows: 56px minmax(0, 1fr);
+}
+.app-layout > .topbar { grid-column: 1; grid-row: 1; }
+.topbar-side {
+  grid-column: 2;
+  grid-row: 1;
+  min-width: 0;
+  border-left: 1px solid var(--line);
+}
+.screen-main { grid-column: 1; grid-row: 2; min-width: 0; min-height: 0; overflow: hidden; display: flex; flex-direction: column; }
+.screen-side {
+  grid-column: 2;
+  grid-row: 2;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  border-left: 1px solid var(--line);
+}
+.session-topbar-side {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 56px;
+  min-width: 0;
+  padding: 0 14px;
+  -webkit-app-region: drag;
+}
+.session-topbar-side button { -webkit-app-region: no-drag; }
 
 .topbar {
   flex: none;
@@ -343,6 +392,16 @@
   align-items: center;
   gap: 10px;
   padding: 0 18px 0 22px;
+  /* hiddenInset 下这条贴着窗口顶沿，就是标题栏——整条可拖拽窗口，
+     交互元件（按钮 / 输入）单独标 no-drag，否则点不动。 */
+  -webkit-app-region: drag;
+}
+.topbar button,
+.topbar input,
+.topbar select,
+.topbar a,
+.topbar [role='button'] {
+  -webkit-app-region: no-drag;
 }
 .topbar .title {
   font-size: var(--fs-17);
@@ -353,7 +412,65 @@
   text-overflow: ellipsis;
 }
 .topbar .i { color: var(--text-secondary); }
+.topbar .menu {
+  -webkit-app-region: no-drag;
+}
+.session-actions {
+  position: relative;
+  flex: none;
+}
+.session-actions-trigger {
+  width: 30px;
+  justify-content: center;
+  padding-left: 0;
+  padding-right: 0;
+}
+.session-actions-menu {
+  top: calc(100% + 6px);
+  right: 0;
+  min-width: 170px;
+}
+.session-actions-menu .menu-item.is-on {
+  background: var(--bg-active);
+  color: var(--text);
+}
 .topbar .spacer { flex: 1; }
+.workspace-crumb {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  color: var(--text-muted);
+  font-size: var(--fs-12);
+}
+.workspace-crumb .i { flex: none; color: var(--text-secondary); }
+.workspace-crumb .mono {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  direction: rtl;
+  text-align: left;
+}
+
+/* 侧栏切换按钮：顶栏最左的图标钮（对齐 VS Code「切换侧边栏」）。展开时贴着侧栏右沿，
+   收起时是重新展开的唯一入口。 */
+.sidebar-toggle {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  margin-left: -4px;
+  border-radius: var(--r-sm);
+  color: var(--text-muted);
+}
+.sidebar-toggle:hover { background: var(--bg-hover); color: var(--text-secondary); }
+.sidebar-toggle .i { color: inherit; }
+/* 收起态：主窗左列压到 0，顶栏贴到窗口左沿——加大左内边距给 macOS 原生交通灯让位
+   （hiddenInset），避免切换钮压在红黄绿三点上。 */
+.window.sidebar-collapsed .topbar { padding-left: 78px; }
 /* `.topbar .act` 三条已删（MU-3 切片 8）：顶栏只有面包屑与 chip，没有图标动作区。
    原型里那几个图标（分享/更多）至今没有协议面，真要做时连同命令一起补。 */
 
@@ -569,6 +686,39 @@
   display: inline-flex; align-items: center; justify-content: center;
 }
 .send:hover { background: var(--accent-hover); }
+
+/* S2 输入区上方的工作区上下文条：文件夹名 + 本地 + git 分支三个轻量 chip。
+   与 composer-wrap 同背景，贴顶撑满宽度；chip 用描边而非实填。 */
+.cwd-bar {
+  display: flex; align-items: center; gap: 6px;
+  padding: 7px 0 9px;
+  border-bottom: 1px solid var(--line);
+  margin-bottom: 10px;
+}
+.cwd-chip {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 2px 8px 2px 6px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-pill);
+  font-size: var(--fs-12); color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+/* S0 工作空间选择器：从输入框内移到框外的独立可点条。点击弹系统目录选择器。 */
+.ws-picker {
+  display: flex; align-items: center; gap: 8px; width: 100%;
+  margin-bottom: 22px; padding: 9px 12px;
+  border: 1px solid var(--line); border-radius: var(--r-sm);
+  background: var(--bg-elev); color: var(--text-secondary); text-align: left;
+}
+.ws-picker:hover { border-color: var(--line-strong); background: var(--bg-hover); }
+.ws-picker .ws-label { font-size: var(--fs-13); color: var(--text-muted); flex: none; }
+.ws-picker .ws-path {
+  min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-family: var(--font-mono); font-size: var(--fs-12); color: var(--text-secondary);
+}
+.ws-picker .spacer { flex: 1; }
+.ws-picker .ws-act { display: inline-flex; align-items: center; gap: 2px; font-size: var(--fs-12); color: var(--sem-info); flex: none; }
 
 /* 会话输入区的模型选择器（composer 发送按钮左边），触发按钮沿用 `.composer .mode` 的低调风格。 */
 .model-pick {
@@ -812,11 +962,37 @@ textarea.inp-area { height: auto; padding: 8px 10px; line-height: 1.6; resize: v
 .panel-toggles .btn.is-on { background: var(--bg-active); color: var(--text); border-color: var(--line-strong); }
 
 /* 右栏「打开文件」面板：左目录树 + 右预览，比属性栏宽以容纳预览 */
-.ws-panel { flex: none; width: 420px; display: flex; flex-direction: column; min-height: 0; border-left: 1px solid var(--line); }
-.ws-head { display: flex; align-items: center; gap: 8px; padding: 10px 14px; border-bottom: 1px solid var(--line); color: var(--text-muted); font-size: var(--fs-13); }
-.ws-head .ws-root { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl; text-align: left; }
+.ws-panel {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+/* 拖拽手柄：命中区做宽（好抓），但只用居中的 2px 伪元素细线做可见反馈，
+   平时透明，hover/active 才提亮到 line-strong —— 避免整条 5px 被 accent 近黑填满。 */
+.ws-resize-edge {
+  position: absolute; top: 0; left: 0; width: 7px; height: 100%; z-index: 5;
+  cursor: col-resize; background: transparent; user-select: none;
+}
+.ws-resize-edge::before {
+  content: ''; position: absolute; top: 0; left: 3px; width: 1px; height: 100%;
+  background: transparent; transition: background .15s;
+}
+.ws-resize-edge:hover::before, .ws-resize-edge:active::before { background: var(--line-strong); }
+/* 文件面板内部只负责树与预览；右列边界由 `.topbar-side` / `.screen-side` 绘制。 */
 .ws-body { flex: 1; display: flex; min-height: 0; }
-.ws-tree { width: 168px; flex: none; overflow-y: auto; padding: 6px 4px; border-right: 1px solid var(--line); }
+.ws-tree { flex: none; overflow-y: auto; padding: 6px 4px; border-left: 1px solid var(--line); }
+.ws-resize-handle {
+  position: relative; flex: none; width: 7px; margin: 0 -3px; cursor: col-resize;
+  background: transparent; user-select: none; z-index: 1;
+}
+.ws-resize-handle::before {
+  content: ''; position: absolute; top: 0; left: 3px; width: 1px; height: 100%;
+  background: transparent; transition: background .15s;
+}
+.ws-resize-handle:hover::before, .ws-resize-handle:active::before { background: var(--line-strong); }
 .ws-preview { flex: 1; min-width: 0; overflow: auto; padding: 14px 16px; font-size: var(--fs-13); }
 .ws-preview pre { margin: 0; white-space: pre-wrap; word-break: break-word; font-family: var(--font-mono); font-size: var(--fs-12); line-height: 1.6; }
 .ws-preview img { max-width: 100%; height: auto; }

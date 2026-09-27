@@ -7,7 +7,7 @@
  * 账本 / 用量视图仍在（sessionView 切换），入口从 S1 统计卡进；缺口一律「拿不到就不渲染」。
  */
 
-import { useState, type ReactElement } from 'react';
+import { useState, useEffect, type ReactElement } from 'react';
 import { useApp } from '../state/store.tsx';
 import { Icon } from '../icons.tsx';
 import { Inspector } from './Inspector.tsx';
@@ -16,10 +16,33 @@ import { MessageStream } from './MessageStream.tsx';
 import { ModelPicker } from './ModelPicker.tsx';
 import { EscalateSheet, LedgerView, UsageView } from './S2Views.tsx';
 
-export function S2Session(): ReactElement {
-  const { current, sessionView, focusPath, prompt, interrupt, agents, rightPanel, escalateOpen, setEscalateOpen } =
-    useApp();
+/** 右列内容由 Shell 的共享 Grid 承载，确保其顶边与会话右顶栏共用分割线。 */
+export function SessionRightPanel({
+  width,
+  onWidthChange,
+}: {
+  width: number;
+  onWidthChange: (width: number) => void;
+}): ReactElement | null {
+  const { rightPanel, setEscalateOpen } = useApp();
+  if (rightPanel === 'props') return <Inspector onEscalate={() => setEscalateOpen(true)} />;
+  if (rightPanel === 'files') return <WorkspacePanel width={width} onWidthChange={onWidthChange} />;
+  return null;
+}
+
+export function SessionMain(): ReactElement {
+  const { current, sessionView, focusPath, prompt, interrupt, agents, escalateOpen, setEscalateOpen } = useApp();
   const [text, setText] = useState('');
+  // 工作区元信息：文件夹名 + git 分支。换会话时重新拉，失败静默降级（null）。
+  const [cwdInfo, setCwdInfo] = useState<{ folderName: string; branch: string | null } | null>(null);
+
+  useEffect(() => {
+    if (!current) { setCwdInfo(null); return; }
+    setCwdInfo(null);
+    void window.axon.invoke('session.cwdInfo', { sessionId: current.record.id }).then((info) => {
+      setCwdInfo(info ?? null);
+    }).catch(() => { /* 静默降级 */ });
+  }, [current?.record.id]);
 
   if (!current) {
     return (
@@ -44,7 +67,7 @@ export function S2Session(): ReactElement {
 
   return (
     <>
-      <div className="body">
+      <div className="session-main body">
         <div className="col">
       {sessionView === 'chat' ? (
         <>
@@ -52,6 +75,26 @@ export function S2Session(): ReactElement {
             <MessageStream />
           </section>
           <div className="composer-wrap">
+            {/* 工作区上下文条：文件夹名 + 本地 + git 分支，截图中的三个小 chip。
+                异步拉取，未就绪时隐藏，不阻塞输入区渲染。 */}
+            {cwdInfo ? (
+              <div className="cwd-bar">
+                <span className="cwd-chip">
+                  <Icon name="folder" size={14} />
+                  {cwdInfo.folderName}
+                </span>
+                <span className="cwd-chip">
+                  <Icon name="monitor" size={14} />
+                  本地
+                </span>
+                {cwdInfo.branch ? (
+                  <span className="cwd-chip">
+                    <Icon name="branch" size={14} />
+                    {cwdInfo.branch}
+                  </span>
+                ) : null}
+              </div>
+            ) : null}
             <div className="composer">
               <textarea
                 className="ph"
@@ -97,11 +140,6 @@ export function S2Session(): ReactElement {
         </section>
       )}
         </div>
-        {rightPanel === 'props' ? (
-          <Inspector onEscalate={() => setEscalateOpen(true)} />
-        ) : rightPanel === 'files' ? (
-          <WorkspacePanel />
-        ) : null}
       </div>
 
       {escalateOpen ? <EscalateSheet onClose={() => setEscalateOpen(false)} /> : null}

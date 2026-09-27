@@ -270,6 +270,16 @@ export interface CommandMap {
   // ── 工作区文件浏览（S2 顶部「打开文件」）──
 
   /**
+   * 会话工作区元信息：文件夹名 + git 分支。
+   * 主进程用 sessionId 解出 record.cwd，再同步跑 `git rev-parse` 拿分支；
+   * 不在 git 仓库时 branch 为 null，调用方自行决定是否展示。
+   */
+  'session.cwdInfo': {
+    payload: { sessionId: string };
+    result: { folderName: string; branch: string | null };
+  };
+
+  /**
    * 列出会话工作区（`record.cwd`）下某目录的条目。
    *
    * 为什么带 sessionId 而不是任意路径：渲染进程零 Node，绝不能让它指定任意路径

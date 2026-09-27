@@ -15,8 +15,10 @@
 import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron';
 import { fileURLToPath } from 'node:url';
 import { mkdir, readdir, readFile as fsReadFile, stat, writeFile } from 'node:fs/promises';
-import { dirname, extname, join, resolve, sep } from 'node:path';
+import { execFileSync } from 'node:child_process';
+import { basename, dirname, extname, join, resolve, sep } from 'node:path';
 import { homedir } from 'node:os';
+import { setGlobalDispatcher, ProxyAgent, EnvHttpProxyAgent, Agent as UndiciAgent } from 'undici';
 import {
   IPC_COMMAND_CHANNEL,
   ipcEventChannel,
@@ -37,6 +39,7 @@ import {
   lastUserText,
   scriptedSource,
   withTurnCost,
+  withDsmlParsing,
   type ModelSource,
 } from '@axon/kernel';
 import { AxonHost } from './host.ts';
@@ -230,6 +233,46 @@ function emitBridgeEvent<E extends keyof EventMap>(
 }
 
 /**
+ * 把 config.proxy 落地为 undici 全局 dispatcher。
+ *
+ * 为什么用 undici：openai SDK（openai@6）的底层 fetch 使用 undici；
+ * 设置全局 dispatcher 后所有走 undici 的出站请求（含 LLM 调用）都走代理，
+ * 无需各处单独注入。
+ *
+ * 四种情形：
+ *  1. 配了 proxy.url        → ProxyAgent，把 noProxy 传给 requestTls/connect 白名单
+ *  2. 没配 proxy.url        → 回到裸 Agent（清掉上一轮可能设置的代理）
+ *  3. 环境变量 HTTP_PROXY 存在 → EnvHttpProxyAgent（兜底；只在「从未手动配过」时生效）
+ *
+ * 热更新：`applyConfigPatch` 调用本函数，已在跑的 Agent 连接不受影响
+ * （undici 在 socket 被复用前才会走新的 dispatcher），新任务立即生效。
+ */
+function applyProxyConfig(config: AxonConfig): void {
+  const url = config.proxy?.url?.trim();
+  if (url) {
+    const options: ConstructorParameters<typeof ProxyAgent>[0] = { uri: url };
+    const noProxy = config.proxy?.noProxy;
+    if (noProxy) {
+      // undici ProxyAgent 支持 noProxyHosts 以跳过特定目标。
+      (options as Record<string, unknown>).noProxyHosts = noProxy
+        .split(',')
+        .map((h) => h.trim())
+        .filter(Boolean);
+    }
+    setGlobalDispatcher(new ProxyAgent(options));
+    console.log(`[desktop] proxy set: ${url}${noProxy ? ` (noProxy: ${noProxy})` : ''}`);
+  } else if (process.env.HTTP_PROXY || process.env.HTTPS_PROXY) {
+    // 用户未在 UI 配代理，但启动时环境变量存在 —— 遵守系统设置。
+    setGlobalDispatcher(new EnvHttpProxyAgent());
+    console.log('[desktop] proxy: 跟随 HTTP_PROXY/HTTPS_PROXY 环境变量');
+  } else {
+    // 明确清除：config.patch 把 proxy.url 置 null 时也要能去掉代理。
+    setGlobalDispatcher(new UndiciAgent());
+    console.log('[desktop] proxy: 无');
+  }
+}
+
+/**
  * 选一个 model source：真网关（`~/.axon/config.json` 配好了）或 faux。
  *
  * 降级而非报错，是因为「没配 key 就启动不了」会把整个开发/测试链路绑在
@@ -249,7 +292,11 @@ async function buildModelSource(config: AxonConfig): Promise<{ source: ModelSour
       ...(choice.headers ? { headers: choice.headers } : {}),
     });
     return {
-      source: real,
+      // withDsmlParsing：部分网关（未开 tool-call-parser 的 vLLM/SGLang）把
+      // DeepSeek 工具调用以 <｜DSML｜calls> special token 吐回明文；这层把它
+      // 重建为标准 toolCall 内容块，让 agent-loop 能正常执行工具。
+      // 若网关侧修复后可直接把 withDsmlParsing(real) 换回 real。
+      source: withDsmlParsing(real),
       label: `真模型 ${choice.providerId}/${choice.defaultModel} @ ${choice.baseUrl}（key ${maskKey(choice.apiKey)}）`,
     };
   }
@@ -336,6 +383,10 @@ async function createHost(config: AxonConfig): Promise<AxonHost> {
   const { source: modelSource, label } = await createModelSource(config);
   console.log(`[desktop] model source: ${label}`);
 
+  // 代理：建宿主之前先把全局 dispatcher 配好，确保后续所有出站请求都走代理。
+  applyProxyConfig(config);
+
+
   // 预算硬线：冒烟 env 优先，否则读配置。接了真模型之后这行不再是演习——
   // faux 时代 cost 恒为 0（faux.js:147 硬编码），没人会真的花钱。
   const budget = process.env.AXON_SMOKE_BUDGET_HARD
@@ -393,6 +444,7 @@ async function applyConfigPatch(): Promise<void> {
   if (!host || !configStore) return;
   const raw = configStore.rawConfig();
   host.applyConfig(raw);
+  applyProxyConfig(raw);
   const { source, label } = await createModelSource(raw);
   host.setModelSource(source);
   console.log(`[desktop] config applied；model source: ${label}`);
@@ -447,6 +499,11 @@ function createWindow(): void {
     width: 1280,
     height: 820,
     backgroundColor: '#fcfcfb', // = tokens.css --bg-canvas（浅色主题，避免启动瞬间深色闪一下）
+    // 顶栏改成贴窗口顶沿的通栏（Codex 式）：hiddenInset 把内容顶到最上沿、交通灯内嵌到
+    // 左上角，会话顶栏（标题 / 文件 / 属性 / 叫人）与侧栏品牌区一起构成那条通栏标题栏，
+    // 「文件 / 属性 / 叫人」按钮随之贴到窗口右上角。仅 macOS：hiddenInset 在
+    // Windows/Linux 会变成无窗控的怪样，其它平台回退到系统默认边框。
+    ...(process.platform === 'darwin' ? { titleBarStyle: 'hiddenInset' as const } : {}),
     webPreferences: {
       // 三条都不能松：渲染进程绝不碰 Node。
       // preload 用 .mjs：ESM preload 是 Electron 的硬性要求（且需 sandbox:false）。
@@ -609,6 +666,26 @@ app.whenReady().then(async () => {
 
         // 工作区文件浏览（S2 顶部「打开文件」）：sessionId → record.cwd 作沙箱根，
         // relPath 经 resolveInCwd 校验后必须仍落在根内，否则抛错（防目录穿越）。
+
+        // 会话工作区元信息：文件夹名 + git 分支（无仓库时 branch 为 null）。
+        if (request.command === 'session.cwdInfo') {
+          const { sessionId } = request.payload as { sessionId: string };
+          const cwd = host!.getSession(sessionId)?.record.cwd;
+          if (!cwd) throw new Error(`会话不存在或无工作区：${sessionId}`);
+          const folderName = basename(cwd);
+          let branch: string | null = null;
+          try {
+            branch = execFileSync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], {
+              cwd,
+              timeout: 2000,
+              encoding: 'utf8',
+            }).trim();
+          } catch {
+            // 不在 git 仓库、git 未安装、或超时 —— 静默降级，branch 保持 null。
+          }
+          return { id: request.id, ok: true, result: { folderName, branch } };
+        }
+
         if (request.command === 'fs.listDir') {
           const { sessionId, relPath } = request.payload as {
             sessionId: string;
