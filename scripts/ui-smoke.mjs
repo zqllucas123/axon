@@ -32,7 +32,13 @@ const projectsDir = launch ? await mkdtemp(join(tmpdir(), 'axon-projects-')) : n
 
 /** 拉起应用（第一次开机与重启幕共用；重启 = 同一份 env 再 spawn 一次）。 */
 function launchApp() {
-  const electron = join(import.meta.dirname, '../node_modules/.bin/electron');
+  // Windows 上 .bin 里没有无后缀的 shim，只有 electron.exe —— 直接 spawn 'electron'
+  // 会 ENOENT，而 spawn 的失败是异步的，表现为「脚本一声不吭地卡死」，
+  // 离真因很远。两个平台各取各的。
+  const electron = join(
+    import.meta.dirname,
+    process.platform === 'win32' ? '../node_modules/.bin/electron.exe' : '../node_modules/.bin/electron',
+  );
   proc = spawn(electron, [`--remote-debugging-port=${port}`, 'apps/desktop/dist/main.mjs'], {
     cwd: join(import.meta.dirname, '..'),
     stdio: ['ignore', 'ignore', 'pipe'],
@@ -53,6 +59,15 @@ function launchApp() {
       AXON_SMOKE_BUDGET_HARD: '0.06',
     },
   });
+  // spawn 失败（路径不对、没装 electron）是**异步**报的：不接这个监听就会表现为
+  // 「脚本什么都不打印，一直等 CDP」，排查成本极高。
+  proc.on('error', (e) => {
+    console.error(`[smoke] 启动应用失败：${e.message}`);
+    process.exit(1);
+  });
+  // stderr 走 pipe 就必须有人读：没人消费的话缓冲区一满就把子进程堵死
+  // （ELECTRON_ENABLE_LOGGING=1 下日志量不小）。这里只求流动，不打印。
+  proc.stderr.resume();
 }
 if (launch) launchApp();
 
@@ -406,11 +421,13 @@ try {
   //     （project.create 直接 invoke，等价于弹窗里手输路径后点「创建项目」）。
   const projCwd = '/tmp/axon-smoke-project';
   const proj = await evalJs(
-    `window.axon.invoke('project.create', { name: '冒烟项目', cwd: '${projCwd}' })
+    `window.axon.invoke('project.create', { name: '冒烟项目', cwd: '${projCwd}', kind: 'local' })
        .then(r => r.accepted ? r.project : null)`,
   );
   log(!!proj && !!proj.id, `project.create 成功（${proj?.id}）`);
   if (!proj || !proj.id) exit(1);
+  log(proj.kind === 'local', `项目类别落盘（kind=${proj.kind}）`);
+  if (proj.kind !== 'local') exit(1);
 
   // projects.changed → React 重渲染 → 左栏出现项目分组（哪怕零会话也在）
   const projGroup = await until(
@@ -429,6 +446,15 @@ try {
   );
   log(projCtx, '项目内「新建会话」→ S0 带项目上下文横幅（工作空间 = 项目 cwd）');
   if (!projCtx) exit(1);
+
+  // 工作区 chip 显示的是**项目目录名**（不是临时目录），且项目会话不给换目录的入口。
+  const projChip = await until(
+    `(() => { const bar = document.querySelector('[data-smoke="session-cwd"]');
+       return !!bar && bar.textContent.includes('axon-smoke-project') &&
+         !document.querySelector('[data-smoke="session-cwd-add"]'); })()`,
+  );
+  log(projChip, '项目会话的工作区 chip = 项目目录名，且无「换目录」入口（目录锁在项目上）');
+  if (!projChip) exit(1);
 
   // 填任务并开始 → 创建会话（主进程以项目 cwd 固化 projectId），进 S2。
   // React 受控 textarea：必须用原型上的原生 value setter，否则 React 收不到变更。
@@ -482,13 +508,29 @@ try {
   const loadedBefore = await evalJs(loadedExpr);
 
   await evalJs(`document.querySelector('[data-smoke="nav-s0"]').click()`);
+  // 普通会话（无项目上下文）的工作区 chip 应显示**临时目录**名（axon-xxxx），
+  // 而不是 config.defaultCwd —— S0 现在每次进屏向主进程领一个临时工作目录。
   const s0 = await until(
-    `!!document.querySelector('[data-smoke="session-task"]') &&
-     document.querySelectorAll('.mode-card').length === 3 &&
-     !!document.querySelector('[data-smoke="start-session"]')`,
+    `(() => { const bar = document.querySelector('[data-smoke="session-cwd"]');
+       return !!document.querySelector('[data-smoke="session-task"]') &&
+         !!document.querySelector('[data-smoke="start-session"]') &&
+         !!bar && bar.textContent.includes('axon-'); })()`,
   );
-  log(s0, 'S0 新建会话屏渲染（任务输入 + 三种执行方式 + 出发）');
+  log(s0, 'S0 新建会话屏渲染（任务输入 + 临时工作区 chip + 出发）');
   if (!s0) exit(1);
+
+  // 执行方式从三张卡折叠成工具栏的一枚按钮：点开应能看到 Single 与指定团队。
+  await evalJs(`document.querySelector('[data-smoke="mode-trigger"]').click()`);
+  const modePopover = await until(
+    `!!document.querySelector('[data-smoke="mode-popover"]') &&
+     !!document.querySelector('[data-smoke="mode-engine"]') &&
+     !!document.querySelector('[data-smoke="mode-team"]')`,
+  );
+  log(modePopover, 'S0 执行模式 popover 可展开（Single / 指定团队）');
+  if (!modePopover) exit(1);
+  // 收起，别把弹层留给后面的断言（它盖在输入区上方）。
+  await evalJs(`document.querySelector('[data-smoke="mode-trigger"]').click()`);
+  await until(`!document.querySelector('[data-smoke="mode-popover"]')`);
 
   await evalJs(`document.querySelector('[data-smoke="nav-s1"]').click()`);
   const s1row = await until(

@@ -15,8 +15,7 @@
 import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron';
 import { fileURLToPath } from 'node:url';
 import { mkdir, readdir, readFile as fsReadFile, stat, writeFile } from 'node:fs/promises';
-import { execFileSync } from 'node:child_process';
-import { basename, dirname, extname, join, resolve, sep } from 'node:path';
+import { dirname, extname, join, resolve, sep } from 'node:path';
 import { homedir } from 'node:os';
 import { setGlobalDispatcher, ProxyAgent, EnvHttpProxyAgent, Agent as UndiciAgent } from 'undici';
 import {
@@ -27,6 +26,7 @@ import {
   type CommandMap,
   type EventMap,
   type OpenPathKind,
+  type ProjectKind,
   type RequestEnvelope,
   type ResponseEnvelope,
 } from '@axon/protocol';
@@ -50,6 +50,13 @@ import { RoleBridge } from './role-bridge.ts';
 import { TeamBridge } from './team-bridge.ts';
 import { ProjectStore } from './project-store.ts';
 import { ConfigStore } from './config-store.ts';
+import {
+  describeWorkspace,
+  disposeTempWorkspaces,
+  inspectWorkspace,
+  newTempWorkspace,
+  trustPath,
+} from './workspace.ts';
 import { openSettingsWindow, settingsWindow } from './windows.ts';
 import { installAppMenu } from './menu.ts';
 import {
@@ -555,7 +562,15 @@ app.whenReady().then(async () => {
   projectStore = new ProjectStore({ dir: PROJECTS_DIR });
   await projectStore.load();
   host.setProjectCwdResolver((id) => projectStore!.get(id)?.cwd);
-  projectStore.watch((s) => sendEvent('projects.changed', s));
+  // 「可信路径集合」的两类初始来源（安全边界见 workspace.ts 文件头）：
+  // 项目 cwd 与设置里的默认工作目录 —— 都是用户自己选的，不是渲染层编的。
+  for (const p of projectStore.current().entries) trustPath(p.cwd);
+  trustPath(configStore!.snapshot().config.defaultCwd);
+  projectStore.watch((s) => {
+    // 热重载进来的项目（用户手改项目文件）同样入集合。
+    for (const p of s.entries) trustPath(p.cwd);
+    sendEvent('projects.changed', s);
+  });
   console.log(`[desktop] projects: ${projectStore.current().entries.length} 个，目录 ${PROJECTS_DIR}`);
 
   const state = host.listRoles();
@@ -611,23 +626,45 @@ app.whenReady().then(async () => {
           return { id: request.id, ok: true, result: projectStore!.current() };
         }
         if (request.command === 'project.create') {
-          const { name, cwd } = request.payload as { name: string; cwd: string };
-          const result = await projectStore!.create({ name, cwd });
-          if (result.accepted) sendEvent('projects.changed', projectStore!.current());
+          const { name, cwd, kind } = request.payload as {
+            name: string;
+            cwd: string;
+            kind?: ProjectKind;
+          };
+          const result = await projectStore!.create({ name, cwd, kind });
+          if (result.accepted) {
+            if (result.project) trustPath(result.project.cwd);
+            sendEvent('projects.changed', projectStore!.current());
+          }
           return { id: request.id, ok: true, result };
         }
         if (request.command === 'project.pickWorkspace') {
           // 渲染进程零 Node，目录选择器只能在主进程弹；限定为目录选择。
+          // 标题不带「项目」二字：新建会话页换工作目录也走这条（两处入口共用）。
           const picked = await dialog.showOpenDialog({
-            title: '选择项目工作空间',
+            title: '选择工作空间',
             properties: ['openDirectory', 'createDirectory'],
           });
           const path = picked.filePaths[0];
+          // 用户亲手在系统对话框里选的目录 = 可信来源，入集合后
+          // `workspace.inspect` 才肯给它探测文件夹名与分支。
+          if (path) trustPath(path);
           const result =
             picked.canceled || !path
               ? { cancelled: true }
               : { cancelled: false, path };
           return { id: request.id, ok: true, result };
+        }
+
+        // 工作区元信息（新建会话页的工作区 chip）。两条命令都不碰会话 ——
+        // 会话还没建出来，正是拿不到 sessionId 才需要它们。
+        if (request.command === 'workspace.newTemp') {
+          return { id: request.id, ok: true, result: await newTempWorkspace() };
+        }
+        if (request.command === 'workspace.inspect') {
+          const { path } = request.payload as { path: string };
+          // 未授权路径会抛错（workspace.ts 里的安全边界），照常走 error 回包。
+          return { id: request.id, ok: true, result: inspectWorkspace(path) };
         }
 
         // 配置层：ConfigStore 是唯一真相（含未知字段保留与环境变量锁）。
@@ -672,18 +709,11 @@ app.whenReady().then(async () => {
           const { sessionId } = request.payload as { sessionId: string };
           const cwd = host!.getSession(sessionId)?.record.cwd;
           if (!cwd) throw new Error(`会话不存在或无工作区：${sessionId}`);
-          const folderName = basename(cwd);
-          let branch: string | null = null;
-          try {
-            branch = execFileSync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], {
-              cwd,
-              timeout: 2000,
-              encoding: 'utf8',
-            }).trim();
-          } catch {
-            // 不在 git 仓库、git 未安装、或超时 —— 静默降级，branch 保持 null。
-          }
-          return { id: request.id, ok: true, result: { folderName, branch } };
+          // 用 describeWorkspace 而不是 inspectWorkspace：这条命令的凭据是
+          // sessionId（会话存在就说明 cwd 可信），路径本身不需要再查可信集合 ——
+          // 否则升级前建的老会话（cwd 可能是任意目录）会直接报错。
+          const info = describeWorkspace(cwd);
+          return { id: request.id, ok: true, result: { folderName: info.folderName, branch: info.branch } };
         }
 
         if (request.command === 'fs.listDir') {
@@ -826,5 +856,12 @@ app.on('will-quit', (event) => {
   const flushed = storage
     ? Promise.race([storage.flush(), new Promise((r) => setTimeout(r, 3000))])
     : Promise.resolve();
-  void flushed.finally(() => app.quit());
+  // 清掉本次运行期分配的临时工作目录（普通会话的默认工作区，见 workspace.ts）。
+  // 与 flush 并行，同样带上限：目录被外部占用删不掉时不能拖着应用关不掉。
+  // 注意这是**真删** —— temp 目录里的产物会一并消失，这是既定语义。
+  const cleaned = Promise.race([
+    disposeTempWorkspaces(),
+    new Promise((r) => setTimeout(r, 2000)),
+  ]);
+  void Promise.all([flushed, cleaned]).finally(() => app.quit());
 });

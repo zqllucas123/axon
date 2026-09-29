@@ -49,8 +49,9 @@ button.side-row,
 button.prow,
 button.list-row,
 button.menu-item,
-button.mode-card,
 button.team-card { width: 100%; text-align: left; }
+/* `button.mode-card` 已随之删除（S0 的三档卡折叠进工具栏 popover，类名不再存在）——
+   按本段纪律：留一个不存在的类名，会让下次真加同名按钮时跳过检查。 */
 /* `button.card-btn` / `button.seg-a` 两条已删（MU-3 切片 8）：全仓无这两个类名。
    归一清单留空条目比漏条目更危险：以后真加一个叫 `card-btn` 的按钮时，
    看到清单里已经有它就不会再检查，而它未必真需要 `width: 100%`。 */

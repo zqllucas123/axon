@@ -60,6 +60,8 @@ export const ICON_PATHS = {
   eye: '<path d="M2.6 12s3.6-6.4 9.4-6.4S21.4 12 21.4 12s-3.6 6.4-9.4 6.4S2.6 12 2.6 12z"/><circle cx="12" cy="12" r="2.8"/>',
   layers: '<path d="m12 3.2 9 4.6-9 4.6-9-4.6z"/><path d="m3 16.2 9 4.6 9-4.6"/><path d="m3 12 9 4.6 9-4.6"/>',
   db: '<ellipse cx="12" cy="6" rx="7.6" ry="3"/><path d="M4.4 6v12c0 1.7 3.4 3 7.6 3s7.6-1.3 7.6-3V6"/><path d="M4.4 12c0 1.7 3.4 3 7.6 3s7.6-1.3 7.6-3"/>',
+  paperclip:
+    '<path d="M20.5 12.2 12.6 20.1a5.3 5.3 0 0 1-7.5-7.5l8.2-8.2a3.5 3.5 0 0 1 5 5l-8.2 8.2a1.8 1.8 0 0 1-2.5-2.5l7.6-7.6"/>',
 } as const;
 
 export type IconName = keyof typeof ICON_PATHS;

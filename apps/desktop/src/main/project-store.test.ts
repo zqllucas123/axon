@@ -6,30 +6,44 @@
  */
 
 import { describe, expect, it } from 'vitest';
+import { basename, join } from 'node:path';
 import { mergeProjectFiles, ProjectStore, type ProjectStoreIO } from './project-store.ts';
 
-/** 内存 IO：一个 Map 当磁盘（key = 文件名，value = 内容）。 */
-function memIO(files: Record<string, string> = {}): ProjectStoreIO & { files: Map<string, string> } {
+/**
+ * 内存 IO：一个 Map 当「项目目录」磁盘（key = 文件名，value = 内容）。
+ *
+ * `existingPaths` 是**另一套**东西 —— 模拟项目目录**之外**的真实文件系统，
+ * 目前只有 git 校验要看的那一个路径（`<cwd>/.git`）。与 disk 分开是因为
+ * 两者根目录不同：项目文件在 `/projects` 下，git 仓库在用户自己的工作目录下。
+ */
+function memIO(
+  files: Record<string, string> = {},
+  existingPaths: string[] = [],
+): ProjectStoreIO & { files: Map<string, string> } {
   const disk = new Map<string, string>(Object.entries(files));
+  const realFs = new Set(existingPaths);
   return {
     files: disk,
     readDir: async () => [...disk.keys()],
+    // 文件名一律用 basename 取，**不要用 `p.split('/')`**：store 内部拼路径走的是
+    // `join(dir, name)`，在 Windows 上那产生的是反斜杠路径，按 '/' 切会整段留下来，
+    // 于是磁盘里永远查不到 —— 本文件三个重载用例原先就是这么一路红着的。
     readFile: async (p) => {
-      const name = p.split('/').pop()!;
-      const v = disk.get(name);
+      const v = disk.get(basename(p));
       if (v === undefined) throw new Error('ENOENT');
       return v;
     },
     writeFile: async (p, data) => {
-      disk.set(p.split('/').pop()!, data);
+      disk.set(basename(p), data);
     },
     rename: async (from, to) => {
-      const f = from.split('/').pop()!;
-      const t = to.split('/').pop()!;
+      const f = basename(from);
+      const t = basename(to);
       disk.set(t, disk.get(f)!);
       disk.delete(f);
     },
     mkdir: async () => {},
+    exists: async (p) => realFs.has(p),
     watchDir: () => () => {},
   };
 }
@@ -83,6 +97,41 @@ describe('ProjectStore · 创建与重载', () => {
     await s.create({ name: '空项目', cwd: '/works/empty' });
     expect(s.current().entries.map((p) => p.name)).toEqual(['空项目']);
   });
+
+  it('类别缺省是 local，且不校验 .git', async () => {
+    const io = memIO(); // existingPaths 空 = 磁盘上哪儿都没有 .git
+    const s = new ProjectStore({ dir: '/projects', io });
+    await s.load();
+    const res = await s.create({ name: '普通项目', cwd: '/works/plain' });
+    expect(res.accepted).toBe(true);
+    expect(res.project?.kind).toBe('local');
+  });
+
+  it('git 项目：目录不含 .git 时拒绝创建，不落盘', async () => {
+    const io = memIO();
+    const s = new ProjectStore({ dir: '/projects', io });
+    await s.load();
+    const res = await s.create({ name: 'GIT 项目', cwd: '/works/plain', kind: 'git' });
+    expect(res.accepted).toBe(false);
+    expect(res.errors.some((e) => e.code === 'invalid-project' && e.message.includes('git init'))).toBe(true);
+    expect(io.files.size).toBe(0);
+  });
+
+  it('git 项目：目录含 .git 时创建成功，kind 落盘并可重载', async () => {
+    // 用 join 拼而不是写死 '/works/repo/.git'：create() 里查的是 join(cwd, '.git')，
+    // 在 Windows 上那是反斜杠路径，写死正斜杠会永远对不上（同文件里那几个
+    // 既有的重载用例就栽在这上面）。
+    const io = memIO({}, [join('/works/repo', '.git')]);
+    const s = new ProjectStore({ dir: '/projects', io });
+    await s.load();
+    const res = await s.create({ name: 'GIT 项目', cwd: '/works/repo', kind: 'git' });
+    expect(res.accepted).toBe(true);
+    expect(res.project?.kind).toBe('git');
+
+    const s2 = new ProjectStore({ dir: '/projects', io });
+    await s2.load();
+    expect(s2.current().entries[0]?.kind).toBe('git');
+  });
 });
 
 describe('mergeProjectFiles · 坏文件隔离', () => {
@@ -116,5 +165,27 @@ describe('mergeProjectFiles · 坏文件隔离', () => {
       { name: 'p-a', content: mk('p-a', 100) },
     ]);
     expect(state.entries.map((p) => p.id)).toEqual(['p-a', 'p-b']);
+  });
+
+  it('老项目文件没有 kind：补 local，**不当坏数据**', () => {
+    // 这是升级路径的关键一条：kind 是后加的字段，已有用户的
+    // ~/.axon/projects/*.json 全都没有它。若按「缺字段 = 坏数据」处理，
+    // 升级后项目列表会整个变空 —— 比不显示分支严重得多。
+    const content = JSON.stringify({
+      version: 1,
+      project: { id: 'p-old', name: '老项目', cwd: '/w', createdAt: 1, updatedAt: 1 },
+    });
+    const state = mergeProjectFiles([{ name: 'p-old', content }]);
+    expect(state.entries.map((p) => p.kind)).toEqual(['local']);
+    expect(state.issues).toEqual([]);
+  });
+
+  it('kind 写了非法值才算坏数据', () => {
+    const content = JSON.stringify({
+      project: { id: 'p-x', name: 'x', cwd: '/w', kind: 'svn', createdAt: 1, updatedAt: 1 },
+    });
+    const state = mergeProjectFiles([{ name: 'p-x', content }]);
+    expect(state.entries).toEqual([]);
+    expect(state.issues.some((i) => i.code === 'invalid-project' && i.message.includes('项目类别'))).toBe(true);
   });
 });

@@ -147,6 +147,9 @@
 .proj-head .caret { color: var(--text-dim); flex: none; }
 .proj-head .label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
 .proj-head .meta { margin-left: auto; font-size: var(--fs-11); color: var(--text-dim); flex: none; }
+/* 项目类别标记（只有 Git 项目有，见 Sidebar）。比通用 `.tag` 矮一档：
+   通用高度 22px 是配正文行的，挂在 14px 的项目名旁边会把整行撑开。 */
+.proj-head .tag { flex: none; height: 16px; padding: 0 5px; }
 .proj-body { padding: 2px 0 4px; }
 /* 项目内会话行：比顶层会话行多一层缩进，视觉上归到项目下 */
 .side-row.proj-row { margin-left: 22px; margin-right: 10px; }
@@ -659,6 +662,9 @@
 
 /* ---------- 6. 输入区 ---------- */
 .composer-wrap { flex: none; padding: 6px 28px 22px; background: var(--bg-canvas); position: relative; }
+/* chip 条存在时撑起顶部空间，让 .cwd-bar.attached 能从 composer-wrap 顶边起始。
+   移除顶部 padding 是因为 chip 条自身的 border-radius 需要紧贴外边缘才能看起来正确。 */
+.composer-wrap.has-cwd { padding-top: 0; }
 .composer-wrap::before {
   content: "";
   position: absolute; left: 0; right: 0; top: -30px; height: 30px;
@@ -704,21 +710,40 @@
   white-space: nowrap;
 }
 
-/* S0 工作空间选择器：从输入框内移到框外的独立可点条。点击弹系统目录选择器。 */
-.ws-picker {
-  display: flex; align-items: center; gap: 8px; width: 100%;
-  margin-bottom: 22px; padding: 9px 12px;
-  border: 1px solid var(--line); border-radius: var(--r-sm);
-  background: var(--bg-elev); color: var(--text-secondary); text-align: left;
+/* S0 的连体变体：工作区条与输入框拼成一块（设计稿的视觉，`margin-top:-1px` 让描边重合）。
+   S2 会话屏继续用默认的非连体样式（分隔线在条下方）—— 两处的贴合方式不同是刻意的，
+   不是遗漏：会话屏的顶边要跟消息流分隔，首屏的顶边没有东西要分隔。 */
+.cwd-bar.attached {
+  max-width: 760px; margin: 0 auto -1px; padding: 0;
+  border: 0; background: none;
+  display: flex;
 }
-.ws-picker:hover { border-color: var(--line-strong); background: var(--bg-hover); }
-.ws-picker .ws-label { font-size: var(--fs-13); color: var(--text-muted); flex: none; }
-.ws-picker .ws-path {
-  min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-  font-family: var(--font-mono); font-size: var(--fs-12); color: var(--text-secondary);
+/* 只包住内容的胶囊：不铺满整条，宽度随 chip 内容收缩，左边缘与下方 composer 对齐。
+   边框/背景/圆角从 .cwd-bar.attached 搬到这里，让「短一截」的视觉成立。 */
+.cwd-bar.attached .cwd-pill {
+  display: inline-flex; align-items: center; gap: 2px;
+  padding: 7px 10px;
+  border: 1px solid var(--line-strong); border-bottom: 0;
+  border-radius: var(--r-lg) var(--r-lg) 0 0;
+  background: var(--bg-sunken);
 }
-.ws-picker .spacer { flex: 1; }
-.ws-picker .ws-act { display: inline-flex; align-items: center; gap: 2px; font-size: var(--fs-12); color: var(--sem-info); flex: none; }
+.cwd-bar .spacer { flex: 1; }
+/* 条上的每一项。button 与 span 混用：能换目录的那项是按钮，纯展示的是 span。 */
+.cwd-item {
+  display: inline-flex; align-items: center; gap: 6px; min-width: 0;
+  padding: 2px 6px; border-radius: var(--r-sm);
+  font-size: var(--fs-12); color: var(--text-secondary); white-space: nowrap;
+}
+button.cwd-item:hover:not(:disabled) { background: var(--bg-hover); color: var(--text); }
+button.cwd-item:disabled { cursor: default; }
+.cwd-item .context-label { overflow: hidden; text-overflow: ellipsis; }
+.cwd-item .context-detail { color: var(--text-dim); }
+/* 相邻项之间加一道竖分隔线（设计稿用 ::before 而不是 border：后者会在换行时露出线头）。 */
+.cwd-item + .cwd-item { position: relative; padding-left: 13px; }
+.cwd-item + .cwd-item::before {
+  content: ""; position: absolute; left: 0;
+  width: 1px; height: 14px; background: var(--line-strong);
+}
 
 /* 会话输入区的模型选择器（composer 发送按钮左边），触发按钮沿用 `.composer .mode` 的低调风格。 */
 .model-pick {
@@ -847,17 +872,55 @@ table.tbl td.num { font-family: var(--font-mono); color: var(--text); }
 .team-card .tc-desc { font-size: var(--fs-12); color: var(--text-muted); line-height: 1.6; }
 .team-card .tc-foot { display: flex; align-items: center; gap: 8px; font-size: var(--fs-12); color: var(--text-dim); }
 
-/* 新建会话：执行方式三档 */
-.mode-grid { display: grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap: 12px; }
-.mode-card {
-  text-align: left; border: 1px solid var(--line); border-radius: var(--r-md);
-  background: var(--bg-elev); padding: 14px; display: flex; flex-direction: column; gap: 8px;
+/* =========================================================================
+   新建会话（S0）—— 空态 + 底部输入区（逐值对齐 docs/new_ux/01-home.html）
+
+   旧版的「执行方式三档」卡片（.mode-grid / .mode-card）已删：模式折叠进输入区
+   工具栏的 popover。卡片不是搬走而是**没有位置了** —— 首屏只回答一个问题。
+   ========================================================================= */
+
+/* 空态撑满 canvas 并垂直居中：首屏只有「说任务是啥」一件事，不堆说明文字。 */
+.s0-empty {
+  min-height: 100%;
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  gap: 10px; padding: 40px 28px; text-align: center;
 }
-.mode-card:hover { border-color: var(--line-strong); background: var(--bg-sunken); }
-.mode-card.is-on { border-color: var(--accent); background: var(--bg-elev); }
-.mode-card .mc-t { display: flex; align-items: center; gap: 8px; font-size: var(--fs-14); font-weight: 500; }
-.mode-card .mc-d { font-size: var(--fs-12); color: var(--text-muted); line-height: 1.6; }
-.mode-card .mc-m { font-size: var(--fs-11); color: var(--text-dim); }
+.s0-mark { width: 64px; height: 64px; color: var(--text-dim); }
+.s0-headline { font-size: var(--fs-20); font-weight: 500; color: var(--text); }
+.s0-sub { font-size: var(--fs-13); color: var(--text-dim); }
+
+/* 四张建议卡：点一下预填模板文案（不自动发）。两列网格，宽度跟着输入区走。 */
+.suggest-grid {
+  display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px;
+  max-width: 480px; width: 100%; margin-top: 14px;
+}
+.suggest-pill {
+  padding: 12px 14px; border: 1px solid var(--line); border-radius: var(--r-lg);
+  background: var(--bg-elev); font-size: var(--fs-13); color: var(--text-dim);
+  text-align: left; line-height: 1.6;
+  transition: background .12s ease, border-color .12s ease, color .12s ease;
+}
+.suggest-pill:hover { background: var(--bg-hover); border-color: var(--line-strong); color: var(--text); }
+.suggest-pill strong { display: block; color: var(--text); font-weight: 500; margin-bottom: 2px; }
+
+/* 输入区工具栏的图标按钮（附件 / 引擎 / 模式）。
+   置灰的那些是**占位**：协议里还没有对应能力，标出位置但不假装能用（原因写在 title 里）。 */
+.tool-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 28px; height: 28px; border-radius: var(--r-sm); color: var(--text-muted); flex: none;
+}
+.tool-btn:hover:not(:disabled) { background: var(--bg-hover); color: var(--text); }
+.tool-btn.is-on { background: var(--bg-hover); color: var(--text); }
+.tool-btn:disabled { color: var(--text-dim); opacity: .45; cursor: default; }
+
+/* 模式 popover：复用 `.menu` 的壳（无阴影，与仓库浮层纪律一致），只补定位与分组标题。 */
+.s0-mode { position: relative; flex: none; }
+.s0-mode-menu { left: 0; bottom: calc(100% + 8px); min-width: 240px; }
+.s0-menu-title { padding: 6px 10px 4px; font-size: var(--fs-11); color: var(--text-dim); }
+
+/* 项目上下文横幅搬进 composer-wrap 后要自己收宽度，与输入区对齐（原先靠 .page 约束）。 */
+.composer-wrap .proj-banner { max-width: 760px; margin: 0 auto 8px; }
 
 /* 会话顶部的团队条（S2 顶栏合并为一行后移除；「叫人」按钮上移进 .topbar） */
 

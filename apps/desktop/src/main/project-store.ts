@@ -10,12 +10,14 @@
  */
 
 import {
+  isProjectKind,
   validateProject,
   type ProjectIssue,
+  type ProjectKind,
   type ProjectRecord,
 } from '@axon/protocol';
 import { mkdir, readFile, readdir, rename, writeFile } from 'node:fs/promises';
-import { watch as fsWatch } from 'node:fs';
+import { existsSync, watch as fsWatch } from 'node:fs';
 import { join } from 'node:path';
 
 export interface ProjectLoadState {
@@ -29,6 +31,8 @@ export interface ProjectStoreIO {
   writeFile(path: string, data: string): Promise<void>;
   rename(from: string, to: string): Promise<void>;
   mkdir(dir: string): Promise<void>;
+  /** 路径是否存在（git 项目校验要看目录里有没有 `.git`）。 */
+  exists(path: string): Promise<boolean>;
   watchDir(dir: string, onChange: () => void): () => void;
 }
 
@@ -41,6 +45,7 @@ const fsIO: ProjectStoreIO = {
   writeFile: (p, data) => writeFile(p, data, 'utf8'),
   rename: (from, to) => rename(from, to),
   mkdir: (dir) => mkdir(dir, { recursive: true }).then(() => undefined),
+  exists: (p) => Promise.resolve(existsSync(p)),
   watchDir: (dir, onChange) => {
     const w = fsWatch(dir, () => onChange());
     return () => w.close();
@@ -78,7 +83,11 @@ export function mergeProjectFiles(
       issues.push(...errs.map((e) => ({ ...e, filePath: file.name })));
       continue;
     }
-    const rec = def as ProjectRecord;
+    const raw = def as Partial<ProjectRecord>;
+    // 老项目文件没有 kind（这个字段是后加的）：补 `'local'`。
+    // 不补的话 `rec.kind` 是 undefined，「Git 项目才显示分支 chip」那处判断
+    // 会静默失准 —— 老项目看着正常，只是永远不显示分支，很难查。
+    const rec: ProjectRecord = { ...(raw as ProjectRecord), kind: isProjectKind(raw.kind) ? raw.kind : 'local' };
     if (rec.id !== file.name) {
       issues.push({
         level: 'error',
@@ -149,15 +158,35 @@ export class ProjectStore {
 
   /** 创建项目（仅元数据）。校验失败不落盘。 */
   async create(
-    input: { name: string; cwd: string },
+    input: { name: string; cwd: string; kind?: ProjectKind },
   ): Promise<{ accepted: boolean; errors: ProjectIssue[]; project?: ProjectRecord }> {
     const name = input.name.trim();
     const cwd = input.cwd.trim();
-    const errors = validateProject({ name, cwd });
+    const kind: ProjectKind = input.kind ?? 'local';
+    const errors = validateProject({ name, cwd, kind });
     if (errors.some((i) => i.level === 'error')) return { accepted: false, errors };
 
+    // git 项目的目录校验要读盘，所以放在这里而不是纯函数 validateProject 里
+    // （与 role/team 的「纯校验 + IO 分离」同一套）。
+    //
+    // 为什么校验而不是替用户跑 `git init`：那是在别人的目录里静默产生副作用，
+    // 而用户点的是「新建项目」不是「初始化仓库」。拒绝并说清怎么办更稳妥。
+    // `.git` 是目录（普通仓库）或文件（worktree / submodule），exists 两种都认。
+    if (kind === 'git' && !(await this.io.exists(join(cwd, '.git')))) {
+      return {
+        accepted: false,
+        errors: [
+          {
+            level: 'error',
+            code: 'invalid-project',
+            message: '该目录不是 Git 仓库 —— 请先在该目录执行 git init，或把类别改成「本地」',
+          },
+        ],
+      };
+    }
+
     const now = Date.now();
-    const project: ProjectRecord = { id: newProjectId(), name, cwd, createdAt: now, updatedAt: now };
+    const project: ProjectRecord = { id: newProjectId(), name, cwd, kind, createdAt: now, updatedAt: now };
     const target = join(this.dir, `${project.id}.json`);
     const tmp = `${target}.tmp-${now}`;
     const payload = `${JSON.stringify({ version: 1, project }, null, 2)}\n`;

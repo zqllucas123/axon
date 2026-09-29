@@ -39,6 +39,7 @@ import type {
   OpenPathKind,
   PendingRequest,
   ProjectIssue,
+  ProjectKind,
   ProjectRecord,
   RoleEntry,
   RoleIssue,
@@ -112,7 +113,11 @@ export interface StoreValue {
   openSession: (sessionId: string) => void;
   createSession: (payload: CreateSessionPayload) => Promise<SessionSummary | null>;
   /** 创建项目（仅元数据）。成功后选中项目并进入带项目上下文的 S0。 */
-  createProject: (input: { name: string; cwd: string }) => Promise<{ accepted: boolean; errors: ProjectIssue[] }>;
+  createProject: (input: {
+    name: string;
+    cwd: string;
+    kind: ProjectKind;
+  }) => Promise<{ accepted: boolean; errors: ProjectIssue[] }>;
   /** 打开原生目录选择器选工作空间；取消返回 null。 */
   pickProjectWorkspace: () => Promise<string | null>;
   /** 进入某项目的「新建会话」页（置项目上下文 + 切到 S0）。 */
@@ -785,7 +790,11 @@ export function AppProvider({ children }: { children: ReactNode }): ReactElement
    * 不隐式建空会话（拍板：进入新建会话页）。事件与返回值分别更新列表，去重幂等。
    */
   const createProject = useCallback(
-    async (input: { name: string; cwd: string }): Promise<{ accepted: boolean; errors: ProjectIssue[] }> => {
+    async (input: {
+      name: string;
+      cwd: string;
+      kind: ProjectKind;
+    }): Promise<{ accepted: boolean; errors: ProjectIssue[] }> => {
       const res = await call(() => window.axon.invoke('project.create', input));
       if (!res) return { accepted: false, errors: [] };
       if (res.accepted && res.project) {

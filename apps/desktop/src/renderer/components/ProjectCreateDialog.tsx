@@ -9,11 +9,14 @@
 import { useEffect, useRef, useState, type ReactElement } from 'react';
 import { useApp } from '../state/store.tsx';
 import { Icon } from '../icons.tsx';
+import type { ProjectKind } from '@axon/protocol';
 
 export function ProjectCreateDialog({ onClose }: { onClose: () => void }): ReactElement {
   const { createProject, pickProjectWorkspace } = useApp();
   const [name, setName] = useState('');
   const [cwd, setCwd] = useState('');
+  // 缺省「本地」：多数目录不是 git 仓库，默认值该跟着多数走。
+  const [kind, setKind] = useState<ProjectKind>('local');
   const [busy, setBusy] = useState(false);
   const [errors, setErrors] = useState<string[]>([]);
   const nameRef = useRef<HTMLInputElement>(null);
@@ -38,7 +41,7 @@ export function ProjectCreateDialog({ onClose }: { onClose: () => void }): React
     if (!ready) return;
     setBusy(true);
     setErrors([]);
-    const res = await createProject({ name: name.trim(), cwd: cwd.trim() });
+    const res = await createProject({ name: name.trim(), cwd: cwd.trim(), kind });
     setBusy(false);
     if (res.accepted) {
       onClose();
@@ -101,6 +104,33 @@ export function ProjectCreateDialog({ onClose }: { onClose: () => void }): React
             </div>
             <span className="dialog-hint">该项目下新建的会话都会在这个目录里执行。</span>
           </label>
+
+          {/* 类别用 <div> 而不是像上两项那样用 <label> 包：这组是按钮，不是输入框，
+              套 label 会让点「本地」变成「聚焦某个表单控件」的语义。 */}
+          <div className="dialog-field">
+            <span className="dialog-label">项目类别</span>
+            <div className="seg" data-smoke="project-kind">
+              <button
+                className={kind === 'local' ? 'is-on' : ''}
+                onClick={() => setKind('local')}
+                data-smoke="project-kind-local"
+              >
+                本地
+              </button>
+              <button
+                className={kind === 'git' ? 'is-on' : ''}
+                onClick={() => setKind('git')}
+                data-smoke="project-kind-git"
+              >
+                Git
+              </button>
+            </div>
+            <span className="dialog-hint">
+              {kind === 'git'
+                ? '目录必须已经是 Git 仓库（含 .git）—— 这类项目的会话会显示当前分支。'
+                : '普通目录，不涉及版本控制。'}
+            </span>
+          </div>
 
           {errors.length > 0 ? (
             <div className="dialog-errors">

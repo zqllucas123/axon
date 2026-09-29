@@ -20,7 +20,7 @@ import type {
   UsageTotals,
 } from './agent.ts';
 import type { ConfigIssue, ConfigPatch, ConfigSnapshot } from './config.ts';
-import type { ProjectIssue, ProjectRecord } from './project.ts';
+import type { ProjectIssue, ProjectKind, ProjectRecord } from './project.ts';
 import type {
   Adoption,
   AdoptionPolicy,
@@ -216,18 +216,54 @@ export interface CommandMap {
     payload: Record<string, never>;
     result: { entries: ProjectRecord[]; issues: ProjectIssue[] };
   };
-  /** 创建项目（仅项目元数据，不隐式建会话）；校验失败 accepted=false 带 errors。 */
+  /**
+   * 创建项目（仅项目元数据，不隐式建会话）；校验失败 accepted=false 带 errors。
+   *
+   * `kind` 缺省 `'local'`。选 `'git'` 时主进程会校验目录内已有 `.git`，
+   * 否则拒绝创建（不替用户跑 `git init` —— 不在别人目录里静默产生副作用）。
+   */
   'project.create': {
-    payload: { name: string; cwd: string };
+    payload: { name: string; cwd: string; kind?: ProjectKind };
     result: { accepted: boolean; errors: ProjectIssue[]; project?: ProjectRecord };
   };
   /**
-   * 打开原生目录选择器选项目工作空间。渲染进程零 Node，不能自己弹 dialog；
+   * 打开原生目录选择器选工作空间。渲染进程零 Node，不能自己弹 dialog；
    * cancelled=true 表示用户取消（此时 path 缺省，UI 不应改写输入）。
+   *
+   * 两个入口共用：新建项目挑目录，以及**新建会话时挑这次的工作目录**。
+   * 主进程会把返回的路径记进「可信路径集合」，之后才能被 `workspace.inspect` 查。
    */
   'project.pickWorkspace': {
     payload: Record<string, never>;
     result: { cancelled: boolean; path?: string };
+  };
+
+  // ── 工作区元信息（新建会话页的工作区 chip）──
+
+  /**
+   * 分配一个**本次运行期专属**的临时工作目录，作普通会话（不归属项目）的默认工作区。
+   *
+   * 为什么是主进程分配而不是渲染层拼路径：渲染进程零 Node，没有 tmpdir 概念；
+   * 而且这个目录要登进「可信路径集合」并被退出清理，必须由主进程持有。
+   * 目录名形如 `axon-a1b2c3`，会话之间的产物互不干扰。
+   */
+  'workspace.newTemp': {
+    payload: Record<string, never>;
+    result: { path: string; folderName: string };
+  };
+  /**
+   * 取一个工作区的展示元信息：文件夹名 + git 分支。
+   *
+   * **path 不是任意路径**：渲染层零 Node，这条命令若接受任意路径就等于把文件系统
+   * 探测能力交给界面层。主进程只认「可信路径集合」里的四类：项目 cwd、
+   * `config.defaultCwd`、`pickWorkspace` 返回过的、本运行期分配的临时目录；
+   * 不在集合内直接抛错。
+   *
+   * 不在 git 仓库时 `branch` 为 null、`isGit` 为 false，调用方自行决定是否展示。
+   */
+  'workspace.inspect': {
+    payload: { path: string };
+    result: { path: string; folderName: string; branch: string | null; isGit: boolean };
   };
 
   // ── MU-1：配置（S8 设置窗）──

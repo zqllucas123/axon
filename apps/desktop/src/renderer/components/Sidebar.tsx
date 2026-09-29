@@ -140,6 +140,8 @@ export function Sidebar(): ReactElement {
                 >
                   <Icon name={isOpen ? 'chevD' : 'chevR'} size={14} cls="caret" />
                   <span className="label">{project.name}</span>
+                  {/* 只给 Git 项目打标 —— 「本地」是缺省类别，标出来全是噪音。 */}
+                  {project.kind === 'git' ? <span className="tag">Git</span> : null}
                   <span className="meta">{rows.length}</span>
                 </button>
                 {isOpen ? (

@@ -74,25 +74,28 @@ export function SessionMain(): ReactElement {
           <section className="canvas">
             <MessageStream />
           </section>
-          <div className="composer-wrap">
+          <div className={`composer-wrap${cwdInfo ? ' has-cwd' : ''}`}>
             {/* 工作区上下文条：文件夹名 + 本地 + git 分支，截图中的三个小 chip。
                 异步拉取，未就绪时隐藏，不阻塞输入区渲染。 */}
             {cwdInfo ? (
-              <div className="cwd-bar">
-                <span className="cwd-chip">
-                  <Icon name="folder" size={14} />
-                  {cwdInfo.folderName}
-                </span>
-                <span className="cwd-chip">
-                  <Icon name="monitor" size={14} />
-                  本地
-                </span>
-                {cwdInfo.branch ? (
-                  <span className="cwd-chip">
-                    <Icon name="branch" size={14} />
-                    {cwdInfo.branch}
+              <div className="cwd-bar attached" data-smoke="session-cwd">
+                <div className="cwd-pill">
+                  <span className="cwd-item">
+                    <Icon name="folder" size={14} />
+                    <span className="context-label">{cwdInfo.folderName}</span>
                   </span>
-                ) : null}
+                  <span className="cwd-item">
+                    <Icon name="monitor" size={14} />
+                    <span className="context-label">本地</span>
+                  </span>
+                  {cwdInfo.branch ? (
+                    <span className="cwd-item">
+                      <Icon name="branch" size={14} />
+                      <span className="context-label">{cwdInfo.branch}</span>
+                      <span className="context-detail">工作分支</span>
+                    </span>
+                  ) : null}
+                </div>
               </div>
             ) : null}
             <div className="composer">
