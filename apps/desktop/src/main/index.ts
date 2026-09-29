@@ -535,6 +535,12 @@ function createWindow(): void {
 }
 
 app.whenReady().then(async () => {
+  // 开发态（未打包）dock 图标：打包后 electron-builder 会用 icon.icns，dock 自动生效；
+  // 开发态直接跑 dist/main.mjs 不经打包，dock 退回默认 Electron 图标，这里手动兜住。
+  if (!app.isPackaged && process.platform === 'darwin') {
+    app.dock?.setIcon(join(here, 'icon.png'));
+  }
+
   configStore = new ConfigStore({ configPath: CONFIG_PATH, roleDir: ROLES_DIR, teamDir: TEAMS_DIR });
   await configStore.load();
   const rawConfig = configStore.rawConfig();

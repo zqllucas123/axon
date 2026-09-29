@@ -104,4 +104,9 @@ await writeFile(join(out, 'renderer/axon.css'), cssParts.join('\n'), 'utf8');
 
 await cp(join(appRoot, 'src/renderer/index.html'), join(out, 'renderer/index.html'));
 
+// 应用图标：打包态由 electron-builder 用 assets/icon.icns，dock 自动显示；
+// 但开发态（`bun dev` 直接跑 dist/main.mjs）不经打包，dock 会退回默认 Electron 图标。
+// 把 PNG 一并拷进 dist，主进程启动时手动 setIcon（见 index.ts app.whenReady）。
+await cp(join(appRoot, 'assets/icon.png'), join(out, 'icon.png'));
+
 console.log('\n✓ 构建完成 → apps/desktop/dist');
