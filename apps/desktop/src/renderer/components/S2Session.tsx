@@ -49,7 +49,7 @@ export function SessionMain(): ReactElement {
       <div className="stream">
         <div className="empty">
           <span className="k">没有选中的会话</span>
-          从左栏「进行中」里点一个会话，或去「新建会话」起一个。
+          从左栏「项目」或「最近」里点一个会话，或去「新建会话」起一个。
         </div>
       </div>
     );

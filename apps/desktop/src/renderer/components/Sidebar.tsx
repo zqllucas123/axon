@@ -1,7 +1,7 @@
 /**
  * 左栏（原型 shell.js:sidebarHTML）。
  *
- * 硬规矩（ux 01 §2.1-①）：左栏只列「会话」这一种粒度 —— 进行中 / 最近两组，
+ * 硬规矩（ux 01 §2.1-①）：左栏只列「会话」这一种粒度 —— 项目分组 / 最近两组，
  * 加一级导航。**会话内部的成员树绝不在这里出现**（那是右栏的事）。
  *
  * 数据纪律（M5 §4.5 懒加载）：本文件只读 `sessions: SessionSummary[]`，
@@ -33,7 +33,7 @@ const NAV: Array<{ id: Screen; icon: IconName; label: string }> = [
 
 export function Sidebar(): ReactElement {
   const { screen, go, sessions, sessionId, openSession, pending, projects, newSessionInProject, openSettings, openPath } = useApp();
-  const { active, recent } = splitSessions(sessions);
+  const { recent } = splitSessions(sessions);
   const chips = globalChips({ sessions, pending });
   const projectGroups = groupSessionsByProject(projects.entries, sessions);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -122,11 +122,11 @@ export function Sidebar(): ReactElement {
             <Icon name="plus" size={14} />
           </button>
         </div>
-        {projectGroups.length === 0 ? (
-          <div className="empty" style={{ padding: '4px 18px 8px' }}>
-            还没有项目 —— 点右上「+」建一个，指定工作空间后即可在其中新建会话。
-          </div>
-        ) : (
+        {/*
+          没有项目时这里原本有一段空态说明（「还没有项目 —— 点右上「+」建一个…」），
+          用户 2026-09-30 要求去掉：分组头本身已经有「+」按钮，空态再复述一遍是噪音。
+        */}
+        {projectGroups.length === 0 ? null : (
           projectGroups.map(({ project, sessions: rows }) => {
             const isOpen = !collapsed.has(project.id);
             return (
@@ -181,21 +181,12 @@ export function Sidebar(): ReactElement {
           })
         )}
 
-        <div className="side-section">
-          <span>进行中</span>
-          <span className="spacer" />
-          <button className="act" title="新建会话" onClick={() => go('s0')}>
-            <Icon name="plus" size={14} />
-          </button>
-        </div>
-        {active.length === 0 ? (
-          <div className="empty" style={{ padding: '4px 18px 8px' }}>
-            还没有会话 —— 去「新建会话」起一个。
-          </div>
-        ) : (
-          active.map(row)
-        )}
-
+        {/*
+          「进行中」分组已删（用户 2026-09-30 拍板）：它列的是**非终止态**会话，
+          与上方的「项目」分组是同一批会话的第二种切法 —— 有项目归属的会在项目下
+          再出现一次。去掉后左栏只剩「项目」+「最近」两种粒度，不再重复。
+          注意 `splitSessions` 仍在用（`recent` 分组 + S1 的活跃计数），别一起删。
+        */}
         <div className="side-section">
           <span>最近</span>
         </div>
