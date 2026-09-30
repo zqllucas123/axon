@@ -119,15 +119,14 @@ export function SessionMain(): ReactElement {
                   {focus?.displayName ?? '—'}
                 </span>
                 <span className="spacer" />
-                {running ? (
-                  <button className="btn sm" onClick={() => focusPath && void interrupt(focusPath)}>
-                    <Icon name="pause" size={14} />
-                    中断
-                  </button>
-                ) : null}
                 {focusPath ? <ModelPicker focusPath={focusPath} /> : null}
-                <button className="send" onClick={send} title="发送（Enter）" disabled={!focusPath}>
-                  <Icon name="arrowUp" size={16} />
+                <button
+                  className="send"
+                  onClick={running ? () => focusPath && void interrupt(focusPath) : send}
+                  title={running ? '中断任务' : '发送（Enter）'}
+                  disabled={!focusPath}
+                >
+                  <Icon name={running ? 'pause' : 'arrowUp'} size={16} />
                 </button>
               </div>
             </div>
