@@ -23,6 +23,7 @@ import {
   ipcEventChannel,
   sessionIdOfPath,
   type AgentPath,
+  type AxonMenuId,
   type CommandMap,
   type EventMap,
   type OpenPathKind,
@@ -57,8 +58,8 @@ import {
   newTempWorkspace,
   trustPath,
 } from './workspace.ts';
-import { openSettingsWindow, settingsWindow } from './windows.ts';
-import { installAppMenu } from './menu.ts';
+import { appMenuItems, installAppMenu, popupAppMenu } from './menu.ts';
+import { applyWindowChrome, windowChromeOptions } from './window-chrome.ts';
 import {
   CONFIG_PATH,
   maskKey,
@@ -177,11 +178,10 @@ function sendEvent<E extends keyof EventMap>(
   payload: EventMap[E],
   source?: AgentPath,
 ): void {
-  // 收件人：主窗 + 设置窗（MU-3）。设置窗要订 `config.changed` 才能在另一个窗口
-  // 改了配置后跟着更新 —— 双窗同步走的就是这条既有事件线，不另造广播通道。
-  const targets = [win, settingsWindow()].filter(
-    (w): w is BrowserWindow => w !== null && !w.isDestroyed(),
-  );
+  // 收件人只有主窗。这里原本还带一个独立设置窗（MU-3），但设置早已改为主窗内的
+  // 一屏（S8）；留着那个窗口的代价是它会订 `config.changed` 却渲染不出任何区别，
+  // 连同 `windows.ts` 一起下线。
+  const targets = [win].filter((w): w is BrowserWindow => w !== null && !w.isDestroyed());
   // 窗口可能已关闭（退出时仍有在途事件），静默丢弃。
   if (targets.length === 0) return;
   const sessionId = source !== undefined ? sessionIdOfPath(source) : undefined;
@@ -486,6 +486,10 @@ async function runShotHook(): Promise<void> {
       console.log('[shot] init →', JSON.stringify(probe));
       await wait(2500);
     }
+    // 菜单栏是原生 views，**不在 capturePage 的 PNG 里** —— 截图上「顶部只剩一行」
+    // 不能证明它被藏掉了（原生菜单栏本来就可能被裁在 web contents 之外）。
+    // 这两个数才是证据（Windows 上期望 menubar=false；macOS 上恒为 true，无视即可）。
+    console.log('[shot] menubar=', w.isMenuBarVisible(), 'maximized=', w.isMaximized());
     const shots = (process.env.AXON_SHOT_HOOKS ?? 's0=nav-s0').split(',').filter(Boolean);
     for (const item of shots) {
       const [name, hookName] = item.split('=');
@@ -508,9 +512,18 @@ function createWindow(): void {
     backgroundColor: '#fcfcfb', // = tokens.css --bg-canvas（浅色主题，避免启动瞬间深色闪一下）
     // 顶栏改成贴窗口顶沿的通栏（Codex 式）：hiddenInset 把内容顶到最上沿、交通灯内嵌到
     // 左上角，会话顶栏（标题 / 文件 / 属性 / 叫人）与侧栏品牌区一起构成那条通栏标题栏，
-    // 「文件 / 属性 / 叫人」按钮随之贴到窗口右上角。仅 macOS：hiddenInset 在
-    // Windows/Linux 会变成无窗控的怪样，其它平台回退到系统默认边框。
+    // 「文件 / 属性 / 叫人」按钮随之贴到窗口右上角。仅 macOS。**Windows 不走这条**：
+    // 它的菜单不在系统顶栏，要在窗口里画，于是改走 windowChromeOptions 的
+    // titleBarStyle:'hidden' + titleBarOverlay（见 window-chrome.ts 文件头）。
+    // Linux 两条都不走：它不支持窗控叠加层，自绘就得自己实现三个窗控按钮，
+    // 回退到系统默认边框。
     ...(process.platform === 'darwin' ? { titleBarStyle: 'hiddenInset' as const } : {}),
+    ...windowChromeOptions(),
+    // 自绘标题栏（「Axon + 文件/编辑/视图/窗口」）第一次让窄窗有硬冲突：品牌字 +
+    // 四个菜单名 + 右侧约 138px 的系统窗控叠加层，窗口太窄就会撞在一起。720 与
+    // 设置屏内容宽（`settings.css` 的 --st-nav-w + --st-body-w）的下限一致。
+    // 仅 Windows —— 别的平台没有这条标题栏，不该被顺带改掉窗口下限。
+    ...(process.platform === 'win32' ? { minWidth: 720 } : {}),
     // Windows 的窗口/任务栏图标取自 BrowserWindow 的 icon（macOS 无此项，走 app.dock）。
     // 开发态跑的是 electron.exe，不指这个就显示 Electron 默认图标；打包态改用 exe 内嵌资源
     // （electron-builder 的 win.icon），此项被忽略，但留着无害且保证开发态一致。
@@ -524,6 +537,11 @@ function createWindow(): void {
       sandbox: false, // preload 里要用 contextBridge，sandbox 下 require 受限
     },
   });
+
+  // 藏原生菜单栏（菜单名改由渲染层画进标题栏，见 window-chrome.ts）。
+  // 放在这里而不是只靠 installAppMenu：那一步发生在**装菜单之后**，
+  // 覆盖不到「此刻已存在的窗口」之外的情况，两边都调才不漏。
+  applyWindowChrome(win);
 
   void win.loadFile(join(here, 'renderer/index.html'));
   win.webContents.on('did-finish-load', () => {
@@ -596,7 +614,7 @@ app.whenReady().then(async () => {
   ipcMain.handle(
     IPC_COMMAND_CHANNEL,
     async (
-      _event,
+      event,
       request: RequestEnvelope,
     ): Promise<ResponseEnvelope> => {
       try {
@@ -707,8 +725,17 @@ app.whenReady().then(async () => {
           return { id: request.id, ok: true, result: { path } };
         }
 
-        if (request.command === 'window.openSettings') {
-          openSettingsWindow();
+        // 应用菜单（Windows 自绘标题栏里的那排菜单名）。
+        // 菜单清单读的是主进程真装着的那份，渲染层不复制一份名字。
+        if (request.command === 'menu.list') {
+          return { id: request.id, ok: true, result: { items: appMenuItems() } };
+        }
+        if (request.command === 'menu.popup') {
+          // 窗口取**发起请求的那个**，不是模块级的 win：菜单要挂在发起者身上，
+          // 否则位置与「点外面关闭」的归属都会怪。
+          const sender = BrowserWindow.fromWebContents(event.sender);
+          if (!sender) throw new Error('menu.popup：找不到发起请求的窗口');
+          popupAppMenu((request.payload as { menuId: AxonMenuId }).menuId, sender);
           return { id: request.id, ok: true, result: { opened: true } };
         }
 
@@ -831,8 +858,19 @@ app.whenReady().then(async () => {
   );
 
   createWindow();
-  // 菜单在窗口之后装：「设置…」点下去要有东西可开（且此时 configStore 已就位）。
-  installAppMenu({ openSettings: () => openSettingsWindow() });
+  // 菜单在窗口之后装：「设置…」点下去要有窗口可切（且此时 configStore 已就位）。
+  installAppMenu({
+    openSettings: () => {
+      // 「设置…」/⌘, 落到主窗的 S8 屏 —— 与侧栏那个「设置」同一屏。
+      // 这里原本调 openSettingsWindow() 开独立窗，而渲染层早已不认那个窗口
+      // （main.tsx 不再看 URL hash），于是同一个入口会点出两种设置界面，
+      // 其中一种还是个和主窗长得一模一样的重复窗口。
+      if (!win || win.isDestroyed()) return;
+      if (win.isMinimized()) win.restore();
+      win.focus();
+      sendEvent('ui.openSettings', {});
+    },
+  });
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
