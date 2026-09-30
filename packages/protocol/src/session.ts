@@ -298,6 +298,12 @@ export interface CreateSessionPayload {
   budget?: SessionBudgetSpec;
   /** 会话级并发；不填则从团队档继承。 */
   maxConcurrent?: number;
+  /**
+   * 用户通过原生文件选择器选中、希望放入本次会话工作目录的文件绝对路径列表。
+   * 主进程负责把它们复制进 record.cwd（不修改原文件）；渲染层不自己写文件。
+   * 字段是**传输用**：落盘的 SessionRecord 里没有它，Agent 直接在 cwd 里看到文件。
+   */
+  attachments?: string[];
 }
 
 /**

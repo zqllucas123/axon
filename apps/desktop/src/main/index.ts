@@ -14,7 +14,7 @@
 
 import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron';
 import { fileURLToPath } from 'node:url';
-import { mkdir, readdir, readFile as fsReadFile, stat, writeFile } from 'node:fs/promises';
+import { copyFile, mkdir, readdir, readFile as fsReadFile, stat, writeFile } from 'node:fs/promises';
 import { dirname, extname, join, resolve, sep } from 'node:path';
 import { homedir } from 'node:os';
 import { setGlobalDispatcher, ProxyAgent, EnvHttpProxyAgent, Agent as UndiciAgent } from 'undici';
@@ -723,6 +723,37 @@ app.whenReady().then(async () => {
           if (kind === 'config') shell.showItemInFolder(path);
           else await shell.openPath(path);
           return { id: request.id, ok: true, result: { path } };
+        }
+
+        if (request.command === 'shell.pickFiles') {
+          const picked = await dialog.showOpenDialog({
+            title: '选择附件',
+            properties: ['openFile', 'multiSelections'],
+          });
+          const paths = picked.canceled ? [] : picked.filePaths;
+          return { id: request.id, ok: true, result: { paths } };
+        }
+
+        if (request.command === 'session.create') {
+          const payload = request.payload as import('@axon/protocol').CreateSessionPayload;
+          const { attachments, ...rest } = payload;
+          // 先用不含 attachments 的 payload 建会话（协议层不认识这个字段）。
+          const summary = await host!.execute('session.create', rest as never);
+          // 有附件才复制；cwd 从刚建出来的会话记录里取，保证目录一定存在。
+          if (attachments && attachments.length > 0) {
+            const cwd = (summary as import('@axon/protocol').SessionSummary).record.cwd;
+            await Promise.all(
+              attachments.map(async (src) => {
+                const name = src.replace(/\\/g, '/').split('/').pop() ?? src;
+                try {
+                  await copyFile(src, join(cwd, name));
+                } catch (e) {
+                  console.warn(`[desktop] 附件复制失败：${src} → ${name}`, e);
+                }
+              }),
+            );
+          }
+          return { id: request.id, ok: true, result: summary };
         }
 
         // 应用菜单（Windows 自绘标题栏里的那排菜单名）。

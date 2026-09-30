@@ -64,13 +64,14 @@ function titleOfTask(task: string): string {
 }
 
 export function S0NewSession(): ReactElement {
-  const { config, teams, projects, projectContext, clearProjectContext, createSession, pickProjectWorkspace, go } =
+  const { config, teams, projects, projectContext, clearProjectContext, createSession, pickProjectWorkspace, pickFiles, go } =
     useApp();
   const [task, setTask] = useState('');
   const [picked, setPicked] = useState<SessionExecutor | null>(null);
   const [teamId, setTeamId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [modeOpen, setModeOpen] = useState(false);
+  const [attachments, setAttachments] = useState<string[]>([]);
   // 这次会话的工作目录。普通会话由下面的 effect 向主进程要一个临时目录；
   // 项目会话不用它 —— 目录锁在项目上（用户手选的路径也落在这里）。
   const [pickedCwd, setPickedCwd] = useState<string | null>(null);
@@ -150,6 +151,18 @@ export function S0NewSession(): ReactElement {
     if (path) setPickedCwd(path); // inspect 由上面的 effect 接住，不在这里重复写一遍
   };
 
+  const addAttachments = async () => {
+    const paths = await pickFiles();
+    if (paths.length > 0) setAttachments((prev) => {
+      const existing = new Set(prev);
+      return [...prev, ...paths.filter((p) => !existing.has(p))];
+    });
+  };
+
+  const removeAttachment = (path: string) => {
+    setAttachments((prev) => prev.filter((p) => p !== path));
+  };
+
   const fillSuggestion = (seed: string) => {
     setTask(seed);
     const el = textRef.current;
@@ -172,9 +185,10 @@ export function S0NewSession(): ReactElement {
       executor,
       ...(needTeam && teamId ? { teamId } : {}),
       initialPrompt: task.trim(),
+      ...(attachments.length > 0 ? { attachments } : {}),
     });
     setBusy(false);
-    if (s) setTask('');
+    if (s) { setTask(''); setAttachments([]); }
   };
 
   // 第三枚 chip（分支）显不显示：项目会话由**项目类别**决定（local 项目建的时候
@@ -273,6 +287,31 @@ export function S0NewSession(): ReactElement {
             </div>
           </div>
 
+          {/* 附件列表：有选中文件时才显示，每个 chip 可单独移除。 */}
+          {attachments.length > 0 ? (
+            <div className="cwd-bar attached" data-smoke="attachments-bar">
+              <div className="cwd-pill">
+                {attachments.map((p) => {
+                  const name = p.replace(/\\/g, '/').split('/').pop() ?? p;
+                  return (
+                    <span key={p} className="cwd-item">
+                      <Icon name="paperclip" size={14} />
+                      <span className="context-label" title={p}>{name}</span>
+                      <button
+                        className="icon-btn"
+                        onClick={() => removeAttachment(p)}
+                        title="移除此附件"
+                        aria-label={`移除 ${name}`}
+                      >
+                        <Icon name="x" size={12} />
+                      </button>
+                    </span>
+                  );
+                })}
+              </div>
+            </div>
+          ) : null}
+
           <div className="composer">
             <textarea
               ref={textRef}
@@ -292,7 +331,12 @@ export function S0NewSession(): ReactElement {
               {/* 附件与引擎都是**置灰占位**，不是能用的功能：
                   协议没有附件面，也没有「引擎」这个维度（见文件头注释 3）。
                   不删是因为它们在信息架构里有位置 —— 删了下次加回来要重新想一遍。 */}
-              <button className="tool-btn" disabled title="尚未支持：协议里没有附件面">
+              <button
+                className={`tool-btn${attachments.length > 0 ? ' is-on' : ''}`}
+                onClick={() => void addAttachments()}
+                title="添加附件（文件将复制到本次会话工作目录）"
+                data-smoke="attach-files"
+              >
                 <Icon name="paperclip" size={16} />
               </button>
               <button className="tool-btn" disabled title="尚未支持：协议里还没有「引擎」这个维度">

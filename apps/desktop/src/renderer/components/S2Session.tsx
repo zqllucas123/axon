@@ -114,10 +114,25 @@ export function SessionMain(): ReactElement {
                 style={{ width: '100%', border: 0, background: 'none', resize: 'none', outline: 'none', font: 'inherit' }}
               />
               <div className="row">
-                <span className="mode" title="焦点分身">
-                  <Icon name="branch" size={14} />
-                  {focus?.displayName ?? '—'}
-                </span>
+                {/* 与 S0 对齐的三枚工具按钮；附件和引擎仍是占位（协议暂无对应面）。 */}
+                <button className="tool-btn" disabled title="尚未支持：协议里没有附件面">
+                  <Icon name="paperclip" size={16} />
+                </button>
+                <button className="tool-btn" disabled title="尚未支持：协议里还没有「引擎」这个维度">
+                  <Icon name="spark" size={16} />
+                </button>
+                <button
+                  className={`tool-btn${current.record.executor === 'team' ? ' is-on' : ''}`}
+                  onClick={() => setEscalateOpen(true)}
+                  data-smoke="mode-trigger"
+                  title={
+                    current.record.executor === 'team'
+                      ? `团队模式 · ${current.record.teamId ?? '未知团队'}（点击切换）`
+                      : '执行模式：单兵（点击叫人升级为团队）'
+                  }
+                >
+                  <Icon name="users" size={16} />
+                </button>
                 <span className="spacer" />
                 {focusPath ? <ModelPicker focusPath={focusPath} /> : null}
                 <button

@@ -238,6 +238,19 @@ export interface CommandMap {
     result: { cancelled: boolean; path?: string };
   };
 
+  /**
+   * 打开原生文件选择器，供用户挑选要放入会话工作目录的附件。
+   *
+   * 与 `project.pickWorkspace` 同一原则：渲染进程零 Node，系统对话框只能在主进程弹。
+   * 返回用户选中的文件绝对路径列表（取消时为空数组）。
+   * 主进程把路径原样回传给渲染层；复制动作在 `session.create` 时集中处理，
+   * 不在这一步做 —— 选文件与建会话是两个独立意图。
+   */
+  'shell.pickFiles': {
+    payload: Record<string, never>;
+    result: { paths: string[] };
+  };
+
   // ── 工作区元信息（新建会话页的工作区 chip）──
 
   /**

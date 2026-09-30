@@ -120,6 +120,8 @@ export interface StoreValue {
   }) => Promise<{ accepted: boolean; errors: ProjectIssue[] }>;
   /** 打开原生目录选择器选工作空间；取消返回 null。 */
   pickProjectWorkspace: () => Promise<string | null>;
+  /** 打开原生文件选择器选附件；取消返回空数组。 */
+  pickFiles: () => Promise<string[]>;
   /** 进入某项目的「新建会话」页（置项目上下文 + 切到 S0）。 */
   newSessionInProject: (projectId: string) => void;
   /** 清除项目上下文（回到普通新建会话）。 */
@@ -821,6 +823,11 @@ export function AppProvider({ children }: { children: ReactNode }): ReactElement
     return res.path;
   }, [call]);
 
+  const pickFiles = useCallback(async (): Promise<string[]> => {
+    const res = await call(() => window.axon.invoke('shell.pickFiles', {}));
+    return res?.paths ?? [];
+  }, [call]);
+
   const newSessionInProject = useCallback((projectId: string): void => {
     setProjectContext({ projectId });
     setScreen('s0');
@@ -991,6 +998,7 @@ export function AppProvider({ children }: { children: ReactNode }): ReactElement
     createSession,
     createProject,
     pickProjectWorkspace,
+    pickFiles,
     newSessionInProject,
     clearProjectContext,
     setSessionView: setSessionViewState,
