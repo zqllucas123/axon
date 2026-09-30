@@ -1,9 +1,9 @@
 /**
  * preload —— 渲染进程与主进程之间唯一的孔。
  *
- * 只暴露 `invoke` 与 `subscribe` 两个方法（形状见 @axon/protocol 的 `AxonBridge`）。
- * 不暴露 ipcRenderer 本体，也不暴露任何 Node API ——
- * 否则 contextIsolation 等于白开。
+ * 只暴露 `platform` 一个常量、`invoke` 与 `subscribe` 两个方法（形状见
+ * @axon/protocol 的 `AxonBridge`）。不暴露 ipcRenderer 本体，也不暴露任何
+ * Node API —— 否则 contextIsolation 等于白开。
  */
 
 import { contextBridge, ipcRenderer } from 'electron';
@@ -12,15 +12,28 @@ import {
   ipcEventChannel,
   type AgentPath,
   type AxonBridge,
+  type AxonPlatform,
   type CommandMap,
   type EventMap,
   type NotificationEnvelope,
   type ResponseEnvelope,
 } from '@axon/protocol';
 
+/**
+ * `process.platform` → 协议里的三值联合。
+ *
+ * 归一（而不是原样透出去）是因为渲染层只对这三种分支过：多出来的值
+ * （`freebsd`/`openbsd`/…）如果漏进去，渲染层会拿到一个「哪个分支都不匹配」
+ * 的字符串，然后静默地按非 Windows 走 —— 那正是最难查的一类错。
+ */
+function toAxonPlatform(platform: NodeJS.Platform): AxonPlatform {
+  return platform === 'darwin' || platform === 'win32' ? platform : 'linux';
+}
+
 let seq = 0;
 
 const bridge: AxonBridge = {
+  platform: toAxonPlatform(process.platform),
   async invoke<C extends keyof CommandMap>(
     command: C,
     payload: CommandMap[C]['payload'],

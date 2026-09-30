@@ -300,8 +300,29 @@ export interface CommandMap {
     payload: { kind: OpenPathKind };
     result: { path: string };
   };
-  /** 打开（或聚焦）设置窗。单例语义在主进程，渲染层只发意图。 */
-  'window.openSettings': { payload: Record<string, never>; result: { opened: true } };
+  // ── 应用菜单（Windows 自绘标题栏里的那排菜单名）──
+
+  /**
+   * 顶层菜单清单（`[{id, label}]`），供 Windows 自绘标题栏渲染那排菜单名。
+   *
+   * 为什么渲染层不自己写死这排名字：菜单的真实定义在主进程的 `menu.ts`
+   * （`Menu.buildFromTemplate`）。渲染层复制一份就是两份真相 —— 以后加一项菜单，
+   * 标题栏会少一个按钮且**不报错**。这里读的是 `Menu.getApplicationMenu()`，
+   * 渲染出来的按钮数就等于主进程真装了几项。
+   */
+  'menu.list': {
+    payload: Record<string, never>;
+    result: { items: Array<{ id: AxonMenuId; label: string }> };
+  };
+
+  /**
+   * 在光标处弹出某个顶层菜单的原生子菜单。
+   *
+   * 点的是标题栏里自绘的菜单名，弹出的仍是**系统原生下拉**（行为、快捷键提示、
+   * 勾选态全部由 Electron 的 role 提供），所以这里只做「弹哪一个」，
+   * 不存在第二套菜单实现。
+   */
+  'menu.popup': { payload: { menuId: AxonMenuId }; result: { opened: true } };
 
   // ── 工作区文件浏览（S2 顶部「打开文件」）──
 
@@ -525,6 +546,18 @@ export interface EventMap {
   'config.changed': { config: ConfigSnapshot };
 
   /**
+   * 「打开设置」从**菜单**发起（`文件 → 设置…` / `Ctrl+,`）。
+   *
+   * 为什么菜单不能像渲染层那样自己切屏：菜单在主进程，而 `screen` 是渲染层的
+   * UI 状态（`state/types.ts`）。走这条事件把意图传回去，与侧栏那个「设置」
+   * 落到同一屏 —— 在此之前菜单走的是另一条路（开独立设置窗），
+   * 结果是同一个入口点出两种设置界面。
+   *
+   * 不带 payload：只表达「去设置」这一个意图，不在协议里复制一份 Screen 联合。
+   */
+  'ui.openSettings': Record<string, never>;
+
+  /**
    * 代批留痕（MU-1 审批修②）。
    *
    * 背景：`resolveDelegation` 只要链上有 auto/full_access 祖先就直接放行，
@@ -564,8 +597,29 @@ export interface BudgetEventPayload {
 // 桥接接口
 // ─────────────────────────────────────────────────────────────
 
+/**
+ * 运行平台 —— **只用这三个值**，不是 `NodeJS.Platform`。
+ *
+ * 两个理由：① 渲染层的类型图里出现 `NodeJS.*` 与「渲染进程零 Node」（AGENTS.md §4.3）
+ * 是自相矛盾的信号，哪怕 `@types/node` 恰好能编过；② 联合类型收窄到我们真的分支过的
+ * 三种，`freebsd` 之流在 preload 归一（`toAxonPlatform`）时就被挡在门外，
+ * 渲染层永远不会遇到一个「既要按 Linux 走又不知道该按谁走」的值。
+ */
+export type AxonPlatform = 'darwin' | 'win32' | 'linux';
+
+/** 顶层菜单的稳定标识（顺序会变、id 不会），两侧唯一的对齐口径。 */
+export type AxonMenuId = 'file' | 'edit' | 'view' | 'window';
+
 /** preload 通过 contextBridge 暴露给渲染进程的对象形状。 */
 export interface AxonBridge {
+  /**
+   * 运行平台。**同步字段，不是命令**：Windows 要不要画那条自绘标题栏，
+   * 这个决定必须在首帧就有答案 —— 走 `invoke` 会先渲染出一帧没有标题栏的布局
+   * 再跳一下。它是不可变的环境常量（与 `process.platform` 同源），
+   * 不属于「状态真相在主进程」那条纪律要管的状态。
+   */
+  readonly platform: AxonPlatform;
+
   invoke<C extends keyof CommandMap>(
     command: C,
     payload: CommandMap[C]['payload'],
