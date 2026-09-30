@@ -511,6 +511,10 @@ function createWindow(): void {
     // 「文件 / 属性 / 叫人」按钮随之贴到窗口右上角。仅 macOS：hiddenInset 在
     // Windows/Linux 会变成无窗控的怪样，其它平台回退到系统默认边框。
     ...(process.platform === 'darwin' ? { titleBarStyle: 'hiddenInset' as const } : {}),
+    // Windows 的窗口/任务栏图标取自 BrowserWindow 的 icon（macOS 无此项，走 app.dock）。
+    // 开发态跑的是 electron.exe，不指这个就显示 Electron 默认图标；打包态改用 exe 内嵌资源
+    // （electron-builder 的 win.icon），此项被忽略，但留着无害且保证开发态一致。
+    ...(process.platform === 'win32' ? { icon: join(here, 'icon.ico') } : {}),
     webPreferences: {
       // 三条都不能松：渲染进程绝不碰 Node。
       // preload 用 .mjs：ESM preload 是 Electron 的硬性要求（且需 sandbox:false）。
@@ -537,6 +541,7 @@ function createWindow(): void {
 app.whenReady().then(async () => {
   // 开发态（未打包）dock 图标：打包后 electron-builder 会用 icon.icns，dock 自动生效；
   // 开发态直接跑 dist/main.mjs 不经打包，dock 退回默认 Electron 图标，这里手动兜住。
+  // Windows 的等价逻辑在 createWindow 的 BrowserWindow icon 选项（Windows 没有 app.dock）。
   if (!app.isPackaged && process.platform === 'darwin') {
     app.dock?.setIcon(join(here, 'icon.png'));
   }

@@ -31,6 +31,17 @@ mac:
   #   xattr -cr /Applications/Axon.app
   identity: null
 
+# Windows 打包见 M7-packaging.md P-3：正式分发延期，此块先把图标钉死。
+# 不配 icon 时 electron-builder 会去找默认 buildResources 目录的 build/icon.ico，
+# 本仓库没有该目录 → 静默回落到 Electron 默认图标，所以必须显式指定。
+# .ico 由 assets/icon.png（1024²）用混合格式编码：16–128 走 BMP/DIB、256 走 PNG，
+# 与 Windows 自身产出的 ICO 同构，任务栏在各 DPI 缩放下都清晰。
+win:
+  target:
+    - target: nsis
+      arch: x64
+  icon: apps/desktop/assets/icon.ico
+
 dmg:
   title: "Axon ${version}"
   contents:
