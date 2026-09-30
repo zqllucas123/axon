@@ -6,6 +6,7 @@
 import { useCallback, useEffect, useState, type CSSProperties, type ReactElement } from 'react';
 import { useApp } from '../state/store.tsx';
 import { Sidebar } from './Sidebar.tsx';
+import { Titlebar } from './Titlebar.tsx';
 import { Topbar, SessionTopbarSide } from './Topbar.tsx';
 import { S0NewSession } from './S0NewSession.tsx';
 import { S1Workbench } from './S1Workbench.tsx';
@@ -91,27 +92,43 @@ export function Shell(): ReactElement {
     return () => document.removeEventListener('keydown', onKey);
   }, [toggleSidebar]);
 
-  // S8 设置屏**整屏接管**：它自带一套左导航（`.st-sidebar`），再叠主窗 Sidebar
-  // 就是两条侧栏并列；而且设置没有会话上下文，Topbar 那排会话胶囊（预算/待批/
-  // 活跃会话）在这里语义为空。返回靠设置屏自己的「← 返回」（SettingsApp.tsx）。
-  if (screen === 's8') return <SettingsScreen />;
-
+  /**
+   * 窗口 chrome 是**通栏**的，所以它在两条路由分支之外 —— 标题栏那一行必须
+   * 在 `.window`（左栏 + 主区两列 Grid）之上，而不是某一列里。
+   *
+   * 为什么 S8 也包进来而不是各写一份：Windows 上菜单栏是被藏掉的，标题栏里的
+   * 那排菜单名是**唯一的**菜单入口（见 components/Titlebar.tsx）。S8 单独走一条
+   * 不带标题栏的分支，等于设置屏里没有菜单；两条分支各画一次又必然漂移。
+   */
   const showRightPanel = screen === 's2' && rightPanel !== 'none';
   const layoutStyle = { '--right-panel-w': `${showRightPanel ? rightPanelWidth : 0}px` } as CSSProperties;
 
   return (
-    <div className={`window${collapsed ? ' sidebar-collapsed' : ''}`}>
-      <Sidebar />
-      <div className={`main app-layout${showRightPanel ? ' has-right-panel' : ''}`} style={layoutStyle}>
-        <Topbar sidebarCollapsed={collapsed} onToggleSidebar={toggleSidebar} />
-        <div className="topbar-side">{showRightPanel ? <SessionTopbarSide /> : null}</div>
-        <div className="screen-main">
-          <ErrorBar />
-          {screen === 's2' ? <SessionMain /> : <Screen />}
-        </div>
-        <div className="screen-side">
-          {showRightPanel ? <SessionRightPanel width={rightPanelWidth} onWidthChange={setRightPanelWidth} /> : null}
-        </div>
+    <div className="app-frame">
+      <Titlebar />
+      <div className="app-body">
+        {screen === 's8' ? (
+          // S8 设置屏**整屏接管**：它自带一套左导航（`.st-sidebar`），再叠主窗
+          // Sidebar 就是两条侧栏并列；而且设置没有会话上下文，Topbar 那排会话胶囊
+          // （预算/待批/活跃会话）在这里语义为空。返回靠设置屏自己的「← 返回」
+          // （SettingsApp.tsx）。
+          <SettingsScreen />
+        ) : (
+          <div className={`window${collapsed ? ' sidebar-collapsed' : ''}`}>
+            <Sidebar />
+            <div className={`main app-layout${showRightPanel ? ' has-right-panel' : ''}`} style={layoutStyle}>
+              <Topbar sidebarCollapsed={collapsed} onToggleSidebar={toggleSidebar} />
+              <div className="topbar-side">{showRightPanel ? <SessionTopbarSide /> : null}</div>
+              <div className="screen-main">
+                <ErrorBar />
+                {screen === 's2' ? <SessionMain /> : <Screen />}
+              </div>
+              <div className="screen-side">
+                {showRightPanel ? <SessionRightPanel width={rightPanelWidth} onWidthChange={setRightPanelWidth} /> : null}
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

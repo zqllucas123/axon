@@ -595,6 +595,9 @@ export function AppProvider({ children }: { children: ReactNode }): ReactElement
     offs.push(sub('teams.changed', ({ entries, issues }) => setTeams({ entries, issues })));
     offs.push(sub('config.changed', ({ config: cfg }) => setConfig(cfg)));
     offs.push(sub('ledger.policyChanged', () => undefined));
+    // 菜单发起的「设置」（文件 → 设置… / ⌘,）：屏是渲染层的状态，菜单在主进程，
+    // 所以这条意图要绕回来落到与侧栏那个「设置」同一屏（`go('s8')`）。
+    offs.push(sub('ui.openSettings', () => setScreen('s8')));
 
     const upsertLedger = (record: LedgerRecord) =>
       setLedger((prev) => {

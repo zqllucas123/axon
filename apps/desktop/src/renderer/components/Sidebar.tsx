@@ -12,6 +12,7 @@ import { useEffect, useState, type ReactElement } from 'react';
 import { useApp } from '../state/store.tsx';
 import { globalChips, groupSessionsByProject, sessionMeta, splitSessions, statusDot } from '../state/selectors.ts';
 import { Icon, type IconName } from '../icons.tsx';
+import { isCustomTitlebar } from '../chrome.ts';
 import { ProjectCreateDialog } from './ProjectCreateDialog.tsx';
 import type { Screen } from '../state/types.ts';
 import type { SessionSummary } from '@axon/protocol';
@@ -80,22 +81,27 @@ export function Sidebar(): ReactElement {
   return (
     <aside className="sidebar">
       {/*
-        原型里的假交通灯（三个红黄绿 `<span className="dot">`）已删：主窗没有设
-        `titleBarStyle`，用的是**原生标题栏**，macOS 自己在左上角画了一组真交通灯。
-        原型是浏览器里的静态稿才需要自绘窗控；这里再画一组，屏幕上就是两组圆点，
-        而假的那组还点不动。（`.traffic` 样式随本次一起删。）
-      */}
+        原型里的假交通灯（三个红黄绿 `<span className="dot">`）已删：macOS 用
+        `titleBarStyle: hiddenInset`，系统自己在左上角画了一组真交通灯；
+        Windows 走自绘标题栏（`Titlebar.tsx`），窗控按钮是系统的叠加层。
+        两端都不需要自绘窗控。（`.traffic` 样式随本次一起删。）
 
-      {/*
         brand 区只留品牌字。原本这里摆着两个 `opacity:0.5` 的占位图标（搜索 / 通知），
         MU-3 切片 8 删除 —— 它们是 `<span>`：无 onClick、无 role、无 tabIndex，点上去
         什么也不会发生，却有 hover 底色诱导人去点（`components.css` 的 `.brand .act`）。
         而且两个能力已经有真正的去处：「通知」就是下面 NAV 里的 s5 收件箱（带真 badge），
         「搜索」则连协议面都没有（台账 D-12）。两个入口指向同一件事时，留那个假的只会分歧。
+
+        Windows 上整块不渲染：那边窗口顶部已经有自绘标题栏里的「Axon」，
+        同屏再来一个大号品牌字就是重复（用户 2026-09-30 拍板）。macOS 保留 ——
+        标题栏那一行在 macOS 上是侧栏品牌区 + 主区顶栏合起来的通栏，
+        拿掉它侧栏顶部就空了，还要另外找东西补上交通灯的让位。
       */}
-      <div className="brand">
-        <span className="name">Axon</span>
-      </div>
+      {isCustomTitlebar() ? null : (
+        <div className="brand">
+          <span className="name">Axon</span>
+        </div>
+      )}
 
       <nav className="nav">
         {NAV.map((n) => (
@@ -201,7 +207,8 @@ export function Sidebar(): ReactElement {
 
       {menuOpen ? (
         <div className="menu menu-up" onClick={(e) => e.stopPropagation()}>
-          {/* MU-3：两条死链接上真落点（设置窗单例 / shell.openPath）。 */}
+          {/* MU-3：两条死链接上真落点（进 S8 设置屏 / shell.openPath）。
+              这里的「设置…」与菜单里那条（`文件 → 设置…`）走的是同一个去处：主窗的 S8。 */}
           <button className="menu-item" data-smoke="menu-settings" onClick={() => openSettings()}>
             <Icon name="settings" size={16} />
             <span>设置…</span>

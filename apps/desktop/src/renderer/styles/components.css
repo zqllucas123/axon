@@ -5,10 +5,30 @@
    屏内专有规则在 screens.css；令牌在 tokens.css。
    ========================================================================= */
 
+/* ---------- 2. 窗口骨架 ---------- */
+/* 外面这一层是**给自绘标题栏留的行**（Windows 才有，其它平台 Titlebar 渲染 null，
+   于是 .app-body 独占全高，与改动前逐值一致）。
+   为什么是 flex 而不是 grid：`.titlebar` 在非 Windows 上根本不进 DOM，
+   grid 的自动放置会把唯一的子项 `.app-body` 放进 auto 行、1fr 行空着，
+   百分比高度解析不到 → `.window` 塌成内容高。flex 的 `flex:1` 没这个歧义。 */
+.app-frame {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+.app-body {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
 .window {
   display: grid;
   grid-template-columns: var(--sidebar-w) 1fr;
-  height: 100vh;
+  /* 不是 100vh：高度由 `.app-body` 给（标题栏那一行要占掉 40px）。
+     留着 100vh 会在 Windows 上多出正好 40px 溢出、`html,body{height:100%}` 下被裁掉，
+     而这个 bug 在 macOS（没有标题栏行）完全看不见 —— 与 base.css 的 #root 同一条链。 */
+  height: 100%;
   overflow: hidden;
   background: var(--bg-canvas);
   transition: grid-template-columns 0.18s ease;
@@ -18,6 +38,60 @@
 .window.sidebar-collapsed {
   grid-template-columns: 0 1fr;
 }
+
+/* ---------- 2.1 自绘标题栏（仅 Windows）----------
+   「Axon + 文件/编辑/视图/窗口」一行。原型依据：docs/new_ux/assets/tokens.css:121-175
+   的 `.titlebar`（通栏 / --bg-sidebar / 1px 下边线 / 整条可拖拽），只有高度按
+   Windows 收敛到 40px（原型那 52px 是照 macOS 交通灯的高度给的）。
+
+   三个值必须与主进程对齐，改一处要改两处（`main/window-chrome.ts`）：
+   高度 40 ↔ `titleBarOverlay.height`；底色 ↔ `titleBarOverlay.color`；
+   左边那条线是 macOS 没有的（那边交通灯在窗口左上角，不加线更干净）。 */
+.titlebar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  height: 40px;
+  background: var(--bg-sidebar);
+  border-bottom: 1px solid var(--line);
+  /* 让开右侧的系统窗控叠加层：那三个按钮由系统画在**页面之上**，被它盖住的东西
+     既看不见也点不到。用 env() 而不是写死 138px —— 最大化/还原与不同 DPI 缩放下
+     这块矩形都会变，写死必错位（`env` 的缺省值是「没有叠加层」，此时右内边距为 0）。 */
+  padding-left: max(10px, env(titlebar-area-x, 0px));
+  padding-right: calc(100% - env(titlebar-area-x, 0px) - env(titlebar-area-width, 100%));
+  /* 整条可拖拽窗口（双击最大化由系统处理）；交互元件单独 no-drag，见下。 */
+  -webkit-app-region: drag;
+}
+.titlebar-brand {
+  font-size: var(--fs-14);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  padding: 0 10px;
+}
+.titlebar-menus { display: flex; align-items: center; }
+.titlebar-menu {
+  padding: 4px 9px;
+  border-radius: var(--r-xs);
+  font-size: var(--fs-13);
+  color: var(--text);
+  line-height: 1.2;
+}
+.titlebar-menu:hover { background: var(--bg-hover); }
+.titlebar-error { margin-left: 10px; font-size: var(--fs-12); color: var(--sem-err); }
+/* no-drag 清单照 `.topbar` 的写法一次列全，别只写 button：漏掉的形态
+   （比如以后放个 `<a>`）会变成「看着能点、实际在拖窗口」。 */
+.titlebar button,
+.titlebar input,
+.titlebar select,
+.titlebar a,
+.titlebar [role='button'] {
+  -webkit-app-region: no-drag;
+}
+
+/* 自绘标题栏下的三处补正（Windows 专属）。前两处的原型值是为 macOS 的
+   交通灯让位写下的，Windows 没有交通灯、也没有侧栏品牌区，照抄会留出空白。 */
+body[data-chrome='custom'] .sidebar { padding-top: 8px; }
+body[data-chrome='custom'] .window.sidebar-collapsed .topbar { padding-left: 22px; }
 
 /* ---------- 3. 侧栏 ---------- */
 .sidebar {
@@ -29,18 +103,12 @@
   position: relative; /* 账号菜单的定位上下文 */
 }
 
-/* `.traffic` / `.traffic .dot` 及三个颜色类已删：主窗用原生标题栏，macOS 已经
-   画了真交通灯，自绘一组只会变成两组圆点（见 Sidebar.tsx 同处注释）。
-   侧栏顶部的留白改由 `.brand` 自己撑。 */
-.traffic .dot { width: 12px; height: 12px; border-radius: 50%; }
-.traffic .r { background: #ff5f57; }
-.traffic .y { background: #febc2e; }
-.traffic .g { background: #28c840; }
-/* `.traffic .spacer` / `.traffic .chrome-btn` 已删（MU-3 切片 8）：无对应元素。
-   红黄绿三点本身也是装饰，但它占着 macOS 原生交通灯的位置（窗口是
-   `titleBarStyle: hiddenInset`），删了侧栏顶部会和系统按钮重叠 —— 不同于
-   brand 区那两个假图标，它们是布局占位，留。 */
+/* `.traffic` 一族（`.dot` / `.r` / `.y` / `.g` / `.spacer` / `.chrome-btn`）整个删了：
+   全仓已无对应元素，而规则还留着 —— 正是本文件末尾「不留孤儿规则」那条自己禁止的形态。
+   两个平台的窗控都不由我们画：macOS 是系统交通灯（`titleBarStyle: hiddenInset`），
+   Windows 是系统的窗控叠加层（`titleBarOverlay`，见 `main/window-chrome.ts`）。 */
 
+/* 品牌区**只在 macOS 渲染**（Windows 上标题栏里已有「Axon」，见 Sidebar.tsx）。 */
 .brand {
   display: flex;
   align-items: center;
@@ -395,8 +463,9 @@
   align-items: center;
   gap: 10px;
   padding: 0 18px 0 22px;
-  /* hiddenInset 下这条贴着窗口顶沿，就是标题栏——整条可拖拽窗口，
-     交互元件（按钮 / 输入）单独标 no-drag，否则点不动。 */
+  /* 这条在 macOS 上贴着窗口顶沿（hiddenInset），就是那条通栏标题栏的一部分；
+     在 Windows 上它让位给 `.titlebar`（自绘标题栏）成了第二行。两边都保持可拖拽：
+     多一条能拖窗口的带子无害，交互元件（按钮 / 输入）照旧单独标 no-drag。 */
   -webkit-app-region: drag;
 }
 .topbar button,
@@ -472,7 +541,9 @@
 .sidebar-toggle:hover { background: var(--bg-hover); color: var(--text-secondary); }
 .sidebar-toggle .i { color: inherit; }
 /* 收起态：主窗左列压到 0，顶栏贴到窗口左沿——加大左内边距给 macOS 原生交通灯让位
-   （hiddenInset），避免切换钮压在红黄绿三点上。 */
+   （hiddenInset），避免切换钮压在红黄绿三点上。
+   Windows 没有交通灯（窗控在标题栏右侧的叠加层里），78px 会变成一段没来由的空白，
+   由文件顶部那组 `body[data-chrome='custom']` 覆盖回 22px。 */
 .window.sidebar-collapsed .topbar { padding-left: 78px; }
 /* `.topbar .act` 三条已删（MU-3 切片 8）：顶栏只有面包屑与 chip，没有图标动作区。
    原型里那几个图标（分享/更多）至今没有协议面，真要做时连同命令一起补。 */
@@ -871,6 +942,20 @@ table.tbl td.num { font-family: var(--font-mono); color: var(--text); }
 .team-card .tc-name { font-size: var(--fs-15); font-weight: 500; }
 .team-card .tc-desc { font-size: var(--fs-12); color: var(--text-muted); line-height: 1.6; }
 .team-card .tc-foot { display: flex; align-items: center; gap: 8px; font-size: var(--fs-12); color: var(--text-dim); }
+.team-card .tc-rename-input {
+  font-size: var(--fs-15); font-weight: 500;
+  border: 1px solid var(--accent); border-radius: var(--r-xs);
+  background: var(--bg); color: var(--text);
+  padding: 2px 6px; outline: none; width: 100%;
+}
+
+/* 右键菜单遮罩 + 菜单危险项 */
+.ctx-backdrop {
+  position: fixed; inset: 0; z-index: 39;
+}
+.team-ctx-menu { min-width: 140px; z-index: 40; }
+.menu-item.danger { color: var(--red, #d0372a); }
+.menu-item.danger .i { color: var(--red, #d0372a); }
 
 /* =========================================================================
    新建会话（S0）—— 空态 + 底部输入区（逐值对齐 docs/new_ux/01-home.html）

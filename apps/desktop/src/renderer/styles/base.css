@@ -35,7 +35,9 @@ a { color: inherit; text-decoration: none; }
 .i-14 { width: 14px; height: 14px; }
 .i-20 { width: 20px; height: 20px; }
 
-/* React 挂载点撑满，`.window` 的 100vh 才有基准 */
+/* React 挂载点撑满 —— `.app-frame`（高度链的顶端）与它下面的 `.window`
+   全靠这条基准；`.window` 自己不再用 100vh（自绘标题栏那一行要占掉窗口高度的一部分，
+   见 components.css 的 `.app-frame`）。 */
 #root { height: 100%; }
 
 /* ---------- 实现新增（原型没有这一段，必须写清为什么）----------

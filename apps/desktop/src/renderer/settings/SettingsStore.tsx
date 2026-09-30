@@ -91,8 +91,9 @@ export function SettingsProvider({ children }: { children: ReactNode }): ReactEl
   const [issues, setIssues] = useState<ConfigIssue[]>([]);
   const [error, setError] = useState<string | null>(null);
 
-  // 首拉 + 订阅：`config.changed` 由主进程在任一窗口改配置后广播，
-  // 所以另一个窗口改了这里也会跟着变（双窗同步的全部实现就是这一行）。
+  // 首拉 + 订阅：`config.changed` 由主进程在配置落盘后广播，所以不论改动来自
+  // 哪个消费方（本屏、主窗的 store、外部改配置文件），这里都会跟着变
+  // —— 同步的全部实现就是这一行。
   useEffect(() => {
     let alive = true;
     void (async () => {

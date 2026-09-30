@@ -51,6 +51,10 @@
   /* hiddenInset 的交通灯内嵌在左上角（约 y≤22px），把「← 返回应用」往下让开。 */
   padding-top: 20px;
 }
+/* Windows 走自绘标题栏：窗控在**标题栏右端**的叠加层里，左上角是「Axon」品牌字。
+   留着这 20px 就是一段没来由的空白（比 components.css 里那组覆盖优先级高，
+   所以不必依赖文件先后顺序）。 */
+body[data-chrome='custom'] .st-win .st-sidebar { padding-top: 0; }
 
 /* 导航项。
    `.st-back`（← 返回应用）重新加回：设置从独立窗改成主窗内的一屏（S8）后，

@@ -12,7 +12,7 @@
  * 但团队档没有单独的「只读」开关 —— 原型的「全员只读」标签不渲染（拿不到就不编）。
  */
 
-import { useMemo, useState, type ReactElement } from 'react';
+import React, { useMemo, useRef, useState, type ReactElement } from 'react';
 import { useApp } from '../state/store.tsx';
 import { Icon } from '../icons.tsx';
 import { money } from '../state/selectors.ts';
@@ -69,39 +69,89 @@ function TeamCard({
   active,
   inUse,
   onOpen,
+  onContextMenu,
+  isRenaming,
+  renameValue,
+  onRenameChange,
+  onRenameCommit,
+  onRenameCancel,
 }: {
   team: TeamDefinition;
   active: boolean;
   inUse: boolean;
   onOpen: () => void;
+  onContextMenu: (e: React.MouseEvent) => void;
+  isRenaming: boolean;
+  renameValue: string;
+  onRenameChange: (v: string) => void;
+  onRenameCommit: () => void;
+  onRenameCancel: () => void;
 }): ReactElement {
   const lead = leadMember(team);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  const head = (
+    <span className="tc-head">
+      <span className="ava-stack">
+        {team.members.slice(0, 4).map((m) => (
+          <span key={m.name} className={`ava${m.lead ? ' lead' : ''}`}>
+            {m.name.slice(0, 1)}
+          </span>
+        ))}
+      </span>
+      <span className="spacer" />
+      {inUse ? <span className="tag">使用中</span> : null}
+    </span>
+  );
+  const foot = (
+    <span className="tc-foot">
+      <span className="tag">{team.members.length} 成员</span>
+      {team.maxConcurrent ? <span className="tag">并发 {team.maxConcurrent}</span> : null}
+      {team.budget?.hardUsd ? <span className="tag">硬线 {teamMoney(team.budget.hardUsd)}</span> : null}
+      {lead ? <span className="tag">lead {lead.name}</span> : null}
+    </span>
+  );
+
+  if (isRenaming) {
+    return (
+      <div
+        className={`team-card${active ? ' is-on' : ''}`}
+        data-smoke="team-card"
+        data-team={team.name}
+        onContextMenu={onContextMenu}
+      >
+        {head}
+        <input
+          ref={inputRef}
+          className="tc-rename-input"
+          value={renameValue}
+          autoFocus
+          onClick={(e) => e.stopPropagation()}
+          onChange={(e) => onRenameChange(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') onRenameCommit();
+            else if (e.key === 'Escape') onRenameCancel();
+          }}
+          onBlur={onRenameCommit}
+        />
+        <span className="tc-desc">{team.description ?? '（没有描述）'}</span>
+        {foot}
+      </div>
+    );
+  }
+
   return (
     <button
       className={`team-card${active ? ' is-on' : ''}`}
       data-smoke="team-card"
       data-team={team.name}
       onClick={onOpen}
+      onContextMenu={onContextMenu}
     >
-      <span className="tc-head">
-        <span className="ava-stack">
-          {team.members.slice(0, 4).map((m) => (
-            <span key={m.name} className={`ava${m.lead ? ' lead' : ''}`}>
-              {m.name.slice(0, 1)}
-            </span>
-          ))}
-        </span>
-        <span className="spacer" />
-        {inUse ? <span className="tag">使用中</span> : null}
-      </span>
+      {head}
       <span className="tc-name">{team.name}</span>
       <span className="tc-desc">{team.description ?? '（没有描述）'}</span>
-      <span className="tc-foot">
-        <span className="tag">{team.members.length} 成员</span>
-        {team.maxConcurrent ? <span className="tag">并发 {team.maxConcurrent}</span> : null}
-        {team.budget?.hardUsd ? <span className="tag">硬线 {teamMoney(team.budget.hardUsd)}</span> : null}
-        {lead ? <span className="tag">lead {lead.name}</span> : null}
-      </span>
+      {foot}
     </button>
   );
 }
@@ -453,6 +503,12 @@ export function S3Teams(): ReactElement {
   const [typeNew, setTypeNew] = useState(false);
   const [teamIssues, setTeamIssues] = useState<readonly TeamIssue[]>([]);
   const [busy, setBusy] = useState(false);
+  /** 右键菜单：{ name, x, y } | null */
+  const [ctxMenu, setCtxMenu] = useState<{ name: string; x: number; y: number } | null>(null);
+  /** 正在重命名的团队名，null = 无 */
+  const [renaming, setRenaming] = useState<string | null>(null);
+  /** 重命名输入框的当前值 */
+  const [renameValue, setRenameValue] = useState('');
 
   const pickedEntry = useMemo(
     () => teams.entries.find((t) => t.team.name === picked) ?? null,
@@ -508,6 +564,50 @@ export function S3Teams(): ReactElement {
       setPicked(null);
       setDraft(null);
     }
+  };
+
+  /** 右键菜单触发（团队卡）。 */
+  const openCtxMenu = (e: React.MouseEvent, name: string): void => {
+    e.preventDefault();
+    e.stopPropagation();
+    setCtxMenu({ name, x: e.clientX, y: e.clientY });
+  };
+
+  const closeCtxMenu = (): void => setCtxMenu(null);
+
+  const ctxDelete = async (): Promise<void> => {
+    if (!ctxMenu) return;
+    const name = ctxMenu.name;
+    closeCtxMenu();
+    setBusy(true);
+    const ok = await deleteTeam(name);
+    setBusy(false);
+    if (ok && picked === name) {
+      setPicked(null);
+      setDraft(null);
+    }
+  };
+
+  const ctxRename = (): void => {
+    if (!ctxMenu) return;
+    setRenaming(ctxMenu.name);
+    setRenameValue(ctxMenu.name);
+    closeCtxMenu();
+  };
+
+  const commitRename = async (): Promise<void> => {
+    if (!renaming) return;
+    const trimmed = renameValue.trim();
+    if (!trimmed || trimmed === renaming) { setRenaming(null); return; }
+    const entry = teams.entries.find((t) => t.team.name === renaming);
+    if (!entry) { setRenaming(null); return; }
+    const renamed: TeamDefinition = { ...structuredClone(entry.team), name: trimmed };
+    setBusy(true);
+    const res = await saveTeam(renamed);
+    if (res.accepted) await deleteTeam(renaming);
+    setBusy(false);
+    setRenaming(null);
+    if (res.accepted && picked === renaming) openTeam(trimmed);
   };
 
   const patchMember = (at: number, next: TeamMember): void => {
@@ -622,6 +722,12 @@ export function S3Teams(): ReactElement {
                       active={picked === t.team.name}
                       inUse={current?.record.teamId === t.team.name}
                       onOpen={() => openTeam(t.team.name)}
+                      onContextMenu={(e) => openCtxMenu(e, t.team.name)}
+                      isRenaming={renaming === t.team.name}
+                      renameValue={renaming === t.team.name ? renameValue : t.team.name}
+                      onRenameChange={setRenameValue}
+                      onRenameCommit={() => void commitRename()}
+                      onRenameCancel={() => setRenaming(null)}
                     />
                   ))}
                 </div>
@@ -905,56 +1011,24 @@ export function S3Teams(): ReactElement {
         </div>
       </section>
 
-      <aside className="inspector">
-        <div className="panel">
-          <div className="panel-title">
-            <span>三层关系</span>
+      {/* 右键菜单浮层 */}
+      {ctxMenu ? (
+        <>
+          <div className="ctx-backdrop" onMouseDown={closeCtxMenu} />
+          <div className="menu team-ctx-menu" style={{ position: 'fixed', left: ctxMenu.x, top: ctxMenu.y }}>
+            <button className="menu-item" onClick={() => { ctxRename(); }}>
+              <Icon name="pen" size={14} className="i" />
+              重命名
+            </button>
+            <div className="menu-sep" />
+            <button className="menu-item danger" onClick={() => { void ctxDelete(); }}>
+              <Icon name="trash" size={14} className="i" />
+              删除团队
+            </button>
           </div>
-          <div className="prow sub">
-            <span className="tag">类型</span>
-            <span>Agent 类型</span>
-            <span className="val">能力模板</span>
-          </div>
-          <div className="prow sub">
-            <span className="tag">成员</span>
-            <span>Agent</span>
-            <span className="val">类型 + 覆写 + 名字</span>
-          </div>
-          <div className="prow sub">
-            <span className="tag">编队</span>
-            <span>Team</span>
-            <span className="val">Agent 组合 + 策略</span>
-          </div>
-          <div className="prow sub">
-            <span className="tag">实例</span>
-            <span>分身</span>
-            <span className="val">会话里跑起来的成员</span>
-          </div>
-          <div className="hint" style={{ padding: '2px 10px 8px' }}>
-            合成顺序不变：类型 → 权限（父 ∩ 子）→ 上下文（ForkMode）。团队只是在最外面加了一层「谁和谁一起上、树长什么形状」。
-          </div>
-        </div>
+        </>
+      ) : null}
 
-        <div className="panel">
-          <div className="panel-title">
-            <span>用这些团队的会话</span>
-          </div>
-          {current?.record.teamId ? (
-            <div className="prow sub">
-              <span className={`sdot ${current.status === 'running' ? 'run' : 'done'}`} />
-              <span>{current.record.title}</span>
-              <span className="val">{current.counts.members} 分身</span>
-            </div>
-          ) : (
-            <div className="hint" style={{ padding: '4px 10px 8px' }}>
-              当前会话没有引用团队（单兵）。左栏点进一个团队会话后这里会显示它。
-            </div>
-          )}
-          <div className="hint" style={{ padding: '2px 10px 8px' }}>
-            改团队不影响已开的会话（合成发生在 session.create 时）。
-          </div>
-        </div>
-      </aside>
     </div>
   );
 }

@@ -74,18 +74,18 @@ if (launch) launchApp();
 /**
  * 找一个 CDP 页面目标。
  *
- * ⚠️ `filter` 必须排掉 `#settings`（MU-3 切片 9）：两个窗口共用同一份
- * `index.html`，只靠 hash 分叉（`renderer/main.tsx`）。旧的「`url.includes('index.html')`
- * 」会在设置窗开着时随机选中它 —— 而设置窗里没有侧栏、没有 nav-sN，
- * 下一句 `document.querySelector(...).click()` 就会报 null —— 且报错地点距离
- * 真因很远，极难查。
+ * 只按 `index.html` 找就够了：设置曾经是**第二个窗口**（共用同一份 `index.html`、
+ * 靠 `#settings` 分叉），那时这里必须排掉它 —— 否则会随机选中一个没有侧栏、
+ * 没有 nav-sN 的窗口，下一句 `querySelector(...).click()` 报 null 且离真因很远。
+ * 设置改为主窗内的一屏之后，页面目标只剩一个，那段过滤连同 `countSettingsWindows`
+ * / `attach` 一起下线。
  */
-async function getPageTarget(filter = (t) => !t.url.includes('#settings')) {
+async function getPageTarget() {
   for (let i = 0; i < 40; i++) {
     try {
       const res = await fetch(`http://127.0.0.1:${port}/json`);
       const list = await res.json();
-      const page = list.find((t) => t.type === 'page' && t.url.includes('index.html') && filter(t));
+      const page = list.find((t) => t.type === 'page' && t.url.includes('index.html'));
       if (page) return page;
     } catch {
       /* 窗口还没起 */
@@ -93,43 +93,6 @@ async function getPageTarget(filter = (t) => !t.url.includes('#settings')) {
     await new Promise((r) => setTimeout(r, 250));
   }
   throw new Error('等不到 CDP 页面目标');
-}
-
-/** 当前有几个设置窗（单例断言用）。 */
-async function countSettingsWindows() {
-  const list = await (await fetch(`http://127.0.0.1:${port}/json`)).json();
-  return list.filter((t) => t.type === 'page' && t.url.includes('#settings')).length;
-}
-
-/**
- * 给任意目标开一条**独立**的 CDP 连接（设置窗幕用）。
- * 不复用全局 `ws`/`evalJs`：那两个句柄归主窗，设置窗幕跑完要接着用主窗
- * 验「双窗同步」，两边必须同时活着。
- */
-async function attach(page) {
-  const sock = new WebSocket(page.webSocketDebuggerUrl);
-  const waiting = new Map();
-  let id = 0;
-  sock.onmessage = (ev) => {
-    const msg = JSON.parse(ev.data);
-    const p = waiting.get(msg.id);
-    if (p) {
-      waiting.delete(msg.id);
-      msg.error ? p.reject(new Error(msg.error.message)) : p.resolve(msg.result);
-    }
-  };
-  await new Promise((res, rej) => {
-    sock.onopen = res;
-    sock.onerror = rej;
-  });
-  const ev = async (expression) => {
-    const i = ++id;
-    sock.send(JSON.stringify({ id: i, method: 'Runtime.evaluate', params: { expression, awaitPromise: true, returnByValue: true } }));
-    const r = await new Promise((resolve, reject) => waiting.set(i, { resolve, reject }));
-    if (r.exceptionDetails) throw new Error('设置窗求值异常: ' + JSON.stringify(r.exceptionDetails.exception?.description));
-    return r.result.value;
-  };
-  return { ev, close: () => sock.close() };
 }
 
 const log = (ok, msg) => console.log(`${ok ? '✓' : '✗'} ${msg}`);
@@ -241,6 +204,47 @@ try {
     exit(1);
   }
   log(true, `window.axon 桥接可用，初始 ${before} 个角色`);
+
+  // ── 1.5 Windows 自绘标题栏（平台门控：macOS 的菜单在系统顶栏，窗口里没有这一行，
+  //      不门控就会在 mac 上弄出一片红）
+  if (process.platform === 'win32') {
+    const platform = await evalJs(`window.axon.platform`);
+    log(platform === 'win32', `preload 暴露的平台为 win32（实际 ${platform}）`);
+    if (platform !== 'win32') exit(1);
+
+    const titlebar = await until(
+      `document.querySelectorAll('[data-smoke="titlebar"]').length === 1`,
+    );
+    log(titlebar, '自绘标题栏渲染且全页唯一');
+    if (!titlebar) exit(1);
+
+    // 渲染出来的菜单按钮数 === 主进程真装了几项。
+    // 这条是「菜单名从主进程读」那个设计的守卫：哪天真加了一项菜单而渲染层跟不上，
+    // 这里会红，而不是静默少一个按钮。
+    // 用 until 而不是一次性求值：菜单名是**异步**拉来的（挂载后才 invoke），
+    // 冷启动时渲染进程还在忙（实测 1.5s 时按钮常常还没进 DOM），一次性求值会假红。
+    const menuAligned = await until(`(async () => {
+      const { items } = await window.axon.invoke('menu.list', {});
+      const drawn = document.querySelectorAll('.titlebar [data-menu-id]');
+      return items.length > 0 && drawn.length === items.length;
+    })()`);
+    log(menuAligned, '标题栏菜单按钮数与应用菜单项数一致');
+    if (!menuAligned) exit(1);
+
+    // 不存在的菜单 id 必须走错误路径（不弹任何窗口）。
+    // 这里**不点真菜单**：原生 popup 会抢走输入，后面所有 CDP 断言都会变得难查。
+    const popupRejected = await evalJs(`window.axon
+      .invoke('menu.popup', { menuId: '__smoke_nope__' })
+      .then(() => false)
+      .catch(() => true)`);
+    log(popupRejected, 'menu.popup 对未知 id 报错（不静默）');
+    if (!popupRejected) exit(1);
+  } else {
+    // 反方向也要钉住：非 Windows 上这一行必须**不在**，否则 macOS 的窗口里会多一条。
+    const absent = await evalJs(`document.querySelectorAll('[data-smoke="titlebar"]').length === 0`);
+    log(absent, `非 Windows 平台不渲染自绘标题栏（${process.platform}）`);
+    if (!absent) exit(1);
+  }
 
   // ── 2. 保存新用户角色
   const saveRes = await evalJs(`window.axon.invoke('role.save', { role: ${JSON.stringify({
