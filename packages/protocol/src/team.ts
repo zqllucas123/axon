@@ -40,6 +40,14 @@ export interface TeamMemberOverride {
   /** 类型白名单的子集；写超集不会生效（求交时被裁掉）。 */
   tools?: string[];
   forkMode?: ForkModeSpec;
+  /**
+   * 执行引擎（M9），同 `CreateSessionPayload.engineId`。
+   *
+   * **只对非 lead 成员有效**：lead 负责协调整队，必须用 Axon 内置引擎。
+   * 指派在团队定义里，同一个角色在不同团队可以有不同引擎。
+   * 校验层会拒绝 lead 带这个字段（见 `'lead-has-engine'` 校验码）。
+   */
+  engineId?: string;
 }
 
 /** 团队里的一名具名成员。 */
@@ -145,7 +153,8 @@ export type TeamIssueCode =
   | 'parent-not-found'
   | 'parent-cycle'
   | 'formation-mismatch'
-  | 'invalid-value';
+  | 'invalid-value'
+  | 'lead-has-engine';
 
 export interface TeamIssue {
   level: TeamIssueLevel;

@@ -73,6 +73,8 @@ export interface MemberPlan {
   task?: string;
   lead: boolean;
   description?: string;
+  /** 执行引擎（M9）；只有非 lead 成员有值。 */
+  engineId?: string;
 }
 
 export interface TeamPlan {
@@ -126,6 +128,8 @@ export function planTeam(team: TeamDefinition, opts: PlanOptions): TeamPlan {
       ...(eff.defaultForkMode !== undefined ? { forkMode: eff.defaultForkMode } : {}),
       ...(member.description !== undefined ? { description: member.description } : {}),
       ...(opts.tasks?.get(member.name) !== undefined ? { task: opts.tasks.get(member.name)! } : {}),
+      // engineId 不进角色定义（只减不增的覆写），直接透传给 MemberPlan。
+      ...(!isLead && member.overrides?.engineId ? { engineId: member.overrides.engineId } : {}),
     };
   };
 

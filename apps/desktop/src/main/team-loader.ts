@@ -193,6 +193,13 @@ export function validateTeam(team: unknown, ctx: TeamValidationContext): TeamIss
         lead.name,
       );
     }
+    if (lead.overrides?.engineId !== undefined) {
+      err(
+        'lead-has-engine',
+        `主控「${lead.name}」不能指定外部引擎：主控负责协调整队，必须用 Axon 内置引擎`,
+        lead.name,
+      );
+    }
 
     // 权限交集链：lead 的白名单必须是每个成员的上限。
     const leadTools = resolvedTools(leadRole, lead);

@@ -28,6 +28,7 @@ import {
   type TeamMember,
   type RoleIssue,
 } from '@axon/protocol';
+import type { AgentToolsSnapshot } from '@axon/protocol';
 
 type Tab = 'teams' | 'agents' | 'types';
 
@@ -180,6 +181,9 @@ function MemberRow({
           {member.name}
           <span className="tag">类型 {member.role}</span>
           {member.lead ? <span className="tag info">lead</span> : null}
+          {member.overrides?.engineId ? (
+            <span className="tag info">引擎 {member.overrides.engineId}</span>
+          ) : null}
           {fork !== undefined && fork !== null ? (
             <span className="tag info">覆写上下文 {formatForkMode(parseForkMode(fork))}</span>
           ) : null}
@@ -203,12 +207,15 @@ function MemberRow({
 function MemberEditor({
   member,
   types,
+  agentTools,
   onChange,
   onRemove,
   onClose,
 }: {
   member: TeamMember;
   types: ReturnType<typeof useApp>['roles'];
+  /** 探测结果：知道哪些工具已安装、可选。 */
+  agentTools: AgentToolsSnapshot | null;
   onChange: (next: TeamMember) => void;
   onRemove: () => void;
   onClose: () => void;
@@ -307,6 +314,43 @@ function MemberEditor({
           <div className="hint">团队恰好一个 lead：它拿 initialPrompt，也负责拆解与分派。</div>
         </div>
       </div>
+      <div className="form-row">
+        <div className="lbl">执行引擎</div>
+        <div>
+          {member.lead ? (
+            <div className="hint">主控必须用 Axon 内置引擎（负责协调整队，外部工具有自己的子代理机制）。</div>
+          ) : (
+            <>
+              <select
+                className="inp"
+                value={member.overrides?.engineId ?? ''}
+                onChange={(e) =>
+                  patchOverride({
+                    engineId: e.target.value === '' ? undefined : e.target.value,
+                  })
+                }
+              >
+                <option value="">Axon 内置引擎</option>
+                {(agentTools?.tools ?? [])
+                  .filter((t) => t.runnable)
+                  .map((t) => (
+                    <option key={t.id} value={t.id}>
+                      {t.label}{t.version ? ` ${t.version}` : ''}
+                    </option>
+                  ))}
+              </select>
+              <div className="hint">
+                {agentTools?.status !== 'ready'
+                  ? '正在检测本机的 Agent 工具…'
+                  : (agentTools?.tools ?? []).filter((t) => t.runnable).length === 0
+                    ? '本机暂无已安装且已接入的外部引擎。'
+                    : '可选本机已安装且 Axon 已接入的外部工具（目前支持 Claude Code）。同一角色在不同团队可以有不同引擎。'}
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+
       <div className="card-foot" style={{ padding: '12px 0 0' }}>
         <button className="btn sm danger" onClick={onRemove}>
           <Icon name="trash" size={14} />
@@ -489,7 +533,7 @@ function TypeEditor({
 
 export function S3Teams(): ReactElement {
   const {
-    teams, roles, current, saveTeam, deleteTeam, saveRole, deleteRole, openPath,
+    teams, roles, current, saveTeam, deleteTeam, saveRole, deleteRole, openPath, agentTools,
   } = useApp();
   const [tab, setTab] = useState<Tab>('teams');
   /** 选中的团队名（详情区跟着它换）。 */
@@ -764,6 +808,7 @@ export function S3Teams(): ReactElement {
                       <MemberEditor
                         member={draft.members[memberAt]}
                         types={roles}
+                        agentTools={agentTools ?? null}
                         onChange={(next) => patchMember(memberAt, next)}
                         onRemove={() => removeMember(memberAt)}
                         onClose={() => setMemberAt(null)}

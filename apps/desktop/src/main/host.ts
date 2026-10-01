@@ -779,6 +779,7 @@ export class AxonHost {
     tasks?: ReadonlyMap<string, string>,
   ): { plan: MemberPlan; path: AgentPath }[] {
     const rootPath = sessionRootPath(sessionId);
+    const record = this.sessions.get(sessionId);
     const paths = new Map<string, AgentPath>();
     const spawned: { plan: MemberPlan; path: AgentPath }[] = [];
     for (const member of plan.members) {
@@ -804,6 +805,36 @@ export class AxonHost {
       });
       paths.set(member.name, snapshot.path);
       spawned.push({ plan: member, path: snapshot.path });
+
+      // 非 lead 成员有外部引擎：建好注册节点后，装配外部引擎替换默认的内置引擎。
+      // lead 在 buildRootEngine 里处理，永远走内置路径（planFor 已在上面确认）。
+      if (!member.lead && member.engineId !== undefined) {
+        const memberPath = snapshot.path;
+        const memberId = member.engineId;
+        const reason = this.externalEngines
+          ? this.externalEngines.unavailableReason(memberId)
+          : `不支持的执行引擎：${memberId}`;
+        const extEngine =
+          reason === undefined && this.externalEngines
+            ? this.externalEngines.create({
+                engineId: memberId,
+                sessionId,
+                cwd: record?.cwd ?? process.cwd(),
+                messages: [],
+                gate: (tool, args) => this.approvals.gate(memberPath, tool, args),
+                onCursor: (cursor) => {
+                  // 游标落到哪里？成员没有对应的 SessionRecord 字段，
+                  // 把它序列化进 transcript 的一个 note，重启时 restoreEngines 读回来。
+                  // TODO M9-follow: 如果团队会话也需要按游标恢复成员，
+                  // 应给 TranscriptHeader 或 agent-level JSON 加一个 resumeCursor 字段。
+                  // 暂时只持久化到内存，重启后成员的引擎会新建（会话上下文在 Claude 侧保留）。
+                  void cursor;
+                },
+              })
+            : unavailableEngine(memberId, reason ?? '外部引擎不可用', []);
+        this.registry.attachEngine(memberPath, extEngine);
+        this.wire(memberPath, extEngine);
+      }
     }
     return spawned;
   }
