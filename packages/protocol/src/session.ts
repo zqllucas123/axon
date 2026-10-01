@@ -60,8 +60,12 @@ export function isSessionExecutor(value: unknown): value is SessionExecutor {
  */
 export type SessionStatus = 'open' | 'closed';
 
-/** 会话落盘 schema 版本 —— 与账本的 LEDGER_SCHEMA_VERSION 各自独立（M5 读侧迁移用）。 */
-export const SESSION_SCHEMA_VERSION = 1;
+/** 会话落盘 schema 版本 —— 与账本的 LEDGER_SCHEMA_VERSION 各自独立（M5 读侧迁移用）。
+ *
+ * v1 → v2（M9）：SessionRecord 新增 `engineId`、`externalSessionId`、`resumeCursor`。
+ * 字段全部可选，旧记录正常读出，新字段缺省即 undefined（= 内置 pi 引擎路径）。
+ */
+export const SESSION_SCHEMA_VERSION = 2;
 
 /**
  * 落盘**外箱**版本（M5）：会话目录布局与文件集的版本。
@@ -185,6 +189,30 @@ export interface SessionRecord {
   budget?: SessionBudgetSpec;
   /** 会话级并发上限（团队 maxConcurrent 实例化到本会话的副本）。 */
   maxConcurrent?: number;
+  /**
+   * 外部引擎 id（M9）。缺省或 undefined = 走内置 pi 引擎（历史会话兼容）。
+   * 值域与 `AgentToolId`（`@axon/protocol/agent-tools`）对齐。
+   */
+  engineId?: string;
+  /**
+   * 外部引擎给出的会话标识（M9）。
+   *
+   * 对 Claude Code（`claude_sdk`）是 SDK 返回的 `providerSessionId`，用于
+   * 下次 `query({ resume: externalSessionId })` 恢复上下文。
+   * 由主进程在会话首次启动成功后写回并落盘；重启后 `restoreEngines()` 读它。
+   */
+  externalSessionId?: string;
+  /**
+   * 外部引擎的完整恢复游标（M9，Claude Code 专用）。
+   *
+   * 形状参照 tutti `sessionRuntime.ts:1237`：
+   * `{ kind: 'claude-agent-sdk'; version: 1; resume: string; resumeSessionAt?: string; turnCount: number }`
+   *
+   * 比 `externalSessionId` 更完整：携带轮次计数与最后一条消息 UUID，
+   * 让 SDK 能精确地从中断点重接而不是从会话头部重播。
+   * `externalSessionId` 保持冗余字段（= `resumeCursor.resume`），方便快速读取。
+   */
+  resumeCursor?: Record<string, unknown>;
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -304,6 +332,12 @@ export interface CreateSessionPayload {
    * 字段是**传输用**：落盘的 SessionRecord 里没有它，Agent 直接在 cwd 里看到文件。
    */
   attachments?: string[];
+  /**
+   * 外部引擎 id（M9）。与 `SessionRecord.engineId` 对应，
+   * 值域为 `AgentToolId`（'claude' | 'codex' | …）。
+   * 缺省 = 走内置 pi 引擎。
+   */
+  engineId?: string;
 }
 
 /**

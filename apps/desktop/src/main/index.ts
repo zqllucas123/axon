@@ -51,6 +51,8 @@ import { RoleBridge } from './role-bridge.ts';
 import { TeamBridge } from './team-bridge.ts';
 import { ProjectStore } from './project-store.ts';
 import { ConfigStore } from './config-store.ts';
+import { AgentToolsRegistry, KNOWN_AGENT_TOOLS, userSearchPath } from './agent-tools.ts';
+import { CLAUDE_ENGINE_ID, createClaudeEngine, isClaudeResumeCursor } from './engine-claude.ts';
 import {
   describeWorkspace,
   disposeTempWorkspaces,
@@ -108,6 +110,13 @@ const OPEN_PATHS: Record<OpenPathKind, () => string> = {
   config: () => CONFIG_PATH,
 };
 
+/**
+ * 外部 Agent 工具探测结果的缓存（见 agent-tools.ts：只探一次，之后读缓存）。
+ * AXON_AGENT_TOOLS_CACHE 供开发/冒烟隔离。
+ */
+const AGENT_TOOLS_CACHE =
+  process.env.AXON_AGENT_TOOLS_CACHE || join(homedir(), '.axon', 'agent-tools.json');
+
 /** 冒烟模式：只由 ui-smoke 打开，生产路径完全不受影响。 */
 const SMOKE = !!process.env.AXON_SMOKE_SCRIPT;
 
@@ -162,6 +171,7 @@ let roleBridge: RoleBridge | null = null;
 let teamBridge: TeamBridge | null = null;
 let projectStore: ProjectStore | null = null;
 let configStore: ConfigStore | null = null;
+let agentTools: AgentToolsRegistry | null = null;
 
 // ── 事件投递与节流 ──────────────────────────────────────
 //
@@ -602,6 +612,52 @@ app.whenReady().then(async () => {
   });
   console.log(`[desktop] projects: ${projectStore.current().entries.length} 个，目录 ${PROJECTS_DIR}`);
 
+  // 外部 Agent 工具：有缓存直接就绪；首次启动在后台探测，不挡窗口。
+  // 冒烟模式不探测也不碰缓存文件：真探会起登录 shell、跑用户机器上的 CLI，
+  // 而写缓存会把真用户的探测结果覆盖成空 —— 都与冒烟的隔离原则相悖。
+  agentTools = new AgentToolsRegistry({
+    cachePath: AGENT_TOOLS_CACHE,
+    ...(SMOKE
+      ? { detect: async () => [], cacheIO: { read: async () => null, write: async () => undefined } }
+      : {}),
+    onChange: (snapshot) => sendEvent('agentTools.changed', { snapshot }),
+  });
+  await agentTools.init();
+
+  // 外部引擎（M9）：本机装没装、怎么拉起由这里回答，host 只管编排。
+  host.setExternalEngineProvider({
+    label: (engineId) => KNOWN_AGENT_TOOLS.find((t) => t.id === engineId)?.label ?? engineId,
+    unavailableReason(engineId) {
+      if (engineId !== CLAUDE_ENGINE_ID) return `暂不支持用 ${engineId} 执行会话`;
+      const snap = agentTools!.snapshot();
+      const claude = snap.tools.find((t) => t.id === CLAUDE_ENGINE_ID);
+      if (claude?.installed) return undefined;
+      return snap.status === 'detecting' && !claude
+        ? '还在检测本机的 Agent 工具，请稍候再试'
+        : '本机未检测到 Claude Code：安装后在「执行引擎」菜单里点「重新检测」';
+    },
+    create(spec) {
+      return createClaudeEngine({
+        cwd: spec.cwd,
+        messages: spec.messages,
+        ...(isClaudeResumeCursor(spec.cursor) ? { cursor: spec.cursor } : {}),
+        // 路径到用时再取：用户「重新检测」之后，已建好的会话也能用上新路径。
+        resolveRuntime: async () => {
+          const claude = agentTools!.snapshot().tools.find((t) => t.id === CLAUDE_ENGINE_ID);
+          if (!claude?.installed || !claude.path) {
+            throw new Error('本机未检测到 Claude Code：安装后在「执行引擎」菜单里点「重新检测」');
+          }
+          // 普通会话的工作目录是临时目录，退出时会被清掉（workspace.ts）；重启后
+          // Claude 要在**同一个路径**下才找得到它的会话记录，目录没了就先建回来。
+          await mkdir(spec.cwd, { recursive: true });
+          return { executable: claude.path, env: { ...process.env, PATH: await userSearchPath() } };
+        },
+        gate: spec.gate,
+        onCursor: (cursor) => spec.onCursor({ ...cursor }),
+      });
+    },
+  });
+
   const state = host.listRoles();
   const teams = teamBridge.list();
   console.log(
@@ -846,6 +902,14 @@ app.whenReady().then(async () => {
           }
           const content = await fsReadFile(target, 'utf8');
           return { id: request.id, ok: true, result: { content, encoding: 'utf8', size } };
+        }
+
+        // 外部 Agent 工具探测（agent-tools.ts）：不属于 host 编排逻辑。
+        if (request.command === 'agentTools.get') {
+          return { id: request.id, ok: true, result: agentTools!.snapshot() };
+        }
+        if (request.command === 'agentTools.redetect') {
+          return { id: request.id, ok: true, result: await agentTools!.redetect() };
         }
 
         // M6: provider.test —— W-B 的 provider-probe.ts 落地后替换 stub 实现。

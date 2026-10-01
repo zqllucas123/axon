@@ -31,6 +31,7 @@ import type {
   AxonThinkingLevel,
   BudgetSnapshot,
   CommandMap,
+  AgentToolsSnapshot,
   ConfigSnapshot,
   CreateSessionPayload,
   FsEntry,
@@ -97,6 +98,8 @@ export interface StoreValue {
   budget: BudgetSnapshot | null;
   budgetAlert: BudgetAlert | null;
   config: ConfigSnapshot | null;
+  /** 本机外部 Agent 工具的探测结果（执行引擎 popover 的数据源；只展示，不是执行维度）。 */
+  agentTools: AgentToolsSnapshot | null;
   /** 最近一次失败的 invoke（原样透传，不吞）。 */
   error: string | null;
   // ── 视图状态（纯 UI，不入协议） ──
@@ -122,6 +125,8 @@ export interface StoreValue {
   pickProjectWorkspace: () => Promise<string | null>;
   /** 打开原生文件选择器选附件；取消返回空数组。 */
   pickFiles: () => Promise<string[]>;
+  /** 重新探测本机外部 Agent 工具（装了新工具后用）；结果经 `agentTools.changed` 回流。 */
+  redetectAgentTools: () => Promise<void>;
   /** 进入某项目的「新建会话」页（置项目上下文 + 切到 S0）。 */
   newSessionInProject: (projectId: string) => void;
   /** 清除项目上下文（回到普通新建会话）。 */
@@ -196,6 +201,7 @@ export function AppProvider({ children }: { children: ReactNode }): ReactElement
   const [budget, setBudget] = useState<BudgetSnapshot | null>(null);
   const [budgetAlert, setBudgetAlert] = useState<BudgetAlert | null>(null);
   const [config, setConfig] = useState<ConfigSnapshot | null>(null);
+  const [agentTools, setAgentTools] = useState<AgentToolsSnapshot | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const [screen, setScreen] = useState<Screen>('s0');
@@ -299,7 +305,7 @@ export function AppProvider({ children }: { children: ReactNode }): ReactElement
   useEffect(() => {
     let alive = true;
     void (async () => {
-      const [st, list, rs, ts, prj, ps, bg, cfg] = await Promise.all([
+      const [st, list, rs, ts, prj, ps, bg, cfg, at] = await Promise.all([
         call(() => window.axon.invoke('storage.status', {})),
         call(() => window.axon.invoke('session.list', {})),
         call(() => window.axon.invoke('role.list', {})),
@@ -308,6 +314,7 @@ export function AppProvider({ children }: { children: ReactNode }): ReactElement
         call(() => window.axon.invoke('pending.list', {})),
         call(() => window.axon.invoke('budget.get', {})),
         call(() => window.axon.invoke('config.get', {})),
+        call(() => window.axon.invoke('agentTools.get', {})),
       ]);
       if (!alive) return;
       if (st) setStorage(st as StorageStatus);
@@ -318,6 +325,8 @@ export function AppProvider({ children }: { children: ReactNode }): ReactElement
       if (ps) setPending(ps);
       if (bg) setBudget(bg);
       if (cfg) setConfig(cfg);
+      // 不覆盖已到的事件：首次探测可能在这次拉取回包前就推过来了（较新）。
+      if (at) setAgentTools((prev) => prev ?? at);
     })();
     return () => {
       alive = false;
@@ -596,6 +605,7 @@ export function AppProvider({ children }: { children: ReactNode }): ReactElement
     offs.push(sub('roles.changed', ({ entries, issues }) => setRoles({ entries, issues })));
     offs.push(sub('teams.changed', ({ entries, issues }) => setTeams({ entries, issues })));
     offs.push(sub('config.changed', ({ config: cfg }) => setConfig(cfg)));
+    offs.push(sub('agentTools.changed', ({ snapshot }) => setAgentTools(snapshot)));
     offs.push(sub('ledger.policyChanged', () => undefined));
     // 菜单发起的「设置」（文件 → 设置… / ⌘,）：屏是渲染层的状态，菜单在主进程，
     // 所以这条意图要绕回来落到与侧栏那个「设置」同一屏（`go('s8')`）。
@@ -828,6 +838,10 @@ export function AppProvider({ children }: { children: ReactNode }): ReactElement
     return res?.paths ?? [];
   }, [call]);
 
+  const redetectAgentTools = useCallback(async (): Promise<void> => {
+    await call(() => window.axon.invoke('agentTools.redetect', {}));
+  }, [call]);
+
   const newSessionInProject = useCallback((projectId: string): void => {
     setProjectContext({ projectId });
     setScreen('s0');
@@ -986,6 +1000,7 @@ export function AppProvider({ children }: { children: ReactNode }): ReactElement
     budget,
     budgetAlert,
     config,
+    agentTools,
     error,
     screen,
     sessionId,
@@ -999,6 +1014,7 @@ export function AppProvider({ children }: { children: ReactNode }): ReactElement
     createProject,
     pickProjectWorkspace,
     pickFiles,
+    redetectAgentTools,
     newSessionInProject,
     clearProjectContext,
     setSessionView: setSessionViewState,

@@ -38,6 +38,9 @@ const FORBIDDEN = [
   // provider.ts 引的是 `api/openai-completions.lazy`，它背后才是 `openai` SDK。
   // 一旦有人把 external 去掉，这条会先炸。
   ['openai', 'OpenAI SDK'],
+  // M9：claude-agent-sdk 体积大，且其 transitive dep 含 @anthropic-ai/sdk，
+  // 若被内联会触发上面的检查。必须保持 external（动态 import()）。
+  ['@anthropic-ai/claude-agent-sdk', 'Claude Agent SDK'],
 ];
 
 /** 必须保持为运行时 require 的包（即 external 生效的证据）。 */
@@ -47,6 +50,8 @@ const MUST_BE_EXTERNAL = [
   // 真 provider 走的懒 API 子路径。它与主包分开断言：external 对子路径的
   // 前缀匹配是 esbuild 的行为细节，不是显式契约，值得单独钉住。
   '@earendil-works/pi-ai/api/openai-completions.lazy',
+  // M9 注：claude-agent-sdk 不在此列——它以 dynamic import() 懒加载，
+  // 不会在 main.mjs 里出现顶层 import 语句，但已加入 FORBIDDEN 防止内联。
 ];
 
 const kb = (bytes) => `${(bytes / 1024).toFixed(0)} KB`;

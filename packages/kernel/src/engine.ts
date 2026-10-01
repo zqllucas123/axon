@@ -69,6 +69,17 @@ export interface AxonEngine {
    * 拉取 steering 队列。对不在跑的 Agent 是「下一轮开始时生效」。
    */
   steer(text: string): void;
+  /**
+   * 外部引擎 id（M9）。内置 pi 引擎缺省。
+   *
+   * 这个接口同时是**外部 Agent 工具（Claude Code 等）接入编排层的插口**：
+   * 外部运行时实现同一个接口、产出同形的事件，host 的落盘 / 记账 / 预算 / 闸门
+   * 就不必知道底下跑的是谁。它只在两处需要被认出来：流式看门狗（外部工具
+   * 跑长命令时没有增量，不能按 pi 的节奏判死）和模型选择器（各家模型表不通用）。
+   */
+  readonly externalEngineId?: string;
+  /** 释放引擎持有的外部资源（子进程等）。pi 引擎没有，缺省。 */
+  dispose?(): void;
 }
 
 /** 创建一个受 Axon 管理的 pi Agent 所需的最小参数。 */

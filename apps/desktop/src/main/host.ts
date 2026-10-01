@@ -97,6 +97,7 @@ import {
   type BudgetState,
   type LeafOperations,
   type ModelSource,
+  type ToolGateResult,
 } from '@axon/kernel';
 import {
   createOrchestrationTools,
@@ -209,6 +210,46 @@ function depthOf(path: AgentPath): number {
   return path.split('/').filter(Boolean).length;
 }
 
+
+/** 造一个外部引擎所需的全部上下文（M9）。 */
+export interface ExternalEngineSpec {
+  engineId: string;
+  sessionId: string;
+  cwd: string;
+  /** 已落盘的 transcript，仅供回放；外部工具的上下文由它自己按 cursor 恢复。 */
+  messages: MessageLike[];
+  /** 上次落盘的恢复游标（`SessionRecord.resumeCursor`）；新会话没有。 */
+  cursor?: Record<string, unknown>;
+  /** 人工审批闸门：外部工具要动手前问它。 */
+  gate: (tool: string, args: unknown) => Promise<ToolGateResult>;
+  /** 游标变了就回调，host 负责落盘。 */
+  onCursor: (cursor: Record<string, unknown>) => void;
+}
+
+/** 外部引擎的提供方（index.ts 实现并注入；单测注入假的）。 */
+export interface ExternalEngineProvider {
+  /** 这个引擎现在为什么用不了（没装 / 不支持）；能用返回 undefined。文案直接给用户看。 */
+  unavailableReason(engineId: string): string | undefined;
+  /** 展示名（Claude Code …）：会话根的 displayName 用它，否则界面会写着「发给 内置引擎」。 */
+  label(engineId: string): string;
+  create(spec: ExternalEngineSpec): AxonEngine;
+}
+
+/** 占位引擎：历史消息照常能看，一发消息就报出不可用的原因。 */
+function unavailableEngine(engineId: string, reason: string, messages: MessageLike[]): AxonEngine {
+  return {
+    externalEngineId: engineId,
+    prompt: () => Promise.reject(new Error(reason)),
+    waitForIdle: () => Promise.resolve(),
+    abort: () => undefined,
+    setModel: () => undefined,
+    setThinkingLevel: () => undefined,
+    subscribe: () => () => undefined,
+    messages: () => structuredClone(messages),
+    steer: () => undefined,
+  };
+}
+
 /** 消息里带的用量之和（重启后没有 state 行时的兜底口径）。 */
 function usageOfMessages(messages: readonly MessageLike[]): UsageTotals {
   let inputTokens = 0;
@@ -238,6 +279,8 @@ export class AxonHost {
    * 缺省返回 undefined —— 没接项目层时 projectId 视为无效。
    */
   private projectCwdResolver: (projectId: string) => string | undefined = () => undefined;
+  /** 外部引擎（Claude Code 等）的造引擎入口；由 index.ts 注入，缺省 = 不支持外部引擎。 */
+  private externalEngines: ExternalEngineProvider | null = null;
   /** 会话元数据（落盘挂点见 onSessionChanged；M5 起由构造参数注入初始记录）。 */
   private readonly sessions: SessionStore;
   /**
@@ -367,6 +410,8 @@ export class AxonHost {
       }
       this.approvals.respond(pending.requestId, false, '应用退出，未决请求已拒绝');
     }
+    // 外部引擎背后是子进程，不收就成孤儿（pi 引擎没有 dispose，跳过）。
+    for (const snap of this.registry.list()) this.registry.get(snap.path)?.engine?.dispose?.();
     if (this.watchdogTimer !== null) {
       clearInterval(this.watchdogTimer);
       this.watchdogTimer = null;
@@ -439,6 +484,8 @@ export class AxonHost {
   setModel(path: AgentPath, model?: string, thinkingLevel?: AxonThinkingLevel): void {
     const node = this.registry.get(path);
     if (!node?.engine) return;
+    // 外部引擎用它自己的模型设置：Axon 网关的模型 id 对它没有意义。
+    if (node.engine.externalEngineId !== undefined) return;
 
     if (model !== undefined) {
       if (!this.modelSource.selectModel) {
@@ -496,6 +543,16 @@ export class AxonHost {
 
   getTeams(): { entries: TeamEntry[]; issues: TeamIssue[] } {
     return { entries: [...this.teams.values()], issues: [...this.teamIssues] };
+  }
+
+  /**
+   * 注入外部引擎的造引擎入口（M9）。
+   *
+   * host 不依赖 electron、也不认识任何具体 SDK（与 pi 只经 `@axon/kernel` 进来同一条纪律），
+   * 所以「本机装没装、怎么拉起」由 index.ts 回答，host 只管把它接进编排。
+   */
+  setExternalEngineProvider(provider: ExternalEngineProvider | null): void {
+    this.externalEngines = provider;
   }
 
   /** 注入项目 cwd 解析器（index.ts 用 ProjectStore.get 接线）。 */
@@ -618,6 +675,19 @@ export class AxonHost {
     const title = titleFromPrompt(payload.title || payload.initialPrompt || '');
     if (!title) throw new Error('会话标题不能为空');
 
+    // 外部引擎先验后建：等根节点和记录都建完才发现 claude 没装，会留下一个残缺会话。
+    const engineId = payload.engineId;
+    if (engineId !== undefined) {
+      if (payload.executor !== 'engine') {
+        // 外部工具有自己的子代理机制，与 Axon 的编排工具还没打通（M9 明确不做）。
+        throw new Error('外部引擎暂只支持单兵会话，不能与团队模式同时使用');
+      }
+      const reason = this.externalEngines
+        ? this.externalEngines.unavailableReason(engineId)
+        : `不支持的执行引擎：${engineId}`;
+      if (reason !== undefined) throw new Error(reason);
+    }
+
     const plan = this.planFor(payload.executor, payload.teamId, payload.members);
     const sessionId = newSessionId();
     const rootPath = sessionRootPath(sessionId);
@@ -645,7 +715,10 @@ export class AxonHost {
     // ① 主控：会话先有根，子节点才有地方挂
     this.registry.createRoot(sessionId, {
       role: plan.lead.role.name,
-      displayName: plan.lead.displayName,
+      displayName:
+        engineId !== undefined && this.externalEngines
+          ? this.externalEngines.label(engineId)
+          : plan.lead.displayName,
       ...(plan.lead.forkMode !== undefined ? { forkMode: plan.lead.forkMode } : {}),
     });
     this.registry.setSessionLimit(sessionId, limit);
@@ -669,6 +742,7 @@ export class AxonHost {
       ...(payload.members !== undefined ? { members: payload.members } : {}),
       ...(payload.budget !== undefined ? { budget: payload.budget } : {}),
       ...(limit > 0 ? { maxConcurrent: limit } : {}),
+      ...(engineId !== undefined ? { engineId } : {}),
     };
     this.sessions.create(record);
     // 基线档位：建档时先记一次，之后只在**变差**时播事件（否则开局就发一条噪音）。
@@ -814,6 +888,9 @@ export class AxonHost {
       messages?: MessageLike[];
     },
   ): AxonEngine {
+    const record = this.sessions.get(sessionId);
+    if (record?.engineId !== undefined) return this.buildExternalRootEngine(rootPath, record, opts);
+
     const allowSet = lead.role.tools ? new Set(lead.role.tools) : undefined;
     const ms0 = this.pickModelSource(lead.role.model);
     const cwdLine = opts.cwd ? `工作目录：${opts.cwd}` : undefined;
@@ -836,6 +913,49 @@ export class AxonHost {
     this.wire(rootPath, engine);
     const rootNode = this.registry.get(rootPath);
     if (rootNode) rootNode.snapshot.model = ms0.model.id;
+    return engine;
+  }
+
+  /**
+   * 外部引擎会话的根引擎（M9）：由外部 Agent 工具（Claude Code 等）执行。
+   *
+   * 与内置路径的差别只有「谁来跑」：角色指令、模型、工具白名单都不适用（外部工具
+   * 带着自己的系统提示、模型与工具集），而审批闸门、落盘、记账照旧 —— 它们挂在
+   * `wire()` 与 `approvals.gate` 上，对底下是谁并不关心。
+   *
+   * 造不出来时**不抛错**：这条路也是重启恢复的路，抛错会让整个会话加载失败、
+   * 连历史消息都看不到。换成一个「一发消息就报原因」的引擎，问题留到用户真要用时再露出。
+   */
+  private buildExternalRootEngine(
+    rootPath: AgentPath,
+    record: SessionRecord,
+    opts: { cwd?: string; messages?: MessageLike[] },
+  ): AxonEngine {
+    const engineId = record.engineId as string;
+    const sessionId = record.id;
+    const reason = this.externalEngines
+      ? this.externalEngines.unavailableReason(engineId)
+      : `不支持的执行引擎：${engineId}`;
+    const engine =
+      reason === undefined && this.externalEngines
+        ? this.externalEngines.create({
+            engineId,
+            sessionId,
+            cwd: opts.cwd ?? record.cwd,
+            messages: opts.messages ?? [],
+            ...(record.resumeCursor !== undefined ? { cursor: record.resumeCursor } : {}),
+            gate: (tool, args) => this.approvals.gate(rootPath, tool, args),
+            // 游标落进会话记录（session.json）：重启后靠它让外部工具接上自己的上下文。
+            onCursor: (cursor) => {
+              this.sessions.update(sessionId, {
+                resumeCursor: cursor,
+                ...(typeof cursor.resume === 'string' ? { externalSessionId: cursor.resume } : {}),
+              });
+            },
+          })
+        : unavailableEngine(engineId, reason ?? '外部引擎不可用', opts.messages ?? []);
+    this.registry.attachEngine(rootPath, engine);
+    this.wire(rootPath, engine);
     return engine;
   }
 
@@ -988,6 +1108,9 @@ export class AxonHost {
     }
     if (node.snapshot.children.length > 0) {
       throw new Error('该会话已经有成员了：直接派新成员即可，不必升级');
+    }
+    if (record.engineId !== undefined) {
+      throw new Error('外部引擎会话暂不支持叫人组队');
     }
     this.budget.assertCanStart('升级');
     this.assertSessionCanStart(sessionId, '升级');
@@ -1791,6 +1914,7 @@ export class AxonHost {
         if (!n) return;
         for (const c of n.snapshot.children) visit(c);
         n.engine?.abort();
+        n.engine?.dispose?.();
       };
       visit(path);
     }
@@ -2142,6 +2266,10 @@ export class AxonHost {
 
   /** 把 pi 的事件流翻译成 Axon 协议事件。 */
   private wire(path: AgentPath, engine: AxonEngine): void {
+    // 流式看门狗（10s 无增量即中断）只管内置引擎：外部工具跑一条长命令时
+    // 本来就没有任何增量，按 pi 的节奏判死会把正常的会话杀掉。
+    // 外部引擎的卡死由空闲超时兜（它的工具进度事件会刷新空闲计时）。
+    const streamWatchdog = engine.externalEngineId === undefined;
     engine.subscribe((event: AgentEvent) => {
       this.touch(path);
       switch (event.type) {
@@ -2231,7 +2359,7 @@ export class AxonHost {
         case 'turn_start':
           // 刷新看门狗时间戳：turn_start 是工具回合间隙的起点，此期间无 message_update，
           // 但 agent 仍在正常运行（S2 §三.闸口 3：最长间隙 1676ms）。
-          this.watchdogActivity.set(path, Date.now());
+          if (streamWatchdog) this.watchdogActivity.set(path, Date.now());
           break;
         case 'message_update': {
           // M6 流式接线：把 pi 的 assistantMessageEvent 翻译成 Axon 协议事件。
@@ -2254,7 +2382,7 @@ export class AxonHost {
             this.emit('agent.tool.update', { callId, chunk: ae.delta }, path);
           }
           // 刷新看门狗时间戳
-          this.watchdogActivity.set(path, Date.now());
+          if (streamWatchdog) this.watchdogActivity.set(path, Date.now());
           break;
         }
         default:

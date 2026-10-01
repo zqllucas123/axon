@@ -20,13 +20,16 @@
  *
  *   3. **执行模式（Single / 指定团队）与执行引擎（Axon / Claude / …）是两回事**。
  *      设计稿的引擎 popover 在协议里**没有对应物**（`SessionExecutor` 只有
- *      engine/team/adhoc，那是模式维度），所以那个按钮置灰占位而不假装能用 ——
- *      这与「临时编队」卡片此前置灰是同一条纪律：标出位置的存在，但不撒谎。
+ *      engine/team/adhoc，那是模式维度）。引擎是另一条正交的维度：`engineId`（M9）。
+ *      popover 里能选的是 Axon 与「已安装且已接入」的外部工具（目前是 Claude Code），
+ *      其余置灰写明原因 —— 标出位置的存在，但不撒谎。外部引擎只支持单兵模式，
+ *      所以两个 popover 互斥联动：选外部引擎回 Single，选团队回 Axon。
  */
 
 import { useEffect, useRef, useState, type ReactElement } from 'react';
 import { useApp } from '../state/store.tsx';
 import { Icon } from '../icons.tsx';
+import { EnginePicker } from './EnginePicker.tsx';
 import type { SessionExecutor } from '@axon/protocol';
 
 /** 工作区元信息（`workspace.inspect` 的结果形状）。 */
@@ -71,6 +74,8 @@ export function S0NewSession(): ReactElement {
   const [teamId, setTeamId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [modeOpen, setModeOpen] = useState(false);
+  // 执行引擎：null = Axon 内置；否则是外部 Agent 工具的 id（随 session.create 下发）。
+  const [engineId, setEngineId] = useState<string | null>(null);
   const [attachments, setAttachments] = useState<string[]>([]);
   // 这次会话的工作目录。普通会话由下面的 effect 向主进程要一个临时目录；
   // 项目会话不用它 —— 目录锁在项目上（用户手选的路径也落在这里）。
@@ -184,6 +189,7 @@ export function S0NewSession(): ReactElement {
       ...(project ? { projectId: project.id } : cwd ? { cwd } : {}),
       executor,
       ...(needTeam && teamId ? { teamId } : {}),
+      ...(engineId ? { engineId } : {}),
       initialPrompt: task.trim(),
       ...(attachments.length > 0 ? { attachments } : {}),
     });
@@ -328,9 +334,7 @@ export function S0NewSession(): ReactElement {
               rows={2}
             />
             <div className="row">
-              {/* 附件与引擎都是**置灰占位**，不是能用的功能：
-                  协议没有附件面，也没有「引擎」这个维度（见文件头注释 3）。
-                  不删是因为它们在信息架构里有位置 —— 删了下次加回来要重新想一遍。 */}
+              {/* 引擎 popover：Axon + 本机已安装且已接入的外部工具（见文件头注释 3 与 EnginePicker）。 */}
               <button
                 className={`tool-btn${attachments.length > 0 ? ' is-on' : ''}`}
                 onClick={() => void addAttachments()}
@@ -339,9 +343,18 @@ export function S0NewSession(): ReactElement {
               >
                 <Icon name="paperclip" size={16} />
               </button>
-              <button className="tool-btn" disabled title="尚未支持：协议里还没有「引擎」这个维度">
-                <Icon name="spark" size={16} />
-              </button>
+              <EnginePicker
+                value={engineId}
+                onChange={(id) => {
+                  setEngineId(id);
+                  // 外部引擎只支持单兵（它有自己的子代理机制，与 Axon 的编排还没打通）：
+                  // 选了它就把模式拨回 Single，免得用户发出去才被主进程拒。
+                  if (id) {
+                    setPicked('engine');
+                    setTeamId(null);
+                  }
+                }}
+              />
 
               <div className="s0-mode">
                 <button
@@ -367,6 +380,8 @@ export function S0NewSession(): ReactElement {
                         onClick={() => {
                           setPicked(m.id);
                           if (m.id !== 'team') setTeamId(null);
+                          // 反过来也一样：要组队就回到 Axon 内置引擎。
+                          else setEngineId(null);
                           setModeOpen(false);
                         }}
                       >
@@ -395,6 +410,7 @@ export function S0NewSession(): ReactElement {
                           onClick={() => {
                             setPicked('team');
                             setTeamId(t.team.name);
+                            setEngineId(null);
                             setModeOpen(false);
                           }}
                         >

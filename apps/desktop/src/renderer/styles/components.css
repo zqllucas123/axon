@@ -997,12 +997,32 @@ table.tbl td.num { font-family: var(--font-mono); color: var(--text); }
 }
 .tool-btn:hover:not(:disabled) { background: var(--bg-hover); color: var(--text); }
 .tool-btn.is-on { background: var(--bg-hover); color: var(--text); }
+/* 带文字的工具按钮（选了外部引擎时把引擎名亮出来）：宽度随内容。 */
+.tool-btn.has-label { width: auto; padding: 0 8px; gap: 6px; }
+.tool-label { font-size: var(--fs-12); white-space: nowrap; }
 .tool-btn:disabled { color: var(--text-dim); opacity: .45; cursor: default; }
 
 /* 模式 popover：复用 `.menu` 的壳（无阴影，与仓库浮层纪律一致），只补定位与分组标题。 */
 .s0-mode { position: relative; flex: none; }
 .s0-mode-menu { left: 0; bottom: calc(100% + 8px); min-width: 240px; }
 .s0-menu-title { padding: 6px 10px 4px; font-size: var(--fs-11); color: var(--text-dim); }
+/* 执行引擎 popover（EnginePicker.tsx）：不可选的行置灰（未安装 / 已安装但 Axon 尚未接入 / 会话中只读）。
+   `.engine-mark` 是字母徽标（设计稿给 Hermes 用的那种），代替各家 logo 图：
+   渲染层构建不处理静态图片资源，为四张小图引入资源管线不值当。 */
+.engine-mark {
+  display: inline-grid; place-items: center; flex: none;
+  width: 18px; height: 18px; border-radius: var(--r-xs);
+  background: var(--bg-sunken); color: var(--text-secondary);
+  font-size: var(--fs-11); font-weight: 600;
+}
+.engine-ver { font-family: var(--font-mono); font-size: var(--fs-11); color: var(--text-dim); }
+.engine-picker .s0-mode-menu { min-width: 280px; }
+.engine-picker .menu-item > span { white-space: nowrap; }
+.engine-picker .menu-item:disabled { color: var(--text-dim); cursor: default; }
+.engine-picker .menu-item:disabled:hover { background: none; }
+.engine-note { padding: 6px 10px; font-size: var(--fs-11); color: var(--text-dim); }
+/* 「已安装」要在置灰的行里仍读得出来 —— 它正是这个 popover 要回答的问题。 */
+.engine-picker .menu-item .mk.engine-ok { color: var(--text-secondary); }
 
 /* 项目上下文横幅搬进 composer-wrap 后要自己收宽度，与输入区对齐（原先靠 .page 约束）。 */
 .composer-wrap .proj-banner { max-width: 760px; margin: 0 auto 8px; }

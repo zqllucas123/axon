@@ -19,6 +19,7 @@ import type {
   RoleIssue,
   UsageTotals,
 } from './agent.ts';
+import type { AgentToolsSnapshot } from './agent-tools.ts';
 import type { ConfigIssue, ConfigPatch, ConfigSnapshot } from './config.ts';
 import type { ProjectIssue, ProjectKind, ProjectRecord } from './project.ts';
 import type {
@@ -379,6 +380,19 @@ export interface CommandMap {
     };
   };
 
+  // ── 本机外部 Agent 工具（新建会话的「执行引擎」popover）──
+
+  /**
+   * 读当前探测结果。**不触发探测**：首次启动的探测由主进程在后台自己发起，
+   * 这条只读快照；`status: 'detecting'` 时等 `agentTools.changed`。
+   */
+  'agentTools.get': { payload: Record<string, never>; result: AgentToolsSnapshot };
+  /**
+   * 重新探测（用户装了新工具后手动点）。等探测完才回包，回的是新快照；
+   * 同时照常广播 `agentTools.changed`。并发调用共享同一次探测。
+   */
+  'agentTools.redetect': { payload: Record<string, never>; result: AgentToolsSnapshot };
+
   // ── M6：Provider 连接测试 ──
 
   /**
@@ -557,6 +571,8 @@ export interface EventMap {
   'projects.changed': { entries: ProjectRecord[]; issues: ProjectIssue[] };
   /** 配置落盘成功（含来自其他途径的变更）；UI 全量重绘而不是局部打补丁。 */
   'config.changed': { config: ConfigSnapshot };
+  /** 外部 Agent 工具探测状态变化（开始探测 / 探测完成）。 */
+  'agentTools.changed': { snapshot: AgentToolsSnapshot };
 
   /**
    * 「打开设置」从**菜单**发起（`文件 → 设置…` / `Ctrl+,`）。

@@ -55,10 +55,13 @@ await cp(desktopDist, staging, {
 });
 console.log('  ✓ esbuild 产物已复制');
 
-// ── 4. 复制 pi external 包（解引用 bun symlink）──────────────────────────
+// ── 4. 复制 external 包（解引用 bun symlink）──────────────────────────────
+// PI_PACKAGES：pi-agent-core / pi-ai（ESM-only，不能内联）
+// M9 新增：@anthropic-ai/claude-agent-sdk 同样必须 external（体积大、含原生二进制）。
 const PI_PACKAGES = [
   '@earendil-works/pi-agent-core',
   '@earendil-works/pi-ai',
+  '@anthropic-ai/claude-agent-sdk',
 ];
 
 const stagingNodeModules = join(staging, 'node_modules');

@@ -31,6 +31,10 @@ const EXTERNAL = [
   '@earendil-works/pi-agent-core',
   '@earendil-works/chord',
   'undici',
+  // M9：Claude Agent SDK 及其 transitive dep（@anthropic-ai/sdk）都不能内联：
+  // SDK 体积大、含原生绑定（可能有 platform binary），且内联会触发 verify-lazy 的
+  // FORBIDDEN 检查（@anthropic-ai/sdk 在禁止列表里）。用动态 import() 懒加载。
+  '@anthropic-ai/claude-agent-sdk',
 ];
 
 /** workspace 内部包走别名，源码直接参与打包（它们是纯 TS，无副作用）。 */

@@ -10,6 +10,7 @@
 import { useState, useEffect, type ReactElement } from 'react';
 import { useApp } from '../state/store.tsx';
 import { Icon } from '../icons.tsx';
+import { EnginePicker } from './EnginePicker.tsx';
 import { Inspector } from './Inspector.tsx';
 import { WorkspacePanel } from './WorkspacePanel.tsx';
 import { MessageStream } from './MessageStream.tsx';
@@ -114,19 +115,20 @@ export function SessionMain(): ReactElement {
                 style={{ width: '100%', border: 0, background: 'none', resize: 'none', outline: 'none', font: 'inherit' }}
               />
               <div className="row">
-                {/* 与 S0 对齐的三枚工具按钮；附件和引擎仍是占位（协议暂无对应面）。 */}
+                {/* 与 S0 对齐的三枚工具按钮；附件仍是占位，引擎 popover 在会话中只读（建会话时已定）。 */}
                 <button className="tool-btn" disabled title="尚未支持：协议里没有附件面">
                   <Icon name="paperclip" size={16} />
                 </button>
-                <button className="tool-btn" disabled title="尚未支持：协议里还没有「引擎」这个维度">
-                  <Icon name="spark" size={16} />
-                </button>
+                <EnginePicker value={current.record.engineId ?? null} />
                 <button
                   className={`tool-btn${current.record.executor === 'team' ? ' is-on' : ''}`}
                   onClick={() => setEscalateOpen(true)}
                   data-smoke="mode-trigger"
+                  disabled={!!current.record.engineId}
                   title={
-                    current.record.executor === 'team'
+                    current.record.engineId
+                      ? '外部引擎会话暂不支持叫人组队'
+                      : current.record.executor === 'team'
                       ? `团队模式 · ${current.record.teamId ?? '未知团队'}（点击切换）`
                       : '执行模式：单兵（点击叫人升级为团队）'
                   }
@@ -134,7 +136,8 @@ export function SessionMain(): ReactElement {
                   <Icon name="users" size={16} />
                 </button>
                 <span className="spacer" />
-                {focusPath ? <ModelPicker focusPath={focusPath} /> : null}
+                {/* 外部引擎用它自己的模型设置，Axon 网关的模型表对它没有意义 —— 不显示选择器。 */}
+                {focusPath && !current.record.engineId ? <ModelPicker focusPath={focusPath} /> : null}
                 <button
                   className="send"
                   onClick={running ? () => focusPath && void interrupt(focusPath) : send}

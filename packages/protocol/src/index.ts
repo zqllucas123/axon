@@ -1,3 +1,4 @@
+export * from './agent-tools.ts';
 export * from './agent.ts';
 export * from './config.ts';
 export * from './ipc.ts';
