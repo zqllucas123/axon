@@ -915,10 +915,10 @@ app.whenReady().then(async () => {
         // M10：子任务 session 列表
         if (request.command === 'subsession.list') {
           const { parentSessionId } = request.payload as { parentSessionId: string };
-          const parent = host.getSession(parentSessionId);
+          const parent = host!.getSession(parentSessionId);
           const childIds = parent?.record.childSessionIds ?? [];
           const result = childIds.flatMap((id) => {
-            const s = host.getSession(id);
+            const s = host!.getSession(id);
             return s ? [{ record: s.record, rootPath: s.rootPath, status: s.status, counts: s.counts, usage: s.usage, budget: s.budget }] : [];
           });
           return { id: request.id, ok: true, result };

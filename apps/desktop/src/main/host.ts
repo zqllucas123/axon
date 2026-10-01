@@ -400,6 +400,8 @@ export class AxonHost {
         this.touch(p);
       },
       timeoutMs: options.approvalTimeoutMs,
+      // M10：子 session 的审批请求带上主管 session id，渲染层据此在两处显示
+      parentSessionIdOf: (sid) => this.sessions.get(sid)?.parentSessionId,
     });
     for (const role of options.roles) {
       this.roles.set(role.name, { role, source: 'builtin', errors: [] });

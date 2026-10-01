@@ -606,6 +606,46 @@ export function AppProvider({ children }: { children: ReactNode }): ReactElement
     offs.push(sub('teams.changed', ({ entries, issues }) => setTeams({ entries, issues })));
     offs.push(sub('config.changed', ({ config: cfg }) => setConfig(cfg)));
     offs.push(sub('agentTools.changed', ({ snapshot }) => setAgentTools(snapshot)));
+
+    // M10：子任务事件 —— 用来刷新主管 session 的 childSessions 列表
+    offs.push(sub('subsession.created', ({ parentSessionId, summary }) => {
+      setSessions((prev) => prev.map((s) => {
+        if (s.record.id !== parentSessionId) return s;
+        const existing = s.childSessions ?? [];
+        if (existing.some((c) => c.sessionId === summary.record.id)) return s;
+        return {
+          ...s,
+          childSessions: [...existing, {
+            sessionId: summary.record.id,
+            title: summary.record.title,
+            status: summary.status,
+            costUsd: summary.usage.costUsd,
+            hasPending: false,
+          }],
+        };
+      }));
+      // 子 session 本身也加进 sessions 列表，方便直接切换过去
+      setSessions((prev) => prev.some((s) => s.record.id === summary.record.id)
+        ? prev : [...prev, summary]);
+    }));
+    offs.push(sub('subsession.changed', ({ parentSessionId, summary }) => {
+      // 更新子 session 自身
+      setSessions((prev) => prev.map((s) => s.record.id === summary.record.id ? summary : s));
+      // 更新主管 session 的 childSessions 快照
+      setSessions((prev) => prev.map((s) => {
+        if (s.record.id !== parentSessionId) return s;
+        const updated = (s.childSessions ?? []).map((c) =>
+          c.sessionId !== summary.record.id ? c : {
+            sessionId: summary.record.id,
+            title: summary.record.title,
+            status: summary.status,
+            costUsd: summary.usage.costUsd,
+            hasPending: (summary as any).hasPending ?? false,
+          },
+        );
+        return { ...s, childSessions: updated };
+      }));
+    }));
     offs.push(sub('ledger.policyChanged', () => undefined));
     // 菜单发起的「设置」（文件 → 设置… / ⌘,）：屏是渲染层的状态，菜单在主进程，
     // 所以这条意图要绕回来落到与侧栏那个「设置」同一屏（`go('s8')`）。
@@ -633,6 +673,7 @@ export function AppProvider({ children }: { children: ReactNode }): ReactElement
                   requestId: p.requestId,
                   kind: 'approval',
                   sessionId: p.sessionId,
+                  ...(p.parentSessionId !== undefined ? { parentSessionId: p.parentSessionId } : {}),
                   origin: p.origin,
                   chain: p.chain,
                   tool: p.tool,

@@ -453,6 +453,11 @@ export interface PendingRequest {
    * 请求属于某会话，但「有人卡住等你」是跨会话的）。
    */
   sessionId: string;
+  /**
+   * 父会话 id（M10）。子 session 的审批请求带此字段，指向主管 session。
+   * 渲染层据此把子 session 的审批也显示在主管 session 的收件箱里。
+   */
+  parentSessionId?: string;
   /** 谁要动手。 */
   origin: AgentPath;
   chain: AgentPath[];
@@ -522,6 +527,8 @@ export interface EventMap {
     requestId: string;
     /** 属于哪个会话（MU-1：收件箱按会话切片；渲染层要能直接把事件拼进待办表）。 */
     sessionId: string;
+    /** M10：子 session 的审批请求带此字段，指向主管 session。 */
+    parentSessionId?: string;
     /** 谁要动手。 */
     origin: AgentPath;
     /** 穿透路径 origin → … → root。 */

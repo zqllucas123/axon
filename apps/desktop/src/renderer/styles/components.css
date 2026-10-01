@@ -1168,3 +1168,50 @@ textarea.inp-area { height: auto; padding: 8px 10px; line-height: 1.6; resize: v
 .ws-preview.md pre { background: var(--bg-sunken); padding: 10px 12px; border-radius: var(--r-sm); }
 .ws-preview-empty, .ws-empty { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; height: 100%; color: var(--text-dim); font-size: var(--fs-13); text-align: center; padding: 20px; }
 .ws-empty b { color: var(--text-muted); }
+
+/* ── M10 子任务面板（SubSessionPanel）──────────────────────────
+   主管 session 派生的子 session 列表，嵌在 S2 消息流和输入区之间。
+   设计约束：不遮消息流，折叠后只占一行标题高度。 */
+.subsession-panel {
+  border-top: 1px solid var(--line);
+  background: var(--bg-sunken);
+  flex: none;
+}
+.subsession-header {
+  display: flex; align-items: center; gap: 6px;
+  width: 100%; padding: 6px 14px; font-size: var(--fs-12);
+  color: var(--text-muted); cursor: pointer; text-align: left;
+  border: none; background: none;
+}
+.subsession-header:hover { background: var(--bg-hover); color: var(--text); }
+.subsession-header-arrow { margin-left: auto; font-size: var(--fs-11); color: var(--text-dim); }
+.subsession-list { display: flex; flex-direction: column; max-height: 160px; overflow-y: auto; }
+.subsession-row {
+  display: flex; align-items: center; gap: 8px;
+  width: 100%; padding: 5px 14px; font-size: var(--fs-12);
+  color: var(--text-muted); cursor: pointer; text-align: left;
+  border: none; background: none;
+}
+.subsession-row:hover { background: var(--bg-hover); color: var(--text); }
+.subsession-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.subsession-cost { font-size: var(--fs-11); color: var(--text-dim); flex: none; }
+.subsession-badge {
+  width: 6px; height: 6px; border-radius: 50%; flex: none;
+  background: var(--accent); box-shadow: 0 0 0 2px var(--bg-sunken);
+}
+
+/* 状态点 */
+.dot { width: 6px; height: 6px; border-radius: 50%; flex: none; background: var(--text-dim); }
+.dot-running { background: var(--accent); animation: pulse 1.2s ease-in-out infinite; }
+.dot-done { background: #4ade80; }
+.dot-failed { background: #f87171; }
+.dot-waiting { background: #facc15; }
+.dot-idle { background: var(--line-strong); }
+@keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: .4; } }
+
+/* M10：子 session 面包屑（子 session 的 S2 顶部） */
+.subsession-breadcrumb {
+  padding: 6px 14px; border-bottom: 1px solid var(--line);
+  background: var(--bg-sunken); flex: none;
+}
+.subsession-breadcrumb .btn { font-size: var(--fs-12); gap: 4px; }

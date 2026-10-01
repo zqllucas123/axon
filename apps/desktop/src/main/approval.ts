@@ -51,6 +51,12 @@ export interface ApprovalBrokerOptions {
   onWaitEnd?: (path: AgentPath) => void;
   timeoutMs?: number;
   now?: () => number;
+  /**
+   * M10：查子 session 的父 session id（审批穿透用）。
+   * 子 session 的审批请求需要同时出现在主管 session 的收件箱里。
+   * 返回 undefined 表示不是子 session（顶层会话）。
+   */
+  parentSessionIdOf?: (sessionId: string) => string | undefined;
 }
 
 interface Entry {
@@ -185,11 +191,14 @@ export class ApprovalBroker {
     const expiresAt = this.timeoutMs > 0 ? at + this.timeoutMs : undefined;
     const chain = this.chainOf(origin);
 
+    const sessionId = sessionIdOfPath(origin) ?? '';
+    const parentSessionId = this.opts.parentSessionIdOf?.(sessionId);
     const request: PendingRequest = {
       requestId,
       kind: 'approval',
       // 会话归属从路径解 —— 多根模型下它就写在路径首段，不必额外传参。
-      sessionId: sessionIdOfPath(origin) ?? '',
+      sessionId,
+      ...(parentSessionId !== undefined ? { parentSessionId } : {}),
       origin,
       chain,
       tool,
@@ -220,6 +229,7 @@ export class ApprovalBroker {
         {
           requestId,
           sessionId: request.sessionId,
+          ...(request.parentSessionId !== undefined ? { parentSessionId: request.parentSessionId } : {}),
           origin,
           chain,
           tool,
