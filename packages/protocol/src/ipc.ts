@@ -197,6 +197,17 @@ export interface CommandMap {
   /** 删会话 = 级联删整棵树 + 清理账本切片/挂起/队列。 */
   'session.remove': { payload: { sessionId: string }; result: { removedPaths: AgentPath[] } };
 
+  // ── M10：子任务 session 查询 ──
+
+  /**
+   * 列出某主管 session 派生的全部子 session。
+   * 用于 S2 透明化面板（主管视角）。
+   */
+  'subsession.list': {
+    payload: { parentSessionId: string };
+    result: SessionSummary[];
+  };
+
   // ── MU-1：团队（S3 团队管理）──
 
   'team.list': {
@@ -564,6 +575,19 @@ export interface EventMap {
   'session.changed': { summary: SessionSummary };
   /** 会话被删。`paths` 是级联删掉的全部路径（子先父后），UI 逐个摘节点。 */
   'session.removed': { sessionId: string; paths: AgentPath[] };
+
+  // ── M10：子任务 session 事件 ──
+
+  /**
+   * 主管 session 派生了一个子 session（`task_spawn` 成功）。
+   * 渲染层监听这个事件来刷新「子任务」面板。
+   */
+  'subsession.created': { parentSessionId: string; summary: SessionSummary };
+  /**
+   * 子 session 状态/用量变化（复用 session.changed 的节流约束）。
+   * 渲染层用它来更新子任务行的状态点和摘要文本。
+   */
+  'subsession.changed': { parentSessionId: string; summary: SessionSummary };
 
   /** 团队集合变化（保存/删除/外部改文件后热重载）。UI 直接拿 entries 重绘。 */
   'teams.changed': { entries: TeamEntry[]; issues: TeamIssue[] };

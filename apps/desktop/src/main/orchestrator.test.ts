@@ -216,6 +216,25 @@ class FakeDriver implements OrchestrationDriver {
     if (this.adoptRejection) throw new Error(this.adoptRejection);
     this.adoptLog.push(spec);
   }
+  async createSubSession(_spec: {
+    role: string;
+    task: string;
+    cwd?: string;
+    engineId?: string;
+    model?: string;
+    context?: string;
+  }): Promise<string> {
+    throw new Error('not implemented in FakeDriver');
+  }
+  async waitSubSession(
+    _ids: string[],
+    _timeoutSec?: number,
+  ): Promise<Array<{ sessionId: string; status: string; timedOut?: true }>> {
+    throw new Error('not implemented in FakeDriver');
+  }
+  subSessionResult(_id: string): string | null {
+    return null;
+  }
 }
 
 // ── 辅助 ──────────────────────────────────────────────────────
@@ -241,7 +260,7 @@ async function call(
 }
 
 describe('编排工具 · 集合与目标校验', () => {
-  it('createOrchestrationTools 产出七件套且名字齐全', () => {
+  it('createOrchestrationTools 产出十件套且名字齐全', () => {
     const { all } = toolsOf(new FakeDriver());
     expect(all.map((t) => t.name).sort()).toEqual(
       [
@@ -252,6 +271,9 @@ describe('编排工具 · 集合与目标校验', () => {
         'agent_resume',
         'agent_wait',
         'ledger_adopt',
+        'task_result',
+        'task_spawn',
+        'task_wait',
       ].sort(),
     );
   });

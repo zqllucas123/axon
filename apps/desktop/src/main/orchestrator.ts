@@ -79,6 +79,33 @@ export interface OrchestrationDriver {
   }): void;
   /** M4：裁决一笔协作。资格校验在宿主；不合格则 throw（错误回灌给模型）。 */
   adoptCollab(spec: { id: string; adoption: Adoption; note?: string }): void;
+
+  // ── M10：跨 session 任务派发 ──────────────────────────────
+
+  /**
+   * 为成员创建一个独立的子 session 并发起任务（`task_spawn` 工具的后端）。
+   *
+   * 返回子 session id，主管通过 `waitSubSession` 等待它完成。
+   * 子 session 的 cwd 缺省继承主管 session 的 cwd，成员之间天然共享文件系统。
+   */
+  createSubSession(spec: {
+    role: string;
+    task: string;
+    cwd?: string;
+    engineId?: string;
+    model?: string;
+    context?: string;
+  }): Promise<string>;
+  /**
+   * 挂起当前 Agent，等待全部子 session 到达终态（done/failed/interrupted）。
+   * 与 `beginWait` 同语义：主管退位让额，子 session 完成后自动恢复。
+   */
+  waitSubSession(subSessionIds: string[], timeoutSec?: number): Promise<Array<{ sessionId: string; status: string; timedOut?: true }>>;
+  /**
+   * 读取子 session 最终输出（最后一条助手消息的文本）。
+   * 子 session 还在跑时返回 null（不阻塞）。
+   */
+  subSessionResult(subSessionId: string): string | null;
 }
 
 // ── 常量与辅助 ────────────────────────────────────────────────
@@ -92,6 +119,10 @@ export const ORCHESTRATION_TOOL_NAMES = [
   'agent_resume',
   'agent_interrupt',
   'ledger_adopt',
+  // M10：跨 session 任务派发（主管工具集）
+  'task_spawn',
+  'task_wait',
+  'task_result',
 ] as const;
 
 /** agent_wait 默认超时 600s（M3 §4.5）。 */
@@ -419,6 +450,145 @@ function ledgerAdoptTool(driver: OrchestrationDriver): AgentTool<typeof ADOPT> {
   };
 }
 
+// ── M10：跨 session 任务派发工具 ─────────────────────────────
+
+const TASK_SPAWN = Type.Object({
+  role: Type.String(),
+  task: Type.String(),
+  cwd: Type.Optional(Type.String()),
+  engineId: Type.Optional(Type.String()),
+  model: Type.Optional(Type.String()),
+  context: Type.Optional(Type.String()),
+});
+
+/**
+ * task_spawn —— 为成员创建一个独立的子 session 并发起任务。
+ *
+ * 与 `agent` 的区别：子 session 有独立的消息历史、用量记账和（可选）外部引擎。
+ * `cwd` 缺省继承主管 session 的 cwd，所有成员共享同一文件系统，文件天然可见。
+ * 返回 sessionId，用 `task_wait` 等结果，用 `task_result` 读输出。
+ */
+function taskSpawnTool(driver: OrchestrationDriver): AgentTool<typeof TASK_SPAWN> {
+  return {
+    name: 'task_spawn',
+    label: '派发子任务',
+    description:
+      '为一名成员创建一个独立的子任务 session 并发起任务。' +
+      '子 session 有独立的消息历史和用量记账，但默认与你共享工作目录（成员可以看到你写的文件）。' +
+      '返回 sessionId，用 task_wait 等它完成，用 task_result 读它的输出。' +
+      '与 agent 工具的区别：task_spawn 的成员在隔离 session 里执行，适合需要外部引擎或完整对话历史的重量级任务；' +
+      'agent 的子节点在同一 session 树里执行，适合轻量级协作。',
+    parameters: TASK_SPAWN,
+    async execute(_toolCallId, params) {
+      const sessionId = await driver.createSubSession({
+        role: params.role,
+        task: params.task,
+        ...(params.cwd ? { cwd: params.cwd } : {}),
+        ...(params.engineId ? { engineId: params.engineId } : {}),
+        ...(params.model ? { model: params.model } : {}),
+        ...(params.context ? { context: params.context } : {}),
+      });
+      return result(
+        `已为「${params.role}」创建子任务 session ${sessionId}，任务已发出。用 task_wait 等它完成。`,
+        { sessionId, role: params.role },
+      );
+    },
+  };
+}
+
+const TASK_WAIT = Type.Object({
+  ids: Type.Array(Type.String()),
+  timeoutSec: Type.Optional(Type.Number()),
+});
+
+/**
+ * task_wait —— 挂起当前 Agent，等待全部子 session 终态。
+ *
+ * 与 `agent_wait` 类似，但等待的是跨 session 的子任务（`task_spawn` 返回的 sessionId）。
+ * 等待期间退位让出并发额度；超时不杀子 session，带 timedOut 标记返回，之后可继续等。
+ */
+function taskWaitTool(driver: OrchestrationDriver): AgentTool<typeof TASK_WAIT> {
+  return {
+    name: 'task_wait',
+    label: '等待子任务',
+    description:
+      '挂起并等待这些子任务 session（task_spawn 返回的 sessionId）全部完成或超时。' +
+      '等待期间让出并发额度。超时不取消子任务，timedOut=true 的条目还在跑，之后可再次 task_wait。',
+    parameters: TASK_WAIT,
+    async execute(_toolCallId, params, signal) {
+      const timeoutSec = params.timeoutSec ?? DEFAULT_WAIT_TIMEOUT_SEC;
+      // waitSubSession 本身已带超时（超时项会标 timedOut），这里只需要处理 abort。
+      const outcome = await new Promise<
+        Array<{ sessionId: string; status: string; timedOut?: true }> | 'aborted'
+      >((resolve) => {
+        let settled = false;
+        const onAbort = () => {
+          if (settled) return;
+          settled = true;
+          resolve('aborted');
+        };
+        if (signal?.aborted) {
+          onAbort();
+          return;
+        }
+        signal?.addEventListener('abort', onAbort, { once: true });
+        driver
+          .waitSubSession(params.ids, timeoutSec)
+          .then((r) => {
+            if (settled) return;
+            settled = true;
+            signal?.removeEventListener('abort', onAbort);
+            resolve(r);
+          })
+          .catch(() => {
+            if (settled) return;
+            settled = true;
+            signal?.removeEventListener('abort', onAbort);
+            resolve(params.ids.map((sessionId) => ({ sessionId, status: 'unknown' })));
+          });
+      });
+      if (outcome === 'aborted') {
+        driver.endWait();
+        return result('等待被中断（当前主管被 interrupt）。子任务仍在继续，可用 task_result 查询。', {
+          aborted: true,
+        });
+      }
+      const lines = outcome.map(
+        (r) => `${r.sessionId}: ${r.status}${r.timedOut ? '（超时，还在跑）' : ''}`,
+      );
+      return result(`等待完成：\n${lines.join('\n')}`, { results: outcome });
+    },
+  };
+}
+
+const TASK_RESULT = Type.Object({
+  id: Type.String(),
+});
+
+/**
+ * task_result —— 读取子 session 最终输出的文本。
+ *
+ * 返回子 session 最后一条助手消息的文本。子 session 还在跑时返回当前进展（如果有）。
+ * 如果子 session 失败，返回错误信息。
+ */
+function taskResultTool(driver: OrchestrationDriver): AgentTool<typeof TASK_RESULT> {
+  return {
+    name: 'task_result',
+    label: '读取子任务结果',
+    description:
+      '读取子任务 session（task_spawn 返回的 sessionId）最后一条助手消息的文本。' +
+      '用 task_wait 等完成后再读，结果最完整。子任务失败时返回错误摘要。',
+    parameters: TASK_RESULT,
+    async execute(_toolCallId, params) {
+      const text = driver.subSessionResult(params.id);
+      if (text === null) {
+        return result(`子任务 ${params.id} 还在运行中，暂无最终输出。`, { sessionId: params.id, pending: true });
+      }
+      return result(text, { sessionId: params.id, output: text });
+    },
+  };
+}
+
 /** 为一棵树上的某个 Agent 现造全套工具（per-spawn bind selfPath）。 */
 export function createOrchestrationTools(driver: OrchestrationDriver) {
   return [
@@ -429,5 +599,8 @@ export function createOrchestrationTools(driver: OrchestrationDriver) {
     agentResumeTool(driver),
     agentInterruptTool(driver),
     ledgerAdoptTool(driver),
+    taskSpawnTool(driver),
+    taskWaitTool(driver),
+    taskResultTool(driver),
   ];
 }

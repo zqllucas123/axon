@@ -259,6 +259,8 @@ export interface SummaryInput {
    * `interruptedAt` 是 S7「上次中断」的唯一来源，之前它落了盘却到不了界面。
    */
   rollup?: SessionRollup;
+  /** M10：子任务 session 精简列表；由 host.summaryOf() 填充。 */
+  childSessions?: SessionSummary['childSessions'];
 }
 
 /**
@@ -316,5 +318,6 @@ export function buildSessionSummary(input: SummaryInput): SessionSummary {
     usage,
     budget,
     ...(input.rollup ? { rollup: input.rollup } : {}),
+    ...(input.childSessions !== undefined ? { childSessions: input.childSessions } : {}),
   };
 }

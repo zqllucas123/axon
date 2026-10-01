@@ -63,9 +63,10 @@ export type SessionStatus = 'open' | 'closed';
 /** 会话落盘 schema 版本 —— 与账本的 LEDGER_SCHEMA_VERSION 各自独立（M5 读侧迁移用）。
  *
  * v1 → v2（M9）：SessionRecord 新增 `engineId`、`externalSessionId`、`resumeCursor`。
- * 字段全部可选，旧记录正常读出，新字段缺省即 undefined（= 内置 pi 引擎路径）。
+ * v2 → v3（M10）：SessionRecord 新增 `parentSessionId`、`parentAgentPath`、`childSessionIds`。
+ * 字段全部可选，旧记录正常读出，新字段缺省即 undefined。
  */
-export const SESSION_SCHEMA_VERSION = 2;
+export const SESSION_SCHEMA_VERSION = 3;
 
 /**
  * 落盘**外箱**版本（M5）：会话目录布局与文件集的版本。
@@ -195,6 +196,21 @@ export interface SessionRecord {
    */
   engineId?: string;
   /**
+   * 父会话 id（M10）。由 `task_spawn` 工具创建的子 session 带此字段，
+   * 指向发出派生的主管 session。顶层会话（用户直接建的）无此字段。
+   */
+  parentSessionId?: string;
+  /**
+   * 派生本会话的主管 Agent 路径（M10）。
+   * 用于审批穿透：子 session 里的审批请求可以沿此路径转发到主管 session。
+   */
+  parentAgentPath?: string;
+  /**
+   * 本会话作为主管派生的子 session id 列表（M10）。
+   * 由 host 在 `task_spawn` 成功后维护（append-only）；落盘后跨重启持久。
+   */
+  childSessionIds?: string[];
+  /**
    * 外部引擎给出的会话标识（M9）。
    *
    * 对 Claude Code（`claude_sdk`）是 SDK 返回的 `providerSessionId`，用于
@@ -295,6 +311,21 @@ export interface SessionSummary {
    * 而已经退出的会话，`interruptedAt` 是「当时还有成员在跑」的唯一证据。
    */
   rollup?: SessionRollup;
+  /**
+   * 子任务 session 的精简状态列表（M10，仅对有子任务的主管 session 出现）。
+   *
+   * 用于 S2「子任务」面板的列表行：知道 id / title / status 就够渲染，
+   * 不必每个子任务都走 session.get（懒加载）。
+   */
+  childSessions?: Array<{
+    sessionId: string;
+    title: string;
+    status: AgentStatus;
+    /** 用量摘要（成本一行字）。 */
+    costUsd: number;
+    /** 有挂起审批时为 true，驱动列表行的红点。 */
+    hasPending: boolean;
+  }>;
 }
 
 /** `session.get` 的结果：摘要 + 本会话成员树（G10.3，右栏顶部面板的数据源）。 */
@@ -338,6 +369,15 @@ export interface CreateSessionPayload {
    * 缺省 = 走内置 pi 引擎。
    */
   engineId?: string;
+  /**
+   * 子任务 session 的派生来源（M10）。
+   *
+   * 由 `task_spawn` 工具调用时填入，用户手动建的会话不应带这两个字段。
+   * host 在创建 session 后会把 `id` 反向追加到父 session 的 `childSessionIds`。
+   */
+  parentSessionId?: string;
+  /** 发出 task_spawn 的那个 Agent 路径；用于审批穿透（阶段 C）。 */
+  parentAgentPath?: string;
 }
 
 /**

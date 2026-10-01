@@ -312,6 +312,17 @@ export class AxonHost {
   private readonly waitResolvers = new Map<AgentPath, () => void>();
   /** 每父一条共享 Promise：同一父的并发多次 wait 合并进同一集合、等同一结局。 */
   private readonly waitPromises = new Map<AgentPath, Promise<void>>();
+  /**
+   * M10：跨 session wait 图。
+   *
+   * 主管 Agent 的路径 → 它正在等待的子 session id 集合。
+   * 子 session 进终态时，host 检查这张图并 resolve 对应的 Promise。
+   */
+  private readonly subSessionWaits = new Map<AgentPath, {
+    pending: Set<string>;
+    results: Map<string, { status: string; timedOut?: true }>;
+    resolve: (results: Array<{ sessionId: string; status: string; timedOut?: true }>) => void;
+  }>();
   /** per-agent idle 计时器与最后活动时间（看门狗，按空闲而非总时长）。 */
   private readonly idleTimers = new Map<AgentPath, ReturnType<typeof setTimeout>>();
   private readonly lastActivity = new Map<AgentPath, number>();
@@ -743,8 +754,23 @@ export class AxonHost {
       ...(payload.budget !== undefined ? { budget: payload.budget } : {}),
       ...(limit > 0 ? { maxConcurrent: limit } : {}),
       ...(engineId !== undefined ? { engineId } : {}),
+      ...(payload.parentSessionId !== undefined ? { parentSessionId: payload.parentSessionId } : {}),
+      ...(payload.parentAgentPath !== undefined ? { parentAgentPath: payload.parentAgentPath } : {}),
     };
     this.sessions.create(record);
+
+    // M10：子任务 session 反向追加到父 session 的 childSessionIds
+    if (payload.parentSessionId !== undefined) {
+      const parentRecord = this.sessions.get(payload.parentSessionId);
+      if (parentRecord) {
+        const existing = parentRecord.childSessionIds ?? [];
+        if (!existing.includes(sessionId)) {
+          this.sessions.update(payload.parentSessionId, {
+            childSessionIds: [...existing, sessionId],
+          });
+        }
+      }
+    }
     // 基线档位：建档时先记一次，之后只在**变差**时播事件（否则开局就发一条噪音）。
     this.sessionTiers.set(sessionId, this.budgetViewOf(sessionId).tier);
 
@@ -763,6 +789,10 @@ export class AxonHost {
     const summary = this.summaryOf(sessionId);
     if (!summary) throw new Error(`会话 ${sessionId} 建后即不可读（内部错误）`);
     this.emit('session.created', { summary });
+    // M10：子任务 session 建好后通知主管 session 侧（渲染层订阅它刷新子任务面板）
+    if (payload.parentSessionId !== undefined) {
+      this.emit('subsession.created', { parentSessionId: payload.parentSessionId, summary });
+    }
     return summary;
   }
 
@@ -1046,6 +1076,21 @@ export class AxonHost {
     // 临时成员 = 树上实际有、团队定义里没有的那些（UX 02 §6 拍板：不算团队成员）。
     const tempCount = team ? Math.max(0, members.length - 1 - team.members.length) : 0;
     const rollup = this.sessionRollups.get(sessionId);
+    // M10：主管 session 的子任务列表（精简快照，用于 S2 子任务面板）
+    const childIds = record.childSessionIds ?? [];
+    const childSessions = childIds.length === 0 ? undefined : childIds.flatMap((cid) => {
+      const cr = this.sessions.get(cid);
+      if (!cr) return [];
+      // 尽量用内存里的实时状态；会话未加载时降级到 rollup 数据
+      const croot = this.loaded.has(cid)
+        ? this.registry.get(sessionRootPath(cid))
+        : undefined;
+      const cRollup = this.sessionRollups.get(cid);
+      const cStatus: AgentStatus = croot?.snapshot.status ?? cRollup?.status ?? 'idle';
+      const cCost = croot?.snapshot.usage.costUsd ?? cRollup?.usage.costUsd ?? 0;
+      const cPending = this.approvals.list().some((ap) => ap.sessionId === cid && ap.state === 'pending');
+      return [{ sessionId: cid, title: cr.title, status: cStatus, costUsd: cCost, hasPending: cPending }];
+    });
     return buildSessionSummary({
       record,
       rootPath,
@@ -1061,6 +1106,7 @@ export class AxonHost {
       // E-1：已装载的会话也带上 rollup —— S7 用它的 `interruptedAt` 说「上次中断」，
       // 那是历史事实，不因为本次装载了就消失。
       ...(rollup ? { rollup } : {}),
+      ...(childSessions !== undefined ? { childSessions } : {}),
     });
   }
 
@@ -1207,6 +1253,24 @@ export class AxonHost {
     if (!summary) return;
     this.scheduleRollup(sessionId, summary);
     this.emit('session.changed', { summary });
+    // M10：子 session 变化时同步通知主管 session
+    const record = this.sessions.get(sessionId);
+    if (record?.parentSessionId !== undefined) {
+      this.emit('subsession.changed', { parentSessionId: record.parentSessionId, summary });
+    }
+    // M10：子 session 进终态时，检查是否有主管正在 task_wait 等它
+    if (isTerminal(summary.status)) {
+      for (const [supervisorPath, entry] of this.subSessionWaits) {
+        if (!entry.pending.has(sessionId)) continue;
+        entry.pending.delete(sessionId);
+        entry.results.set(sessionId, { status: summary.status });
+        if (entry.pending.size === 0) {
+          // 所有子 session 都终态了，resolve 等待
+          const results = [...entry.results.entries()].map(([sid, r]) => ({ sessionId: sid, ...r }));
+          entry.resolve(results);
+        }
+      }
+    }
   }
 
   // ── M5：懒加载与恢复（§4.5 / §4.6）─────────────────────────
@@ -2221,7 +2285,151 @@ export class AxonHost {
       steerTo: (p, text) => this.steer(p, text),
       recordCollab: (spec) => this.recordCollab(path, spec),
       adoptCollab: (spec) => this.adoptByAgent(path, spec),
+      createSubSession: (spec) => this.createSubSession(path, spec),
+      waitSubSession: (ids, timeoutSec) => this.waitSubSession(path, ids, timeoutSec),
+      subSessionResult: (id) => this.subSessionResult(id),
     };
+  }
+
+  // ── M10：跨 session 任务派发 ──────────────────────────────
+
+  /**
+   * 主管 Agent 创建一个子 session（`task_spawn` 的后端）。
+   *
+   * cwd 缺省继承主管的 cwd；所有成员天然共享文件系统，
+   * 文件可见性不需要额外配置（M10 §三 的设计结论）。
+   */
+  private async createSubSession(
+    supervisorPath: AgentPath,
+    spec: {
+      role: string;
+      task: string;
+      cwd?: string;
+      engineId?: string;
+      model?: string;
+      context?: string;
+    },
+  ): Promise<string> {
+    const supervisorSessionId = this.registry.sessionIdOf(supervisorPath);
+    if (!supervisorSessionId) throw new Error('主管 Agent 找不到所属 session，无法创建子任务');
+
+    const supervisorRecord = this.sessions.get(supervisorSessionId);
+    if (!supervisorRecord) throw new Error('主管 session 记录不存在');
+
+    // 嵌套禁止（M10 设计决策：子 session 不能再 task_spawn）
+    if (supervisorRecord.parentSessionId !== undefined) {
+      throw new Error('子任务 session 不支持再次嵌套 task_spawn，请在顶层主管 session 里调用');
+    }
+
+    const cwd = spec.cwd ?? supervisorRecord.cwd;
+    // context 注入：主管可以把当前进展摘要传给成员
+    const prompt = spec.context ? `${spec.context}
+
+---
+${spec.task}` : spec.task;
+
+    const summary = this.createSession({
+      title: spec.task,
+      cwd,
+      executor: 'engine',
+      initialPrompt: prompt,
+      ...(spec.engineId ? { engineId: spec.engineId } : {}),
+      parentSessionId: supervisorSessionId,
+      parentAgentPath: supervisorPath,
+    });
+    return summary.record.id;
+  }
+
+  /**
+   * 主管 Agent 等待子 session 终态（`task_wait` 的后端）。
+   *
+   * 主管 Agent 调用 `beginWait` 退位让额（与 `agent_wait` 同语义）；
+   * 子 session 进终态后 `touchSession` 会触发 `subSessionWaits` 的检查。
+   */
+  private waitSubSession(
+    supervisorPath: AgentPath,
+    subSessionIds: string[],
+    timeoutSec = 600,
+  ): Promise<Array<{ sessionId: string; status: string; timedOut?: true }>> {
+    return new Promise((resolve) => {
+      const pending = new Set(subSessionIds);
+      const results = new Map<string, { status: string; timedOut?: true }>();
+
+      // 立即检查已终态的
+      for (const id of subSessionIds) {
+        const rec = this.sessions.get(id);
+        if (!rec) {
+          results.set(id, { status: 'not_found' });
+          pending.delete(id);
+          continue;
+        }
+        const rootPath = sessionRootPath(id);
+        const snap = this.loaded.has(id) ? this.registry.get(rootPath) : undefined;
+        const status = snap?.snapshot.status ?? this.sessionRollups.get(id)?.status;
+        if (status && isTerminal(status as AgentStatus)) {
+          results.set(id, { status });
+          pending.delete(id);
+        }
+      }
+
+      if (pending.size === 0) {
+        resolve(subSessionIds.map((id) => ({ sessionId: id, ...results.get(id)! })));
+        return;
+      }
+
+      // 主管退位让额（与 agent_wait 同语义）
+      void this.beginWait(supervisorPath, []);
+
+      const entry = {
+        pending,
+        results,
+        resolve: (r: Array<{ sessionId: string; status: string; timedOut?: true }>) => {
+          this.subSessionWaits.delete(supervisorPath);
+          this.endWait(supervisorPath);
+          resolve(r);
+        },
+      };
+      this.subSessionWaits.set(supervisorPath, entry);
+
+      // 超时：把还没结果的标 timedOut
+      setTimeout(() => {
+        const e = this.subSessionWaits.get(supervisorPath);
+        if (!e) return;
+        for (const id of e.pending) e.results.set(id, { status: 'unknown', timedOut: true as const });
+        e.pending.clear();
+        e.resolve(subSessionIds.map((id) => ({ sessionId: id, ...e.results.get(id)! })));
+      }, timeoutSec * 1000);
+    });
+  }
+
+  /**
+   * 读取子 session 最后一条助手消息的文本（`task_result` 的后端）。
+   * 子 session 还在跑或找不到时返回 null。
+   */
+  private subSessionResult(subSessionId: string): string | null {
+    if (!this.loaded.has(subSessionId)) {
+      // 尝试懒加载（不阻塞，若失败返回 null）
+      try {
+        this.ensureSessionLoaded(subSessionId);
+      } catch {
+        return null;
+      }
+    }
+    const rootPath = sessionRootPath(subSessionId);
+    const messages = this.messagesOf(rootPath);
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const m = messages[i];
+      if (!m || m.role !== 'assistant') continue;
+      const text = (m.content ?? [])
+        .filter((b): b is { type: 'text'; text: string } => b.type === 'text')
+        .map((b) => b.text)
+        .join('\n');
+      if (text) return text;
+    }
+    const rec = this.sessions.get(subSessionId);
+    const snap = this.registry.get(rootPath);
+    if (snap?.snapshot.status === 'failed') return `子任务失败：${snap.snapshot.lastError ?? '未知错误'}`;
+    return null;
   }
 
   private setStatus(path: AgentPath, status: AgentSnapshot['status'], error?: string) {

@@ -912,6 +912,18 @@ app.whenReady().then(async () => {
           return { id: request.id, ok: true, result: await agentTools!.redetect() };
         }
 
+        // M10：子任务 session 列表
+        if (request.command === 'subsession.list') {
+          const { parentSessionId } = request.payload as { parentSessionId: string };
+          const parent = host.getSession(parentSessionId);
+          const childIds = parent?.record.childSessionIds ?? [];
+          const result = childIds.flatMap((id) => {
+            const s = host.getSession(id);
+            return s ? [{ record: s.record, rootPath: s.rootPath, status: s.status, counts: s.counts, usage: s.usage, budget: s.budget }] : [];
+          });
+          return { id: request.id, ok: true, result };
+        }
+
         // M6: provider.test —— W-B 的 provider-probe.ts 落地后替换 stub 实现。
         // 拦在 host.execute 之前，因为 host 不处理这条命令。
         if (request.command === 'provider.test') {
