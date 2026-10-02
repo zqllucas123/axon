@@ -2256,6 +2256,24 @@ export class AxonHost {
   }
 
   /**
+   * 读取某 Agent 最后一条 assistant 消息的纯文本预览（截断到 max 字）。
+   * 用于成员终态通知中的进展摘要（M11 Phase 4）。
+   */
+  private lastAssistantPreviewOf(path: AgentPath, max = 300): string | undefined {
+    const messages = this.messagesOf(path);
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const m = messages[i];
+      if (!m || m.role !== 'assistant') continue;
+      const text = (m.content ?? [])
+        .filter((b): b is { type: 'text'; text: string } => b.type === 'text')
+        .map((b) => b.text)
+        .join('\n');
+      if (text) return text.length > max ? `${text.slice(0, max)}…` : text;
+    }
+    return undefined;
+  }
+
+  /**
    * 为该 Agent 现造编排工具（per-spawn bind selfPath），并按其角色白名单
    * 裁剪：allowSet 里有的工具名才发放（M3 §4.1）。
    * 公开是为了测试与将来的工具自省（M6 诊断）；宿主内部在 spawn 时调用。
@@ -2521,6 +2539,29 @@ ${spec.task}` : spec.task;
       if (status === 'interrupted') {
         this.approvals.cancelFor(path);
         this.questions.cancelFor(path);
+      }
+      // M11 Phase 4：成员进终态时通知主管（idle 通知机制）。
+      // 条件：有 sessionId、是非根节点（不是主管自己）、父节点是主管 session 的根。
+      const sessionId = this.registry.sessionIdOf(path);
+      if (sessionId !== undefined) {
+        const rootPath = sessionRootPath(sessionId);
+        const record = this.sessions.get(sessionId);
+        const isOrchestration = record?.executor !== 'engine';
+        const isNonRoot = path !== rootPath;
+        if (isOrchestration && isNonRoot) {
+          const snap = this.registry.get(path);
+          const statusLabel =
+            status === 'done' ? '已完成' :
+            status === 'failed' ? '失败' :
+            status === 'interrupted' ? '已中断' : status;
+          const displayName = snap?.snapshot.displayName ?? path;
+          const preview = this.lastAssistantPreviewOf(path, 300);
+          const msg = preview
+            ? `[成员通知] ${displayName}（${path}）${statusLabel}。\n最后输出：「${preview}」`
+            : `[成员通知] ${displayName}（${path}）${statusLabel}。`;
+          // steer 给主管 session 的根（下一轮生效）
+          this.steer(rootPath, msg);
+        }
       }
     }
   }
