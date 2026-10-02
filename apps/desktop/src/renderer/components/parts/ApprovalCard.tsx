@@ -43,31 +43,44 @@ export function Chain({ chain }: { chain: string[] }): ReactElement {
   );
 }
 
-/** 提问卡尾（`question.respond`）：输入框 + 提交（Enter 提交）。 */
+/** 提问卡尾（`question.respond`）：输入框 + 提交（Enter 提交）；可选的建议选项按钮。 */
 function QuestionFoot({ request }: { request: PendingRequest }): ReactElement {
   const { answerQuestion } = useApp();
   const [answer, setAnswer] = useState('');
-  const submit = () => {
-    const t = answer.trim();
+  const choices = (request.detail as { choices?: string[] } | undefined)?.choices;
+  const submit = (text?: string) => {
+    const t = (text ?? answer).trim();
     if (!t) return;
+    setAnswer('');
     void answerQuestion(request.requestId, t);
   };
   return (
-    <div className="card-foot">
-      <input
-        className="inp"
-        value={answer}
-        placeholder="回答后回车提交…"
-        onChange={(e) => setAnswer(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter') submit();
-        }}
-        style={{ flex: 1 }}
-      />
-      <button className="btn sm primary" data-smoke="question-answer" onClick={submit} disabled={!answer.trim()}>
-        <Icon name="check" size={14} />
-        提交
-      </button>
+    <div className="card-foot" style={{ flexDirection: 'column', gap: 8, alignItems: 'stretch' }}>
+      {choices && choices.length > 0 ? (
+        <div className="question-choices">
+          {choices.map((c) => (
+            <button key={c} className="btn sm ghost" onClick={() => submit(c)}>
+              {c}
+            </button>
+          ))}
+        </div>
+      ) : null}
+      <div style={{ display: 'flex', gap: 8 }}>
+        <input
+          className="inp"
+          value={answer}
+          placeholder="回答后回车提交…"
+          onChange={(e) => setAnswer(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') submit();
+          }}
+          style={{ flex: 1 }}
+        />
+        <button className="btn sm primary" data-smoke="question-answer" onClick={() => submit()} disabled={!answer.trim()}>
+          <Icon name="check" size={14} />
+          提交
+        </button>
+      </div>
     </div>
   );
 }

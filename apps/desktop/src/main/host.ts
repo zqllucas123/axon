@@ -104,6 +104,7 @@ import {
   type OrchestrationDriver,
 } from './orchestrator.ts';
 import { ApprovalBroker, DEFAULT_APPROVAL_TIMEOUT_MS } from './approval.ts';
+import { QuestionBroker } from './question-broker.ts';
 import { ENGINE_ROLE, LEAD_ROLE } from './roles.ts';
 import { arbiterIneligibleReason, resolveArbiter } from './adoption.ts';
 import {
@@ -339,6 +340,7 @@ export class AxonHost {
   /** 未加载会话的汇总缓存（来自 session.json 的 rollup）。 */
   private readonly sessionRollups = new Map<string, SessionRollup>();
   private readonly approvals: ApprovalBroker;
+  private readonly questions: QuestionBroker;
   private adoptionPolicy: AdoptionPolicy;
   private adoptionPolicyAt: number;
   /**
@@ -403,6 +405,15 @@ export class AxonHost {
       // M10：子 session 的审批请求带上主管 session id，渲染层据此在两处显示
       parentSessionIdOf: (sid) => this.sessions.get(sid)?.parentSessionId,
     });
+    this.questions = new QuestionBroker({
+      emit: (event, payload, source) => this.emit(event, payload, source),
+      exists: (p) => this.registry.has(p),
+      onWaitStart: (p) => this.awaitingApproval.add(p),
+      onWaitEnd: (p) => {
+        this.awaitingApproval.delete(p);
+        this.touch(p);
+      },
+    });
     for (const role of options.roles) {
       this.roles.set(role.name, { role, source: 'builtin', errors: [] });
     }
@@ -433,6 +444,7 @@ export class AxonHost {
     for (const t of this.idleTimers.values()) clearTimeout(t);
     this.idleTimers.clear();
     this.approvals.dispose();
+    this.questions.dispose();
     this.awaitingApproval.clear();
     this.arbitrationTargets.clear();
     this.waits.clear();
@@ -665,7 +677,7 @@ export class AxonHost {
 
   /** 挂起中的审批/提问（`pending.list`）。 */
   listPending(): PendingRequest[] {
-    return this.approvals.list();
+    return [...this.approvals.list(), ...this.questions.list()];
   }
 
   respondApproval(requestId: string, approved: boolean, note?: string): { accepted: true } {
@@ -2290,6 +2302,7 @@ export class AxonHost {
       createSubSession: (spec) => this.createSubSession(path, spec),
       waitSubSession: (ids, timeoutSec) => this.waitSubSession(path, ids, timeoutSec),
       subSessionResult: (id) => this.subSessionResult(id),
+      askUser: (spec) => this.askUser(path, spec),
     };
   }
 
@@ -2434,6 +2447,29 @@ ${spec.task}` : spec.task;
     return null;
   }
 
+  /**
+   * 主管 Agent 向用户提问（`ask_user` 工具的后端，M11 §2）。
+   *
+   * 主管进入 waiting 状态（退位让额）；用户在收件箱回答后恢复 running。
+   * 不超时：任务是长期的，用户可能隔天回来。
+   */
+  private askUser(
+    origin: AgentPath,
+    spec: { question: string; context?: string; choices?: string[] },
+  ): Promise<string> {
+    // 先退位让额，再发问——顺序很重要：
+    // 如果先发事件再退位，drain 循环可能在退位前把额度给别人，
+    // 结果主管跑到一半被挂起，而不是主动让出。
+    void this.beginWait(origin, []);
+    return this.questions.ask(origin, spec.question, {
+      context: spec.context,
+      choices: spec.choices,
+    }).then((answer) => {
+      this.endWait(origin);
+      return answer;
+    });
+  }
+
   private setStatus(path: AgentPath, status: AgentSnapshot['status'], error?: string) {
     try {
       this.registry.setStatus(path, status, error);
@@ -2466,7 +2502,10 @@ ${spec.task}` : spec.task;
     if (isTerminal(status)) {
       this.settleCollabFor(path);
       // 中断后挂起的审批没人会再管它，取消掉免得在收件箱里变幽灵待办。
-      if (status === 'interrupted') this.approvals.cancelFor(path);
+      if (status === 'interrupted') {
+        this.approvals.cancelFor(path);
+        this.questions.cancelFor(path);
+      }
     }
   }
 
@@ -2670,9 +2709,8 @@ ${spec.task}` : spec.task;
         return this.respondApproval(p.requestId, p.approved, p.note) as never;
       }
       case 'question.respond': {
-        // 提问通道与审批共用挂起表（Axon5 人机交互留的入口）。
         const p = payload as { requestId: string; answer: string };
-        return this.approvals.respond(p.requestId, true, p.answer) as never;
+        return this.questions.respond(p.requestId, p.answer) as never;
       }
       case 'pending.list':
         return this.listPending() as never;

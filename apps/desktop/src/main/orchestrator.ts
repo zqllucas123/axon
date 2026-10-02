@@ -106,6 +106,20 @@ export interface OrchestrationDriver {
    * 子 session 还在跑时返回 null（不阻塞）。
    */
   subSessionResult(subSessionId: string): string | null;
+
+  // ── M11：主管向用户提问 ──────────────────────────────────
+
+  /**
+   * 主管 Agent 向用户提问（`ask_user` 工具的后端）。
+   *
+   * 返回 Promise：主管挂起（退位让额），用户在收件箱回答后 resolve。
+   * 不超时：任务是长期的，用户可能隔天回来继续。
+   */
+  askUser(spec: {
+    question: string;
+    context?: string;
+    choices?: string[];
+  }): Promise<string>;
 }
 
 // ── 常量与辅助 ────────────────────────────────────────────────
@@ -123,6 +137,8 @@ export const ORCHESTRATION_TOOL_NAMES = [
   'task_spawn',
   'task_wait',
   'task_result',
+  // M11：主管向用户提问
+  'ask_user',
 ] as const;
 
 /** agent_wait 默认超时 600s（M3 §4.5）。 */
@@ -589,6 +605,66 @@ function taskResultTool(driver: OrchestrationDriver): AgentTool<typeof TASK_RESU
   };
 }
 
+const ASK_USER = Type.Object({
+  question: Type.String(),
+  context: Type.Optional(Type.String()),
+  choices: Type.Optional(Type.Array(Type.String())),
+});
+
+/**
+ * ask_user —— 主管向用户提问（M11 对齐能力）。
+ *
+ * 适用于：任务开始前澄清关键预期、执行中遇到歧义的技术决策、
+ * 遇到风险点请用户拍板。
+ *
+ * 不适用于：能从上下文推断的、礼貌性确认（「我开始了」）、纯执行层的问题。
+ * 主管调用后进入 waiting 状态，用户在收件箱回答后恢复 running。
+ * 不超时：用户可能隔天回来继续。
+ */
+function askUserTool(driver: OrchestrationDriver): AgentTool<typeof ASK_USER> {
+  return {
+    name: 'ask_user',
+    label: '向用户提问',
+    description:
+      '向用户提问，等待用户回答后继续。' +
+      '适用于：任务开始前澄清关键预期、执行中遇到歧义的技术决策、遇到风险点请用户拍板。' +
+      '一次最多问 1-2 个关键问题；不要问能从上下文推断的；不要礼貌性确认。' +
+      '调用后你会进入等待状态，用户回答后自动恢复。',
+    parameters: ASK_USER,
+    async execute(_toolCallId, params, signal) {
+      const answer = await new Promise<string | 'aborted'>((resolve) => {
+        let settled = false;
+        const onAbort = () => {
+          if (settled) return;
+          settled = true;
+          resolve('aborted');
+        };
+        if (signal?.aborted) { onAbort(); return; }
+        signal?.addEventListener('abort', onAbort, { once: true });
+        driver.askUser({
+          question: params.question,
+          ...(params.context ? { context: params.context } : {}),
+          ...(params.choices?.length ? { choices: params.choices } : {}),
+        }).then((a) => {
+          if (settled) return;
+          settled = true;
+          signal?.removeEventListener('abort', onAbort);
+          resolve(a);
+        }).catch(() => {
+          if (settled) return;
+          settled = true;
+          resolve('aborted');
+        });
+      });
+      if (answer === 'aborted') {
+        driver.endWait();
+        return result('等待用户回答时被中断。请根据你目前掌握的信息继续，或再次提问。', { aborted: true });
+      }
+      return result(answer, { answer });
+    },
+  };
+}
+
 /** 为一棵树上的某个 Agent 现造全套工具（per-spawn bind selfPath）。 */
 export function createOrchestrationTools(driver: OrchestrationDriver) {
   return [
@@ -602,5 +678,6 @@ export function createOrchestrationTools(driver: OrchestrationDriver) {
     taskSpawnTool(driver),
     taskWaitTool(driver),
     taskResultTool(driver),
+    askUserTool(driver),
   ];
 }
