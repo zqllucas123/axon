@@ -1994,6 +1994,9 @@ export class AxonHost {
   }
 
   interrupt(path: AgentPath): void {
+    // M11：无论 agent 处于什么状态，立即取消挂起的提问
+    this.questions.cancelFor(path);
+
     // parked：直接出队并取消任务
     const qi = this.pendingRuns.indexOf(path);
     if (qi >= 0) {
@@ -2010,6 +2013,8 @@ export class AxonHost {
     // 状态由 abort 引发的事件流兜住；这里只做乐观标记。
     // suspended（在 waits 里）的父也打 interrupted：abort 会沿 signal 传到 wait 工具。
     if (node && (node.snapshot.status === 'running' || this.waits.has(path))) {
+      // M11：取消挂起的提问（此处也要取消，防止 onStatusChanged 路径未命中）
+      this.questions.cancelFor(path);
       this.setStatus(path, 'interrupted');
     }
   }
@@ -2457,16 +2462,9 @@ ${spec.task}` : spec.task;
     origin: AgentPath,
     spec: { question: string; context?: string; choices?: string[] },
   ): Promise<string> {
-    // 先退位让额，再发问——顺序很重要：
-    // 如果先发事件再退位，drain 循环可能在退位前把额度给别人，
-    // 结果主管跑到一半被挂起，而不是主动让出。
-    void this.beginWait(origin, []);
     return this.questions.ask(origin, spec.question, {
       context: spec.context,
       choices: spec.choices,
-    }).then((answer) => {
-      this.endWait(origin);
-      return answer;
     });
   }
 
