@@ -10,20 +10,17 @@ import type { AgentPath, EventMap } from '@axon/protocol';
 
 const path = '/s1' as AgentPath;
 
-function makeEmit() {
-  return vi.fn<Parameters<QuestionBrokerOptions['emit']>, ReturnType<QuestionBrokerOptions['emit']>>();
-}
-
 type QuestionBrokerOptions = ConstructorParameters<typeof QuestionBroker>[0];
 
 function boot(overrides: Partial<QuestionBrokerOptions> = {}) {
-  const emit = vi.fn<[keyof EventMap, EventMap[keyof EventMap], AgentPath?], void>();
+  const emit = vi.fn() as unknown as QuestionBrokerOptions['emit'];
+  const emitSpy = emit as ReturnType<typeof vi.fn>;
   const qb = new QuestionBroker({
-    emit: emit as QuestionBrokerOptions['emit'],
+    emit,
     exists: () => true,
     ...overrides,
   });
-  return { qb, emit };
+  return { qb, emit: emitSpy };
 }
 
 describe('QuestionBroker', () => {

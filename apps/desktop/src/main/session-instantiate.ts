@@ -21,9 +21,12 @@ import {
   approvalStrictness,
   formationOf,
   leadMember,
+  isTerminal,
   type ApprovalMode,
   type AgentPath,
+  type AgentSnapshot,
   type ForkModeSpec,
+  type PendingRequest,
   type RoleDefinition,
   type TeamDefinition,
   type TeamMember,
@@ -213,7 +216,6 @@ export function rosterPrompt(
 // ─────────────────────────────────────────────────────────────
 // 临时编队 → 团队定义
 // ─────────────────────────────────────────────────────────────
-
 /**
  * 把临时编队（S0 第三张卡）转成一份团队定义，复用同一条实例化路径。
  *
@@ -245,4 +247,64 @@ export function adhocTasks(members: AdhocMemberSpec[], nameOf: (m: AdhocMemberSp
     if (m.task) out.set(nameOf(m, i), m.task);
   });
   return out;
+}
+
+// ─────────────────────────────────────────────────────────────
+// 动态任务板（M11 Phase 2）
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * 为主管 Agent 构建当前团队状态快照（纯文本，注入到 prompt 开头）。
+ *
+ * 只对 orchestration 会话注入（成员 > 0 才有意义）。
+ * 所有成员都 idle 且无子任务无待批时返回 null（任务还没开始没意义）。
+ */
+export function buildStatusSnapshot(
+  sessionId: string,
+  members: readonly AgentSnapshot[],
+  pending: readonly PendingRequest[],
+  childSessions?: readonly { sessionId: string; title: string; status: string }[],
+): string | null {
+  const rootPath = `/${sessionId}`;
+  const nonRoot = members.filter((m) => m.path !== rootPath);
+  if (nonRoot.length === 0 && (!childSessions || childSessions.length === 0)) return null;
+
+  const now = new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
+
+  const statusLabel = (s: string) =>
+    s === 'running' ? '⏳ 进行中' :
+    s === 'done' ? '✓ 已完成' :
+    s === 'failed' ? '✗ 失败' :
+    s === 'waiting' ? '⌛ 等待中' :
+    s === 'interrupted' ? '◎ 已中断' : '○ 空闲';
+
+  const memberLines = nonRoot.map((m) => {
+    const label = statusLabel(m.status);
+    const lastErr = m.status === 'failed' && m.lastError ? `（${m.lastError.slice(0, 60)}）` : '';
+    return `  ${label} ${m.displayName}（${m.path}）${lastErr}`;
+  });
+
+  const subLines = (childSessions ?? []).map((cs) => {
+    return `  ${statusLabel(cs.status)} [子任务] ${cs.title}（${cs.sessionId}）`;
+  });
+
+  const sessionPending = pending.filter((p) => p.sessionId === sessionId && p.state === 'pending');
+  const pendingLines = sessionPending.map((p) => {
+    const who = p.origin.split('/').pop() ?? p.origin;
+    return `  ⚠ ${who} 有待处理的${p.kind === 'question' ? '提问' : '审批'}（requestId: ${p.requestId}）`;
+  });
+
+  // 所有成员 idle 且无子任务无待批时不注入
+  const hasActivity =
+    nonRoot.some((m) => m.status !== 'idle') ||
+    (childSessions ?? []).some((cs) => cs.status !== 'idle') ||
+    pendingLines.length > 0;
+  if (!hasActivity) return null;
+
+  const sections: string[] = [`[团队状态快照 · ${now}]`];
+  if (memberLines.length > 0) sections.push('成员：', ...memberLines);
+  if (subLines.length > 0) sections.push('子任务 session：', ...subLines);
+  if (pendingLines.length > 0) sections.push('待处理事项：', ...pendingLines);
+
+  return sections.join('\n');
 }

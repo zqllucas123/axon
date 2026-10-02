@@ -121,6 +121,7 @@ import {
   adhocTeam,
   planTeam,
   rosterPrompt,
+  buildStatusSnapshot,
   stricterApproval,
   type MemberPlan,
   type TeamPlan,
@@ -2130,6 +2131,23 @@ export class AxonHost {
     const node = this.registry.get(path);
     if (!node?.engine) throw new Error(`Agent 无引擎: ${path}`);
     this.touch(path);
+    // M11 Phase 2：orchestration 会话（有团队成员）在每轮 prompt 前注入动态任务板快照
+    const sessionId = node.snapshot.sessionId;
+    const record = this.sessions.get(sessionId);
+    const isOrchestration = record?.executor !== 'engine';
+    const isRoot = path === sessionRootPath(sessionId);
+    if (isOrchestration && isRoot) {
+      const members = this.registry.listOf(sessionId);
+      const pending = this.listPending();
+      const childSessions = record?.childSessionIds?.flatMap((cid) => {
+        const cr = this.sessions.get(cid);
+        if (!cr) return [];
+        const snap = this.loaded.has(cid) ? this.registry.get(sessionRootPath(cid)) : undefined;
+        return [{ sessionId: cid, title: cr.title, status: snap?.snapshot.status ?? 'idle' }];
+      });
+      const snapshot = buildStatusSnapshot(sessionId, members, pending, childSessions);
+      if (snapshot) node.engine.steer(snapshot);
+    }
     try {
       await node.engine.prompt(text);
       await node.engine.waitForIdle();
