@@ -35,6 +35,12 @@ import type {
   ConfigSnapshot,
   CreateSessionPayload,
   FsEntry,
+  IndexingDonePayload,
+  IndexingErrorPayload,
+  IndexingProgressPayload,
+  KnowledgeBase,
+  KnowledgeChunk,
+  KnowledgeDoc,
   LedgerRecord,
   MessageLike,
   OpenPathKind,
@@ -90,6 +96,13 @@ export interface StoreValue {
   projects: { entries: ProjectRecord[]; issues: ProjectIssue[] };
   pending: PendingRequest[];
   ledger: LedgerRecord[];
+  /**
+   * 知识库列表缓存（M13：S4 知识库管理屏的数据源）。
+   * 启动时拉一次，`kb.indexing.done` 后重新拉。
+   */
+  kbs: KnowledgeBase[];
+  /** 当前正在进行的摄入任务（jobId → 进度信息）。 */
+  kbJobs: Record<string, { sourceRef: string; processed: number; total: number; error?: string }>;
   /**
    * 每个成员的消息流（切片 3）：`agent.messages` 回放 + 事件增量都落在这一份缓存。
    * 键是 AgentPath —— 成员是会话内的自然切片，切焦点不重拉。
@@ -163,6 +176,21 @@ export interface StoreValue {
   openPath: (kind: OpenPathKind) => Promise<void>;
   /** 打开设置屏（S8，主窗内联）。 */
   openSettings: () => void;
+
+  // ── M13：知识库意图 ──
+
+  /** 新建知识库（`kb.create`）。 */
+  createKb: (name: string, description: string) => Promise<KnowledgeBase | null>;
+  /** 删除知识库（`kb.delete`）。 */
+  deleteKb: (kbId: string) => Promise<void>;
+  /** 异步摄入来源（`kb.addSource`）；立即返回 jobId。 */
+  addKbSource: (kbId: string, sourceType: string, sourceRef: string) => Promise<string | null>;
+  /** 删除已摄入文档（`kb.removeDoc`）。 */
+  removeKbDoc: (kbId: string, docId: string) => Promise<void>;
+  /** 向量检索（`kb.query`）。 */
+  queryKb: (kbId: string, query: string, topK?: number) => Promise<KnowledgeChunk[]>;
+  /** 列出知识库下的文档（`kb.listDocs`）。 */
+  listKbDocs: (kbId: string) => Promise<KnowledgeDoc[]>;
   /**
    * 本次运行期内已处理的待办流水（S5 「已处理」段，拍板 P-5）。
    *
@@ -197,6 +225,8 @@ export function AppProvider({ children }: { children: ReactNode }): ReactElement
   const [projects, setProjects] = useState<StoreValue['projects']>({ entries: [], issues: [] });
   const [pending, setPending] = useState<PendingRequest[]>([]);
   const [ledger, setLedger] = useState<LedgerRecord[]>([]);
+  const [kbs, setKbs] = useState<KnowledgeBase[]>([]);
+  const [kbJobs, setKbJobs] = useState<StoreValue['kbJobs']>({});
   const [streams, setStreams] = useState<Record<AgentPath, StreamItem[]>>({});
   const [budget, setBudget] = useState<BudgetSnapshot | null>(null);
   const [budgetAlert, setBudgetAlert] = useState<BudgetAlert | null>(null);
@@ -305,7 +335,7 @@ export function AppProvider({ children }: { children: ReactNode }): ReactElement
   useEffect(() => {
     let alive = true;
     void (async () => {
-      const [st, list, rs, ts, prj, ps, bg, cfg, at] = await Promise.all([
+      const [st, list, rs, ts, prj, ps, bg, cfg, at, kbList] = await Promise.all([
         call(() => window.axon.invoke('storage.status', {})),
         call(() => window.axon.invoke('session.list', {})),
         call(() => window.axon.invoke('role.list', {})),
@@ -315,6 +345,7 @@ export function AppProvider({ children }: { children: ReactNode }): ReactElement
         call(() => window.axon.invoke('budget.get', {})),
         call(() => window.axon.invoke('config.get', {})),
         call(() => window.axon.invoke('agentTools.get', {})),
+        call(() => window.axon.invoke('kb.list', {})),
       ]);
       if (!alive) return;
       if (st) setStorage(st as StorageStatus);
@@ -327,6 +358,7 @@ export function AppProvider({ children }: { children: ReactNode }): ReactElement
       if (cfg) setConfig(cfg);
       // 不覆盖已到的事件：首次探测可能在这次拉取回包前就推过来了（较新）。
       if (at) setAgentTools((prev) => prev ?? at);
+      if (kbList) setKbs(kbList);
     })();
     return () => {
       alive = false;
@@ -606,6 +638,37 @@ export function AppProvider({ children }: { children: ReactNode }): ReactElement
     offs.push(sub('teams.changed', ({ entries, issues }) => setTeams({ entries, issues })));
     offs.push(sub('config.changed', ({ config: cfg }) => setConfig(cfg)));
     offs.push(sub('agentTools.changed', ({ snapshot }) => setAgentTools(snapshot)));
+
+    // M13：知识库摄入进度事件
+    offs.push(
+      sub('kb.indexing.progress', (p: IndexingProgressPayload) => {
+        setKbJobs((prev) => ({
+          ...prev,
+          [p.jobId]: { sourceRef: p.sourceRef, processed: p.processed, total: p.total },
+        }));
+      }),
+    );
+    offs.push(
+      sub('kb.indexing.done', (p: IndexingDonePayload) => {
+        // 摄入完成：清掉进度条，刷新知识库列表
+        setKbJobs((prev) => {
+          const next = { ...prev };
+          delete next[p.jobId];
+          return next;
+        });
+        void call(() => window.axon.invoke('kb.list', {})).then((list) => {
+          if (list) setKbs(list);
+        });
+      }),
+    );
+    offs.push(
+      sub('kb.indexing.error', (p: IndexingErrorPayload) => {
+        setKbJobs((prev) => ({
+          ...prev,
+          [p.jobId]: { sourceRef: p.sourceRef, processed: 0, total: 0, error: p.error },
+        }));
+      }),
+    );
 
     // M10：子任务事件 —— 用来刷新主管 session 的 childSessions 列表
     offs.push(sub('subsession.created', ({ parentSessionId, summary }) => {
@@ -996,6 +1059,62 @@ export function AppProvider({ children }: { children: ReactNode }): ReactElement
     setScreen('s8');
   }, [setScreen]);
 
+  // ── M13：知识库意图 ──
+
+  const createKb = useCallback(
+    async (name: string, description: string) => {
+      const kb = await call(() => window.axon.invoke('kb.create', { name, description }));
+      if (kb) setKbs((prev) => (prev.some((k) => k.id === kb.id) ? prev : [...prev, kb]));
+      return kb;
+    },
+    [call],
+  );
+
+  const deleteKb = useCallback(
+    async (kbId: string): Promise<void> => {
+      await call(() => window.axon.invoke('kb.delete', { kbId }));
+      setKbs((prev) => prev.filter((k) => k.id !== kbId));
+    },
+    [call],
+  );
+
+  const addKbSource = useCallback(
+    async (kbId: string, sourceType: string, sourceRef: string): Promise<string | null> => {
+      const res = await call(() =>
+        window.axon.invoke('kb.addSource', {
+          kbId,
+          sourceType: sourceType as import('@axon/protocol').KnowledgeSourceType,
+          sourceRef,
+        }),
+      );
+      return res?.jobId ?? null;
+    },
+    [call],
+  );
+
+  const removeKbDoc = useCallback(
+    async (kbId: string, docId: string): Promise<void> => {
+      await call(() => window.axon.invoke('kb.removeDoc', { kbId, docId }));
+    },
+    [call],
+  );
+
+  const queryKb = useCallback(
+    async (kbId: string, query: string, topK?: number) => {
+      const res = await call(() => window.axon.invoke('kb.query', { kbId, query, topK }));
+      return res ?? [];
+    },
+    [call],
+  );
+
+  const listKbDocs = useCallback(
+    async (kbId: string) => {
+      const res = await call(() => window.axon.invoke('kb.listDocs', { kbId }));
+      return res ?? [];
+    },
+    [call],
+  );
+
   /** 右栏单槽 toggle：点已激活的槽 = 收起。 */
   const setRightPanel = useCallback((panel: RightPanel): void => {
     setRightPanelState((prev) => (prev === panel ? 'none' : panel));
@@ -1037,6 +1156,8 @@ export function AppProvider({ children }: { children: ReactNode }): ReactElement
     projects,
     pending,
     ledger,
+    kbs,
+    kbJobs,
     streams,
     budget,
     budgetAlert,
@@ -1082,6 +1203,12 @@ export function AppProvider({ children }: { children: ReactNode }): ReactElement
     deleteRole,
     openPath,
     openSettings,
+    createKb,
+    deleteKb,
+    addKbSource,
+    removeKbDoc,
+    queryKb,
+    listKbDocs,
     // 派生（不存第二份真相）：已结算的待办就是 `pending` 里 state!=='pending' 那些。
     resolvedFeed: pending.filter((p) => p.state !== 'pending'),
     dismissError: () => setError(null),

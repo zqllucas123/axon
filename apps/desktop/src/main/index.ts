@@ -49,6 +49,7 @@ import { ALL_ROLES } from './roles.ts';
 import { BUILTIN_TEAMS } from './teams.ts';
 import { RoleBridge } from './role-bridge.ts';
 import { TeamBridge } from './team-bridge.ts';
+import { KnowledgeBridge } from './knowledge-bridge.ts';
 import { ProjectStore } from './project-store.ts';
 import { ConfigStore } from './config-store.ts';
 import { AgentToolsRegistry, KNOWN_AGENT_TOOLS, userSearchPath } from './agent-tools.ts';
@@ -169,6 +170,7 @@ let host: AxonHost | null = null;
 let storage: SessionPersistence | undefined;
 let roleBridge: RoleBridge | null = null;
 let teamBridge: TeamBridge | null = null;
+let knowledgeBridge: KnowledgeBridge | null = null;
 let projectStore: ProjectStore | null = null;
 let configStore: ConfigStore | null = null;
 let agentTools: AgentToolsRegistry | null = null;
@@ -595,6 +597,32 @@ app.whenReady().then(async () => {
   roleBridge.onChanged(() => {
     void teamBridge?.revalidate();
   });
+
+  // M13：知识库 bridge（仅当配置有 endpoint + apiKey 时启用）。
+  // AXON_KNOWLEDGE_DIR 供冒烟/测试隔离。
+  const providerCfg = rawConfig.provider ?? {};
+  const kbEndpoint = (providerCfg as { baseUrl?: string }).baseUrl;
+  const kbApiKey = (providerCfg as { apiKey?: string }).apiKey;
+  if (kbEndpoint && kbApiKey && !SMOKE) {
+    knowledgeBridge = new KnowledgeBridge(
+      ipcMain,
+      () => win?.webContents ?? null,
+      kbEndpoint,
+      kbApiKey,
+    );
+    knowledgeBridge.register();
+    console.log('[desktop] KnowledgeBridge 已注册');
+  } else {
+    // 冒烟/未配置时注册空 stub，使 kb.* 命令返回空结果而不是 ENOENT。
+    ipcMain.handle('axon:kb.list', async () => []);
+    ipcMain.handle('axon:kb.create', async () => null);
+    ipcMain.handle('axon:kb.delete', async () => ({ deleted: false }));
+    ipcMain.handle('axon:kb.getStats', async () => null);
+    ipcMain.handle('axon:kb.addSource', async () => ({ jobId: '' }));
+    ipcMain.handle('axon:kb.removeDoc', async () => ({ removed: false }));
+    ipcMain.handle('axon:kb.query', async () => []);
+    ipcMain.handle('axon:kb.listDocs', async () => []);
+  }
 
   // 项目层：独立于会话存储的项目元数据（一项目一文件）。
   // host 只需要「projectId → cwd」解析器来固化项目会话的工作空间。

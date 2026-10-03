@@ -12,6 +12,7 @@ import { S0NewSession } from './S0NewSession.tsx';
 import { S1Workbench } from './S1Workbench.tsx';
 import { SessionMain, SessionRightPanel } from './S2Session.tsx';
 import { S3Teams } from './S3Teams.tsx';
+import { S4Knowledge } from './S4Knowledge.tsx';
 import { S5Inbox } from './S5Inbox.tsx';
 import { S6Budget } from './S6Budget.tsx';
 import { S7Sessions } from './S7Sessions.tsx';
@@ -25,6 +26,8 @@ function Screen(): ReactElement {
       return <S1Workbench />;
     case 's3':
       return <S3Teams />;
+    case 's4':
+      return <S4Knowledge />;
     case 's5':
       return <S5Inbox />;
     case 's6':
