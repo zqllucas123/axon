@@ -35,12 +35,18 @@ const EXTERNAL = [
   // SDK 体积大、含原生绑定（可能有 platform binary），且内联会触发 verify-lazy 的
   // FORBIDDEN 检查（@anthropic-ai/sdk 在禁止列表里）。用动态 import() 懒加载。
   '@anthropic-ai/claude-agent-sdk',
+  // M12：LanceDB 含 native addon（.node 文件），必须 external；
+  // mammoth / cheerio 体积大且有 Node.js 内置依赖，也不能内联。
+  '@lancedb/lancedb',
+  'mammoth',
+  'cheerio',
 ];
 
 /** workspace 内部包走别名，源码直接参与打包（它们是纯 TS，无副作用）。 */
 const alias = {
   '@axon/protocol': join(repoRoot, 'packages/protocol/src/index.ts'),
   '@axon/kernel': join(repoRoot, 'packages/kernel/src/index.ts'),
+  '@axon/knowledge': join(repoRoot, 'packages/knowledge/src/index.ts'),
 };
 
 const common = {

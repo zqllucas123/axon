@@ -2,6 +2,7 @@ export * from './agent-tools.ts';
 export * from './agent.ts';
 export * from './config.ts';
 export * from './ipc.ts';
+export * from './knowledge.ts';
 export * from './ledger.ts';
 export * from './project.ts';
 export * from './session.ts';

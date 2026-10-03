@@ -26,7 +26,8 @@
     "baseUrl": ".",
     "paths": {
       "@axon/protocol": ["./packages/protocol/src/index.ts"],
-      "@axon/kernel": ["./packages/kernel/src/index.ts"]
+      "@axon/kernel": ["./packages/kernel/src/index.ts"],
+      "@axon/knowledge": ["./packages/knowledge/src/index.ts"]
     }
   }
 }

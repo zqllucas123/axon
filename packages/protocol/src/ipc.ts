@@ -21,6 +21,15 @@ import type {
 } from './agent.ts';
 import type { AgentToolsSnapshot } from './agent-tools.ts';
 import type { ConfigIssue, ConfigPatch, ConfigSnapshot } from './config.ts';
+import type {
+  AddSourcePayload,
+  IndexingDonePayload,
+  IndexingErrorPayload,
+  IndexingProgressPayload,
+  KnowledgeBase,
+  KnowledgeChunk,
+  KnowledgeDoc,
+} from './knowledge.ts';
 import type { ProjectIssue, ProjectKind, ProjectRecord } from './project.ts';
 import type {
   Adoption,
@@ -423,6 +432,31 @@ export interface CommandMap {
     payload: { model?: string };
     result: { ok: boolean; latencyMs: number; models: string[]; error?: string };
   };
+
+  // ── M12：知识库 ──
+
+  /** 列出全部知识库。 */
+  'kb.list': { payload: Record<string, never>; result: KnowledgeBase[] };
+  /** 新建知识库。 */
+  'kb.create': { payload: { name: string; description: string }; result: KnowledgeBase };
+  /** 删除知识库（级联删 LanceDB 表和元数据目录）。 */
+  'kb.delete': { payload: { kbId: string }; result: { deleted: boolean } };
+  /** 获取知识库统计（docCount / chunkCount / embeddingModel）。 */
+  'kb.getStats': {
+    payload: { kbId: string };
+    result: { docCount: number; chunkCount: number; embeddingModel: string } | null;
+  };
+  /** 异步摄入一个来源；立即返回 jobId，进度通过事件通知。 */
+  'kb.addSource': { payload: AddSourcePayload; result: { jobId: string } };
+  /** 删除一个已摄入的文档及其 chunk。 */
+  'kb.removeDoc': { payload: { kbId: string; docId: string }; result: { removed: boolean } };
+  /** 向量检索。 */
+  'kb.query': {
+    payload: { kbId: string; query: string; topK?: number };
+    result: KnowledgeChunk[];
+  };
+  /** 列出知识库下的全部文档元数据。 */
+  'kb.listDocs': { payload: { kbId: string }; result: KnowledgeDoc[] };
 }
 
 /** `shell.openPath` 的可达集（主进程解成真路径）。 */
@@ -604,6 +638,15 @@ export interface EventMap {
   'config.changed': { config: ConfigSnapshot };
   /** 外部 Agent 工具探测状态变化（开始探测 / 探测完成）。 */
   'agentTools.changed': { snapshot: AgentToolsSnapshot };
+
+  // ── M12：知识库摄入进度事件 ──
+
+  /** 摄入任务分批处理进度（主进程 → 渲染）。 */
+  'kb.indexing.progress': IndexingProgressPayload;
+  /** 摄入任务完成（主进程 → 渲染）。 */
+  'kb.indexing.done': IndexingDonePayload;
+  /** 摄入任务失败（主进程 → 渲染）。 */
+  'kb.indexing.error': IndexingErrorPayload;
 
   /**
    * 「打开设置」从**菜单**发起（`文件 → 设置…` / `Ctrl+,`）。
