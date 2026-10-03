@@ -149,10 +149,29 @@ function ToolCard({ item }: { item: Extract<StreamItem, { kind: 'tool' }> }): Re
   );
 }
 
+/** 三点跳动动画，在引擎运行但尚无文本输出时显示。 */
+function ThinkingIndicator(): ReactElement {
+  return (
+    <div className="thinking-indicator" aria-label="正在思考" role="status">
+      <span />
+      <span />
+      <span />
+    </div>
+  );
+}
+
 export function MessageStream(): ReactElement {
   const { streams, focusPath, pending, current, agents } = useApp();
   const items = focusPath ? (streams[focusPath] ?? []) : [];
   const approvals = current ? pending.filter((p) => p.state === 'pending' && p.sessionId === current.record.id) : [];
+
+  // 引擎在跑但流尾还没有 pending 助手占位（发送→message.start 的空窗）时，
+  // 主动在流底部插入思考指示器。
+  const focusStatus = focusPath ? agents[focusPath]?.status : undefined;
+  const isRunning = focusStatus === 'running';
+  const lastItem = items[items.length - 1];
+  const hasPendingAssistant = lastItem?.kind === 'assistant' && lastItem.pending;
+  const showThinkingIndicator = isRunning && !hasPendingAssistant && approvals.length === 0;
   const focusName = focusPath ? (agents[focusPath]?.displayName ?? '') : '';
 
   return (
@@ -178,7 +197,7 @@ export function MessageStream(): ReactElement {
             return (
               <div className={item.pending ? 'assistant pending' : 'assistant'} key={item.id} data-smoke="assistant-msg">
                 {item.pending && !item.text
-                  ? <p>正在生成…</p>
+                  ? <ThinkingIndicator />
                   : <Prose text={item.text} />}
               </div>
             );
@@ -208,6 +227,9 @@ export function MessageStream(): ReactElement {
             return null;
         }
       })}
+
+      {/* running 且流尾没有 pending 助手消息时（发送→message.start 的空窗），显示思考指示器。 */}
+      {showThinkingIndicator ? <ThinkingIndicator /> : null}
 
       {approvals.map((p) => (
         <ApprovalCard request={p} key={p.requestId} />
