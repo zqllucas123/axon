@@ -6,8 +6,12 @@
   "main": "./dist/main.mjs",
   "dependencies": {
     "@axon/kernel": "workspace:*",
+    "@axon/knowledge": "workspace:*",
     "@axon/protocol": "workspace:*",
+    "@lancedb/lancedb": "0.14.0",
+    "cheerio": "1.0.0",
     "highlight.js": "11.10.0",
+    "mammoth": "1.9.0",
     "marked": "14.1.3"
   }
 }
