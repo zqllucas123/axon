@@ -20,6 +20,7 @@
 
 import type { RoleDefinition } from '@axon/protocol';
 import { ORCHESTRATION_TOOL_NAMES } from './orchestrator.ts';
+import { KB_TOOL_NAMES } from './kb-tools.ts';
 
 /** 只读工具集 —— 能看不能改。 */
 export const READ_ONLY = ['read', 'grep', 'glob', 'ls'];
@@ -32,8 +33,11 @@ export const READ_WRITE = [...READ_ONLY, 'edit', 'write', 'bash'];
  * 用户否决了推荐矩阵，取最大自由度——token 风险改由预算熔断（M3 §4.4）
  * 硬线冻结新活 + 树深上限 2（registry DEFAULT_MAX_DEPTH）两条底线兑住。
  * 用户自定义角色仍按自己的 tools 白名单自由裁剪（名字引用即授权，不引用即无）。
+ *
+ * M14：kb_search / kb_list 同样全员可用——知识检索是只读操作，没有副作用，
+ * 给所有角色都加上，让 Agent 能在任务中主动检索知识库。
  */
-const withOrchestration = (...tools: string[]) => [...tools, ...ORCHESTRATION_TOOL_NAMES];
+const withOrchestration = (...tools: string[]) => [...tools, ...ORCHESTRATION_TOOL_NAMES, ...KB_TOOL_NAMES];
 
 export const BUILTIN_ROLES: RoleDefinition[] = [
   {

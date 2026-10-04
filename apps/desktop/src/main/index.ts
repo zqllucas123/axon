@@ -49,7 +49,8 @@ import { ALL_ROLES } from './roles.ts';
 import { BUILTIN_TEAMS } from './teams.ts';
 import { RoleBridge } from './role-bridge.ts';
 import { TeamBridge } from './team-bridge.ts';
-import { KnowledgeBridge } from './knowledge-bridge.ts';
+import { KnowledgeBridge, makeKnowledgeManager } from './knowledge-bridge.ts';
+import { createKbSearchTool, createKbListTool } from './kb-tools.ts';
 import { ProjectStore } from './project-store.ts';
 import { ConfigStore } from './config-store.ts';
 import { AgentToolsRegistry, KNOWN_AGENT_TOOLS, userSearchPath } from './agent-tools.ts';
@@ -398,7 +399,7 @@ function smokeReply(text: string): unknown {
 }
 const smokeCalls = new Map<string, number>();
 
-async function createHost(config: AxonConfig): Promise<AxonHost> {
+async function createHost(config: AxonConfig, kbManager?: import('@axon/knowledge').KnowledgeManager): Promise<AxonHost> {
   const { source: modelSource, label } = await createModelSource(config);
   console.log(`[desktop] model source: ${label}`);
 
@@ -446,7 +447,10 @@ async function createHost(config: AxonConfig): Promise<AxonHost> {
     ...(config.defaultApproval !== undefined ? { defaultApproval: config.defaultApproval } : {}),
     ...(config.defaultCwd !== undefined ? { defaultCwd: config.defaultCwd } : {}),
     ...(config.defaultExecutor !== undefined ? { defaultExecutor: config.defaultExecutor } : {}),
-    ...(SMOKE ? { tools: [smokeEchoTool()] } : {}),
+    tools: [
+      ...(SMOKE ? [smokeEchoTool()] : []),
+      ...(kbManager ? [createKbSearchTool(kbManager), createKbListTool(kbManager)] : []),
+    ],
     emit: (event, payload, sourcePath) => emitBridgeEvent(event, payload, sourcePath),
   });
 }
@@ -580,11 +584,20 @@ app.whenReady().then(async () => {
   await configStore.load();
   const rawConfig = configStore.rawConfig();
 
-  host = await createHost(rawConfig);
+  // M14：在 createHost 之前创建 KnowledgeManager，这样 kb 工具可以在构造时注入
+  // host universe（AxonHost.tools 是 readonly，只能在 new 时传入）。
+  // 冒烟模式跳过（避免依赖真实 LanceDB 目录）。
+  const providerCfg = rawConfig.provider ?? {};
+  const kbEndpoint = (providerCfg as { baseUrl?: string }).baseUrl;
+  const kbApiKey = (providerCfg as { apiKey?: string }).apiKey;
+  let kbManager: import('@axon/knowledge').KnowledgeManager | null = null;
+  if (kbEndpoint && kbApiKey && !SMOKE) {
+    kbManager = makeKnowledgeManager(kbEndpoint, kbApiKey);
+  }
+
+  host = await createHost(rawConfig, kbManager ?? undefined);
   roleBridge = new RoleBridge({ dir: ROLES_DIR, builtinRoles: EFFECTIVE_ROLES, host });
   await roleBridge.init();
-  // 团队在角色之后加载：`validateTeam` 要按角色表解 tools/approval，
-  // 角色还没就位时会整批报 role-not-found（假红条）。
   teamBridge = new TeamBridge({
     dir: TEAMS_DIR,
     builtinTeams: BUILTIN_TEAMS,
@@ -598,20 +611,16 @@ app.whenReady().then(async () => {
     void teamBridge?.revalidate();
   });
 
-  // M13：知识库 bridge（仅当配置有 endpoint + apiKey 时启用）。
-  // AXON_KNOWLEDGE_DIR 供冒烟/测试隔离。
-  const providerCfg = rawConfig.provider ?? {};
-  const kbEndpoint = (providerCfg as { baseUrl?: string }).baseUrl;
-  const kbApiKey = (providerCfg as { apiKey?: string }).apiKey;
-  if (kbEndpoint && kbApiKey && !SMOKE) {
+  // M14：知识库 bridge（使用 createHost 之前预创建的 kbManager）。
+  // kbManager 为 null 时（冒烟/未配置）注册空 stub，使 kb.* 命令返回空结果。
+  if (kbManager) {
     knowledgeBridge = new KnowledgeBridge(
       ipcMain,
       () => win?.webContents ?? null,
-      kbEndpoint,
-      kbApiKey,
+      kbManager,
     );
     knowledgeBridge.register();
-    console.log('[desktop] KnowledgeBridge 已注册');
+    console.log('[desktop] KnowledgeBridge 已注册，kb 工具已注入 host');
   } else {
     // 冒烟/未配置时注册空 stub，使 kb.* 命令返回空结果而不是 ENOENT。
     ipcMain.handle('axon:kb.list', async () => []);

@@ -45,9 +45,9 @@ export class KnowledgeManager {
   private readonly meta: KbMetaStore;
   private readonly store: KnowledgeStore;
   private readonly embedder: Embedder;
-  private readonly onProgress?: ProgressCallback;
-  private readonly onDone?: DoneCallback;
-  private readonly onError?: ErrorCallback;
+  private onProgress?: ProgressCallback;
+  private onDone?: DoneCallback;
+  private onError?: ErrorCallback;
 
   constructor(opts: KnowledgeManagerOptions) {
     this.meta = new KbMetaStore(opts.baseDir);
@@ -56,6 +56,13 @@ export class KnowledgeManager {
     this.onProgress = opts.onProgress;
     this.onDone = opts.onDone;
     this.onError = opts.onError;
+  }
+
+  /** 运行时绑定进度回调（主进程 KnowledgeBridge 在 getSender 就绪后调用）。 */
+  setCallbacks(cbs: { onProgress?: ProgressCallback; onDone?: DoneCallback; onError?: ErrorCallback }): void {
+    if (cbs.onProgress) this.onProgress = cbs.onProgress;
+    if (cbs.onDone) this.onDone = cbs.onDone;
+    if (cbs.onError) this.onError = cbs.onError;
   }
 
   // ── KB CRUD ───────────────────────────────────────────────────
