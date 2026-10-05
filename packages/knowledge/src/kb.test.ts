@@ -74,7 +74,7 @@ describe('KbMetaStore', () => {
     await store.addDoc({
       id: 'doc-2',
       kbId: kb.id,
-      sourceType: 'html',
+      sourceType: 'web',
       sourceRef: 'http://example.com',
       title: '页面',
       chunkCount: 10,

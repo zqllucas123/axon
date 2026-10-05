@@ -18,8 +18,12 @@ export interface KnowledgeBase {
   embeddingModel: string;
 }
 
-/** 来源类型 */
-export type KnowledgeSourceType = 'html' | 'docx' | 'md' | 'repo';
+/**
+ * 来源类型。
+ * `web` 是远程网页：给 URL，由主进程抓取正文。本地 .html 文件也走这条，
+ * 因为解析器同一个，区别只在内容从网络还是磁盘来。
+ */
+export type KnowledgeSourceType = 'web' | 'docx' | 'md' | 'repo';
 
 /** 已摄入的来源文档（不存原始内容，只存元数据）。 */
 export interface KnowledgeDoc {

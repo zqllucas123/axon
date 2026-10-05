@@ -138,7 +138,7 @@ async function waitForDocCount(
 async function waitForIngest(
   manager: KnowledgeManager,
   kbId: string,
-  sourceType: 'md' | 'html' | 'docx' | 'repo',
+  sourceType: 'md' | 'web' | 'docx' | 'repo',
   sourceRef: string,
   timeoutMs = 5000,
 ): Promise<void> {

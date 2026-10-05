@@ -13,10 +13,10 @@ import { useApp } from '../state/store.tsx';
 import { Icon } from '../icons.tsx';
 import type { KnowledgeBase, KnowledgeChunk, KnowledgeDoc } from '@axon/protocol';
 
-type SourceType = 'html' | 'docx' | 'md' | 'repo';
+type SourceType = 'web' | 'docx' | 'md' | 'repo';
 
 const SOURCE_LABELS: Record<SourceType, string> = {
-  html: '网页（URL 或本地 HTML）',
+  web: '网页（粘贴网址，自动抓取正文）',
   docx: 'Word 文档（.docx）',
   md: 'Markdown 文件（.md）',
   repo: '代码仓库（目录路径）',
@@ -121,7 +121,7 @@ function AddSourceDialog({ kbId, onClose }: { kbId: string; onClose: () => void 
                 className={`s4-type-btn${sourceType === t ? ' is-active' : ''}`}
                 onClick={() => setSourceType(t)}
               >
-                {t === 'html' ? <Icon name="link" size={16} /> : t === 'repo' ? <Icon name="branch" size={16} /> : <Icon name="file" size={16} />}
+                {t === 'web' ? <Icon name="link" size={16} /> : t === 'repo' ? <Icon name="branch" size={16} /> : <Icon name="file" size={16} />}
                 <span>{t}</span>
               </button>
             ))}
@@ -129,15 +129,20 @@ function AddSourceDialog({ kbId, onClose }: { kbId: string; onClose: () => void 
           <div className="s4-type-hint">{SOURCE_LABELS[sourceType]}</div>
 
           <label className="field-label" style={{ marginTop: 12 }}>
-            {sourceType === 'html' ? 'URL 或本地 HTML 文件路径' : '文件或目录绝对路径'}
+            {sourceType === 'web' ? '网页地址' : '文件或目录绝对路径'}
           </label>
           <input
             className="field-input"
             value={sourceRef}
             onChange={(e) => setSourceRef(e.target.value)}
-            placeholder={sourceType === 'html' ? 'https://… 或 /path/to/file.html' : '/absolute/path/to/…'}
+            placeholder={sourceType === 'web' ? 'https://example.com/article' : '/absolute/path/to/…'}
             onKeyDown={(e) => { if (e.key === 'Enter') void submit(); }}
           />
+          {sourceType === 'web' ? (
+            <div className="s4-type-hint" style={{ marginTop: 6 }}>
+              抓取页面正文后嵌入；也可填本地 .html 文件路径。
+            </div>
+          ) : null}
           {err ? <div className="field-err" role="alert">{err}</div> : null}
         </div>
         <div className="dialog-foot">
@@ -246,7 +251,7 @@ function KbDetail({ kb, onBack }: { kb: KnowledgeBase; onBack: () => void }): Re
         <div className="s4-doc-list">
           {docs.map((doc) => (
             <div key={doc.id} className="s4-doc-row">
-              <Icon name={doc.sourceType === 'html' ? 'link' : doc.sourceType === 'repo' ? 'branch' : 'file'} size={14} />
+              <Icon name={doc.sourceType === 'web' ? 'link' : doc.sourceType === 'repo' ? 'branch' : 'file'} size={14} />
               <div className="s4-doc-info">
                 <span className="s4-doc-title">{doc.title}</span>
                 <span className="s4-doc-meta">{doc.sourceRef} · {doc.chunkCount} 块 · {new Date(doc.indexedAt).toLocaleDateString()}</span>
