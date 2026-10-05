@@ -47,53 +47,73 @@ export class KnowledgeBridge {
     });
   }
 
-  register(): void {
-    const { ipcMain, mgr } = this;
-
-    ipcMain.handle('axon:kb.list', async () => mgr.listKbs());
-
-    ipcMain.handle('axon:kb.create', async (_e, payload: { name: string; description: string }) =>
-      mgr.createKb(payload.name, payload.description),
-    );
-
-    ipcMain.handle('axon:kb.delete', async (_e, payload: { kbId: string }) => {
-      await mgr.deleteKb(payload.kbId);
-      return { deleted: true };
-    });
-
-    ipcMain.handle('axon:kb.getStats', async (_e, payload: { kbId: string }) => {
-      const kb = await mgr.getKb(payload.kbId);
-      if (!kb) return null;
-      return { docCount: kb.docCount, chunkCount: kb.chunkCount, embeddingModel: kb.embeddingModel };
-    });
-
-    ipcMain.handle('axon:kb.addSource', async (_e, payload: AddSourcePayload) => ({
-      jobId: mgr.addSource(payload.kbId, payload.sourceType, payload.sourceRef),
-    }));
-
-    ipcMain.handle('axon:kb.removeDoc', async (_e, payload: { kbId: string; docId: string }) => {
-      await mgr.removeDoc(payload.kbId, payload.docId);
-      return { removed: true };
-    });
-
-    ipcMain.handle(
-      'axon:kb.query',
-      async (_e, payload: { kbId: string; query: string; topK?: number }) =>
-        mgr.query(payload.kbId, payload.query, payload.topK ?? 5),
-    );
-
-    ipcMain.handle('axon:kb.listDocs', async (_e, payload: { kbId: string }) =>
-      mgr.listDocs(payload.kbId),
-    );
+  /**
+   * 信封通道分发（M14 修复）。
+   *
+   * 渲染层所有命令都走 IPC_COMMAND_CHANNEL 单一信封通道，不存在
+   * `axon:kb.*` 这种独立通道 —— 之前按独立通道注册等于没接线，
+   * 命令会一路落到 host dispatch 的 default 分支报「未实现的命令」。
+   *
+   * 返回 undefined 表示「不是 kb 命令」，由调用方继续往下路由。
+   */
+  async handle(command: string, payload: unknown): Promise<unknown> {
+    const mgr = this.mgr;
+    switch (command) {
+      case 'kb.list':
+        return mgr.listKbs();
+      case 'kb.create': {
+        const p = payload as { name: string; description?: string };
+        return mgr.createKb(p.name, p.description ?? '');
+      }
+      case 'kb.delete': {
+        const p = payload as { kbId: string };
+        await mgr.deleteKb(p.kbId);
+        return { deleted: true };
+      }
+      case 'kb.getStats': {
+        const p = payload as { kbId: string };
+        const kb = await mgr.getKb(p.kbId);
+        if (!kb) return null;
+        return {
+          docCount: kb.docCount,
+          chunkCount: kb.chunkCount,
+          embeddingModel: kb.embeddingModel,
+        };
+      }
+      case 'kb.addSource': {
+        const p = payload as AddSourcePayload;
+        return { jobId: mgr.addSource(p.kbId, p.sourceType, p.sourceRef) };
+      }
+      case 'kb.removeDoc': {
+        const p = payload as { kbId: string; docId: string };
+        await mgr.removeDoc(p.kbId, p.docId);
+        return { removed: true };
+      }
+      case 'kb.query': {
+        const p = payload as { kbId: string; query: string; topK?: number };
+        return mgr.query(p.kbId, p.query, p.topK);
+      }
+      case 'kb.listDocs': {
+        const p = payload as { kbId: string };
+        return mgr.listDocs(p.kbId);
+      }
+      default:
+        return undefined;
+    }
   }
 
-  unregister(): void {
-    for (const ch of [
-      'axon:kb.list', 'axon:kb.create', 'axon:kb.delete', 'axon:kb.getStats',
-      'axon:kb.addSource', 'axon:kb.removeDoc', 'axon:kb.query', 'axon:kb.listDocs',
-    ]) {
-      this.ipcMain.removeHandler(ch);
-    }
+  /**
+   * 把摄入管道的三个回调接到渲染层事件通道上。
+   *
+   * 命令走 `handle()`（信封通道），这里只管事件方向：
+   * 摄入是异步长任务，进度得主动推给 S4 屏的进度条。
+   */
+  bindEvents(): void {
+    this.mgr.setCallbacks({
+      onProgress: (job) => this._emit('kb.indexing.progress', job),
+      onDone: (job) => this._emit('kb.indexing.done', job),
+      onError: (job) => this._emit('kb.indexing.error', job),
+    });
   }
 
   private _emit(event: string, payload: unknown): void {

@@ -255,6 +255,17 @@ export function AppProvider({ children }: { children: ReactNode }): ReactElement
     }
   }, []);
 
+  /**
+   * 表单用的 invoke 通道：**把错误抛给调用方**，由表单就地显示。
+   *
+   * 和 `call` 的分工：`call` 面向「用户没在等结果」的后台意图，错误归集到顶部红条；
+   * `callStrict` 面向对话框提交这类「用户正盯着表单等反馈」的意图 —— 错误必须出现在
+   * 提交按钮旁边，而不是飘到顶部，也不该让表单编一句猜测性的兜底文案。
+   */
+  const callStrict = useCallback(async function run<T>(fn: () => Promise<T>): Promise<T> {
+    return await fn();
+  }, []);
+
   const streamsRef = useRef(streams);
   streamsRef.current = streams;
   /** 已回放过的路径：回放只做一次（之后全靠事件增量），切焦点回来不重拉。 */
@@ -1063,11 +1074,11 @@ export function AppProvider({ children }: { children: ReactNode }): ReactElement
 
   const createKb = useCallback(
     async (name: string, description: string) => {
-      const kb = await call(() => window.axon.invoke('kb.create', { name, description }));
+      const kb = await callStrict(() => window.axon.invoke('kb.create', { name, description }));
       if (kb) setKbs((prev) => (prev.some((k) => k.id === kb.id) ? prev : [...prev, kb]));
       return kb;
     },
-    [call],
+    [callStrict],
   );
 
   const deleteKb = useCallback(
@@ -1080,7 +1091,7 @@ export function AppProvider({ children }: { children: ReactNode }): ReactElement
 
   const addKbSource = useCallback(
     async (kbId: string, sourceType: string, sourceRef: string): Promise<string | null> => {
-      const res = await call(() =>
+      const res = await callStrict(() =>
         window.axon.invoke('kb.addSource', {
           kbId,
           sourceType: sourceType as import('@axon/protocol').KnowledgeSourceType,
@@ -1089,7 +1100,7 @@ export function AppProvider({ children }: { children: ReactNode }): ReactElement
       );
       return res?.jobId ?? null;
     },
-    [call],
+    [callStrict],
   );
 
   const removeKbDoc = useCallback(

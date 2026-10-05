@@ -619,19 +619,11 @@ app.whenReady().then(async () => {
       () => win?.webContents ?? null,
       kbManager,
     );
-    knowledgeBridge.register();
-    console.log('[desktop] KnowledgeBridge 已注册，kb 工具已注入 host');
-  } else {
-    // 冒烟/未配置时注册空 stub，使 kb.* 命令返回空结果而不是 ENOENT。
-    ipcMain.handle('axon:kb.list', async () => []);
-    ipcMain.handle('axon:kb.create', async () => null);
-    ipcMain.handle('axon:kb.delete', async () => ({ deleted: false }));
-    ipcMain.handle('axon:kb.getStats', async () => null);
-    ipcMain.handle('axon:kb.addSource', async () => ({ jobId: '' }));
-    ipcMain.handle('axon:kb.removeDoc', async () => ({ removed: false }));
-    ipcMain.handle('axon:kb.query', async () => []);
-    ipcMain.handle('axon:kb.listDocs', async () => []);
+    knowledgeBridge.bindEvents();
+    console.log('[desktop] KnowledgeBridge 已就绪，kb 工具已注入 host');
   }
+  // kbManager 为 null 时不建 bridge —— 信封处理器里 kb.* 会返回
+  // 「知识库未启用」的结构化错误，由 S4 屏提示用户去配 Provider。
 
   // 项目层：独立于会话存储的项目元数据（一项目一文件）。
   // host 只需要「projectId → cwd」解析器来固化项目会话的工作空间。
@@ -740,6 +732,31 @@ app.whenReady().then(async () => {
             (request.payload as { name: string }).name,
           );
           return { id: request.id, ok: true, result };
+        }
+
+        // 知识库层（M14）：kb.* 统一走 KnowledgeBridge.handle。
+        //
+        // 未配置 provider 时 knowledgeBridge 为 null，此时读写分流：
+        // **读**（list/listDocs/query）降级为空结果 —— S4 屏首屏就会拉 kb.list，
+        // 这里抛错会让用户一进屏就吃一条红条，而「还没有知识库」才是真实状态；
+        // **写**（create/addSource/...）必须抛错 —— 用户正等着表单反馈，静默失败
+        // 会让人以为建成了。错误消息直接指向该去改什么。
+        if (request.command.startsWith('kb.')) {
+          if (!knowledgeBridge) {
+            if (request.command === 'kb.list' || request.command === 'kb.listDocs' || request.command === 'kb.query') {
+              return { id: request.id, ok: true, result: [] as never };
+            }
+            return {
+              id: request.id,
+              ok: false,
+              error: {
+                code: 'kb-unavailable',
+                message: '知识库未启用：请先在设置里配置 Provider 的 baseUrl 与 apiKey',
+              },
+            };
+          }
+          const result = await knowledgeBridge.handle(request.command, request.payload);
+          return { id: request.id, ok: true, result: result as never };
         }
 
         // 项目层：ProjectStore（文件 IO）。create 成功后 watch 会补发 projects.changed，

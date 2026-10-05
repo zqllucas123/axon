@@ -34,10 +34,15 @@ function CreateKbDialog({ onClose }: { onClose: () => void }): ReactElement {
   const submit = useCallback(async () => {
     if (!name.trim()) { setErr('请输入知识库名称'); return; }
     setSaving(true);
-    const kb = await createKb(name.trim(), desc.trim());
-    setSaving(false);
-    if (kb) onClose();
-    else setErr('创建失败，请检查配置中的 API 端点');
+    setErr('');
+    try {
+      await createKb(name.trim(), desc.trim());
+      onClose();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSaving(false);
+    }
   }, [createKb, name, desc, onClose]);
 
   return (
@@ -89,10 +94,15 @@ function AddSourceDialog({ kbId, onClose }: { kbId: string; onClose: () => void 
   const submit = useCallback(async () => {
     if (!sourceRef.trim()) { setErr('请输入路径或 URL'); return; }
     setSubmitting(true);
-    const jobId = await addKbSource(kbId, sourceType, sourceRef.trim());
-    setSubmitting(false);
-    if (jobId) onClose();
-    else setErr('摄入请求失败');
+    setErr('');
+    try {
+      await addKbSource(kbId, sourceType, sourceRef.trim());
+      onClose();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSubmitting(false);
+    }
   }, [addKbSource, kbId, sourceType, sourceRef, onClose]);
 
   return (
