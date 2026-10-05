@@ -588,11 +588,17 @@ app.whenReady().then(async () => {
   // host universe（AxonHost.tools 是 readonly，只能在 new 时传入）。
   // 冒烟模式跳过（避免依赖真实 LanceDB 目录）。
   const providerCfg = rawConfig.provider ?? {};
-  const kbEndpoint = (providerCfg as { baseUrl?: string }).baseUrl;
-  const kbApiKey = (providerCfg as { apiKey?: string }).apiKey;
+  // AXON_KB_EMBED_* 供端到端测试把 embedding 指向本地桩服务（照 AXON_KNOWLEDGE_DIR 的惯例）。
+  const kbEndpoint =
+    process.env.AXON_KB_EMBED_ENDPOINT || (providerCfg as { baseUrl?: string }).baseUrl;
+  const kbApiKey =
+    process.env.AXON_KB_EMBED_KEY || (providerCfg as { apiKey?: string }).apiKey;
+  const kbModel = process.env.AXON_KB_EMBED_MODEL;
   let kbManager: import('@axon/knowledge').KnowledgeManager | null = null;
   if (kbEndpoint && kbApiKey && !SMOKE) {
-    kbManager = makeKnowledgeManager(kbEndpoint, kbApiKey);
+    kbManager = kbModel
+      ? makeKnowledgeManager(kbEndpoint, kbApiKey, kbModel)
+      : makeKnowledgeManager(kbEndpoint, kbApiKey);
   }
 
   host = await createHost(rawConfig, kbManager ?? undefined);

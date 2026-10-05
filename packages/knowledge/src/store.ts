@@ -71,7 +71,9 @@ export class KnowledgeStore {
     const client = await this.connect();
     const table: Table = await client.openTable(this._tableName(kbId));
 
-    const rows = await table.vectorSearch(vector).limit(topK).toArray();
+    // 必须显式指定 cosine：LanceDB 默认 L2，而归一化向量的 L2² = 2−2cos ∈ [0,4]，
+    // 落进 _distanceToSimilarity 的 `>= 1 → 0` 分支后所有 score 一律归零（实测全 0.000）。
+    const rows = await table.vectorSearch(vector).distanceType('cosine').limit(topK).toArray();
 
     return rows.map((row) => ({
       chunkId: row.chunkId as string,

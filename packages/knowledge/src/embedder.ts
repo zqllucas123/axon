@@ -36,7 +36,12 @@ export class OpenAICompatEmbedder implements Embedder {
   async embed(texts: string[]): Promise<number[][]> {
     if (texts.length === 0) return [];
     const { endpoint, apiKey, model, batchSize } = this.cfg;
-    const url = endpoint.replace(/\/$/, '') + '/v1/embeddings';
+    // endpoint 按 OpenAI SDK 惯例**已含版本段**（config.provider.baseUrl 形如
+    // `https://host/path/v1`），所以这里只拼 `/embeddings`。写成 `/v1/embeddings`
+    // 会拼出 `/v1/v1/embeddings` → 404，而摄入链路把它报成笼统的
+    // 「Embedding API error 404」。对没带版本段的 endpoint 兜底补上。
+    const base = endpoint.replace(/\/$/, '');
+    const url = /\/v\d+$/.test(base) ? `${base}/embeddings` : `${base}/v1/embeddings`;
 
     const result: number[][] = [];
     for (let i = 0; i < texts.length; i += batchSize) {

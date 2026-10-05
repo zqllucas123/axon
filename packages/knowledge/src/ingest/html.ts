@@ -23,11 +23,24 @@ const NOISE_SELECTORS = [
   '[aria-hidden="true"]', '[hidden]', '[role="navigation"]',
   '[role="banner"]', '[role="contentinfo"]', '[role="search"]',
   '.ad', '.advertisement', '.sidebar', '.comments', '.cookie-banner',
+  // 微信公众号：页面自带一堆常驻隐藏弹层（扫码关注、"预览时标签不可点"、
+  // 小程序跳转的"取消/允许"），它们不在 nav/footer 里，退回 body 时会被
+  // 当成正文嵌入。公众号是本地知识库的高频来源，值得单独列。
+  '.weui-dialog', '.weui-mask', '.weui-toast', '.weui-actionsheet',
+  '#js_pc_qr_code', '.qr_code_pc', '.reward_area', '.js_tags',
+  '.rich_media_area_extra', '.discuss_container', '.media_tool_meta',
+  '.weui-half-screen-dialog', '.js_dialog_bg',
 ];
 
-/** 正文容器候选，从最可信排到最宽松。 */
+/**
+ * 正文容器候选，从最可信排到最宽松。
+ * 带站点专属选择器是必要的妥协：公众号页面没有 `<main>`/`<article>`，
+ * 正文只在 `#js_content` 里，靠通用规则会退回 body 并吃进整页弹层。
+ */
 const CONTENT_SELECTORS = [
-  'main', 'article', '[role="main"]', '#content', '.content',
+  'main', 'article', '[role="main"]',
+  '#js_content', '.rich_media_content',  // 微信公众号
+  '#content', '.content',
   '.markdown-body', '.post-content', '.article-content',
 ];
 

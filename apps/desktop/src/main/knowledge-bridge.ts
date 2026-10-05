@@ -116,9 +116,20 @@ export class KnowledgeBridge {
     });
   }
 
+  /**
+   * 发事件 —— 必须套 NotificationEnvelope。
+   *
+   * preload 的 `subscribe` 读的是 `envelope.payload`（见 preload/index.ts），
+   * 裸发 payload 会让渲染层每个 handler 都收到 `undefined`：表现为进度条
+   * 不动 + 控制台 `Cannot read properties of undefined (reading 'jobId')`，
+   * 而主进程一切正常，极难定位。
+   */
   private _emit(event: string, payload: unknown): void {
     const sender = this.getSender();
     if (!sender || sender.isDestroyed()) return;
-    sender.send(ipcEventChannel(event as Parameters<typeof ipcEventChannel>[0]), payload);
+    sender.send(ipcEventChannel(event as Parameters<typeof ipcEventChannel>[0]), {
+      payload,
+      at: Date.now(),
+    });
   }
 }
