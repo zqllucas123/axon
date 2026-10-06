@@ -27,7 +27,7 @@ export const KNOWLEDGE_DIR =
 export function makeKnowledgeManager(
   endpointUrl: string,
   apiKey: string,
-  model = 'text-embedding-3-small',
+  model = 'qwen3.7-text-embedding',
 ): KnowledgeManager {
   const embedder = new OpenAICompatEmbedder({ endpoint: endpointUrl, apiKey, model });
   return new KnowledgeManager({ baseDir: KNOWLEDGE_DIR, embedder });
