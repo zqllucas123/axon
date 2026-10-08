@@ -279,17 +279,23 @@ export function S0NewSession(): ReactElement {
                   <span className="context-detail">工作分支</span>
                 </span>
               ) : null}
-              {project ? null : (
-                <button
-                  className="icon-btn"
-                  onClick={() => void chooseWorkspace()}
-                  title="切换工作目录"
-                  aria-label="切换工作目录"
-                  data-smoke="session-cwd-add"
-                >
-                  <Icon name="plus" size={14} />
-                </button>
-              )}
+              {/* 已选团队：和目录/分支同处一枚胶囊，复用 .cwd-item 的竖分隔线。
+                  点 × 清除时把模式拨回 engine —— 否则会留下「team 模式但没有团队」的
+                  卡死态（ready 恒为 false，发送按钮禁用且没有说明）。 */}
+              {needTeam && teamId ? (
+                <span className="cwd-item" data-smoke="selected-team">
+                  <Icon name="users" size={14} />
+                  <span className="context-label">{teamId}</span>
+                  <button
+                    className="icon-btn"
+                    onClick={() => { setTeamId(null); setPicked('engine'); }}
+                    title="取消选择团队"
+                    aria-label={`取消选择团队 ${teamId}`}
+                  >
+                    <Icon name="x" size={12} />
+                  </button>
+                </span>
+              ) : null}
             </div>
           </div>
 
