@@ -16,10 +16,12 @@ directories:
 files:
   - "**/*"
 
-# pi-ai 在运行时用动态 import 懒加载 44 个 provider。
-# asarUnpack 把整个 @earendil-works/** 解包为真实文件，彻底规避 asar 虚拟路径限制。
+# ESM import 走 Node 原生 loader，不认 asar 虚拟路径——external 包必须全部解包到
+# app.asar.unpacked/node_modules/ 下，否则 main.mjs 的顶层 import 在启动时即崩溃。
+# 规则：node_modules/** 全部解包（含 undici、openai、typebox 等传递依赖）。
+# 之前只列 @earendil-works/**，导致 undici 等被打进 asar，ESM loader 找不到。
 asarUnpack:
-  - node_modules/@earendil-works/**
+  - node_modules/**
 
 mac:
   target:
