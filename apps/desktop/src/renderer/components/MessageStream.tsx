@@ -17,25 +17,10 @@
 
 import { useState, type ReactElement } from 'react';
 import { useApp } from '../state/store.tsx';
-import { Icon, type IconName } from '../icons.tsx';
+import { Icon } from '../icons.tsx';
 import { inlineSegments, parseProse, type StreamItem } from '../state/selectors.ts';
 // 审批/提问卡与 S5 收件箱共用一张（MU-3 切片 2.5 抽到 parts/）。
 import { ApprovalCard } from './parts/ApprovalCard.tsx';
-
-/** 工具名 → 图标（对齐原型：read_file=file / bash=terminal / edit=pen…）。 */
-const TOOL_ICONS: Record<string, IconName> = {
-  read_file: 'file',
-  write_file: 'pen',
-  edit_file: 'pen',
-  replace_in_file: 'pen',
-  list_files: 'folder',
-  glob: 'search',
-  grep: 'search',
-  bash: 'terminal',
-  shell: 'terminal',
-  agent: 'branch',
-  spawn_agent: 'branch',
-};
 
 /** 长输出截断（原型只有固定高度，滚动查看；截断避免 DOM 里塞整篇文件）。 */
 const CLIP = 1600;
@@ -44,9 +29,17 @@ function clip(text: string): string {
   return text.length > CLIP ? `${text.slice(0, CLIP)}\n…（已截断 ${text.length - CLIP} 字符）` : text;
 }
 
-function lines(text: string): number {
-  return text.trim() ? text.trim().split('\n').length : 0;
-}
+/**
+ * 工具四态 → 前置状态点。复用 components.css 既有 `.dot-*` 家族（与 S2 子任务面板同
+ * 一套语义色）：绿=成功 / 红=失败 / 蓝脉冲=进行中 / 灰=未记录结果。只上色不写字，
+ * 文字进 title/aria（去掉右侧 `ok · N 行` 标签，见截图反馈）。
+ */
+const TOOL_STATE: Record<'running' | 'ok' | 'err' | 'lost', { dot: string; label: string }> = {
+  ok: { dot: 'dot dot-done', label: '执行成功' },
+  err: { dot: 'dot dot-failed', label: '执行失败' },
+  running: { dot: 'dot dot-running', label: '执行中' },
+  lost: { dot: 'dot dot-idle', label: '未记录结果' },
+};
 
 /** 行内 `code` 片段（原型正文里的 <code>）。 */
 function Inline({ text }: { text: string; key?: string }): ReactElement {
@@ -94,11 +87,20 @@ function ToolCard({ item }: { item: Extract<StreamItem, { kind: 'tool' }> }): Re
   const state =
     item.state === 'lost' && (agentStatus === 'running' || agentStatus === 'waiting') ? 'running' : item.state;
   const done = state !== 'running';
-  // 工具详情默认收起：只有存在结果体、且用户点击卡头时才展开（见截图反馈）。
+  /**
+   * 工具详情默认收起：只有存在结果体、且用户点击卡头时才展开（见截图反馈）。
+   * 卡头保持**整行可点 + 手型光标**（`.card-head.toggle`），折叠箭头只做可展开提示，
+   * 不缩小点击热区。
+   */
   const [open, setOpen] = useState(false);
   const hasBody = done && !!item.result;
   return (
-    <div className={state === 'err' ? 'card err' : 'card'} data-smoke="tool-card" data-tool={item.name}>
+    <div
+      className={state === 'err' ? 'card err' : 'card'}
+      data-smoke="tool-card"
+      data-tool={item.name}
+      data-state={state}
+    >
       <div
         className={hasBody ? 'card-head toggle' : 'card-head'}
         role={hasBody ? 'button' : undefined}
@@ -116,20 +118,15 @@ function ToolCard({ item }: { item: Extract<StreamItem, { kind: 'tool' }> }): Re
             : undefined
         }
       >
+        <span
+          className={TOOL_STATE[state].dot}
+          title={TOOL_STATE[state].label}
+          aria-label={TOOL_STATE[state].label}
+          role="img"
+        />
         {hasBody ? <Icon name={open ? 'chevD' : 'chevR'} size={14} /> : null}
-        <Icon name={TOOL_ICONS[item.name] ?? 'terminal'} size={16} />
         <span className="name">{item.name}</span>
         {item.args ? <span className="path">{item.args}</span> : null}
-        <span className="spacer" />
-        <span className={state === 'ok' ? 'tag ok' : state === 'err' ? 'tag err' : state === 'running' ? 'tag run' : 'tag'}>
-          {state === 'ok'
-            ? `ok · ${lines(item.result)} 行`
-            : state === 'err'
-              ? '失败'
-              : state === 'running'
-                ? 'running'
-                : '未记录结果'}
-        </span>
       </div>
       {hasBody && open ? <div className="card-body mono">{clip(item.result)}</div> : null}
       {state === 'running' ? (
