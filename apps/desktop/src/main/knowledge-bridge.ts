@@ -21,16 +21,49 @@ export const KNOWLEDGE_DIR =
   process.env.AXON_KNOWLEDGE_DIR || join(homedir(), '.axon', 'knowledge');
 
 /**
+ * 一个可用的向量端点 = 某个 provider 的 baseUrl/apiKey + 它挂着的向量模型名。
+ *
+ * 之所以是「端点+模型」成对给出而不是拆成两组参数：跨网关时模型名无法寻址
+ * （两个网关挂同名模型是常态），配对交给配置侧（`resolveEmbeddingModels`）
+ * 一次算清，这里只消费结论。
+ */
+export interface EmbeddingTarget {
+  model: string;
+  endpoint: string;
+  apiKey: string;
+}
+
+/**
  * 创建 KnowledgeManager（不含进度回调）。
  * 进度回调在 KnowledgeBridge 构造时绑定（那时 getSender 才有 WebContents）。
+ *
+ * `targets[0]` 是默认 embedder（全局向量模型）；其余供单个知识库覆盖 —— 没有
+ * `embedderFactory` 的话 `KnowledgeManager._embedderFor` 会把任何 KB 级覆盖都
+ * 吞掉回落默认，S4 那支「向量模型」下拉就只是个改标签的假控件。
  */
-export function makeKnowledgeManager(
-  endpointUrl: string,
-  apiKey: string,
-  model = 'qwen3.7-text-embedding',
-): KnowledgeManager {
-  const embedder = new OpenAICompatEmbedder({ endpoint: endpointUrl, apiKey, model });
-  return new KnowledgeManager({ baseDir: KNOWLEDGE_DIR, embedder });
+export function makeKnowledgeManager(opts: {
+  targets: readonly EmbeddingTarget[];
+  baseDir?: string;
+}): KnowledgeManager {
+  const first = opts.targets[0];
+  if (!first) throw new Error('makeKnowledgeManager 需要至少一个向量目标');
+  const embedder = new OpenAICompatEmbedder({
+    endpoint: first.endpoint,
+    apiKey: first.apiKey,
+    model: first.model,
+  });
+  const byModel = new Map(opts.targets.map((t) => [t.model, t]));
+  return new KnowledgeManager({
+    baseDir: opts.baseDir ?? KNOWLEDGE_DIR,
+    embedder,
+    embedderFactory: (model) => {
+      const t = byModel.get(model);
+      // 名字对不上任何目标（手写的历史值 / 模型已被删）：回落默认，让维度不匹配
+      // 在查询时才暴露，而不是让摄入当场失败。
+      if (!t) return embedder;
+      return new OpenAICompatEmbedder({ endpoint: t.endpoint, apiKey: t.apiKey, model: t.model });
+    },
+  });
 }
 
 export class KnowledgeBridge {

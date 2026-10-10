@@ -213,6 +213,60 @@ describe('resolveModelChoice', () => {
     expect(choice.providers).toHaveLength(1);
     expect(choice.providers[0]?.providerId).toBe('new');
   });
+
+  // ── M17：向量模型与对话模型分道 ──
+
+  it('向量模型不进对话侧注册表 —— 它只有 /embeddings，当会话模型用会恒 400', () => {
+    const choice = resolveModelChoice(
+      {
+        providers: [
+          {
+            id: 'ali',
+            baseUrl: 'https://ali/v1',
+            apiKey: 'k',
+            defaultModel: 'text-embedding-v3',
+            models: [{ id: 'text-embedding-v3', kind: 'embedding' }, { id: 'qwen3-max' }],
+          },
+        ],
+      },
+      {},
+    );
+    expect(choice.kind).toBe('openai-compat');
+    if (choice.kind !== 'openai-compat') return;
+    expect(choice.providers[0]?.models.map((m) => m.id)).toEqual(['qwen3-max']);
+    // defaultModel 写的是向量模型：清单里找不到 → 回落首个对话模型
+    expect(choice.providers[0]?.defaultModel).toBe('qwen3-max');
+    expect(choice.defaultRef).toBe('ali:qwen3-max');
+  });
+
+  it('只挂向量模型的网关从对话侧跳过，原因写清楚（别让人去删一个配对了的模型）', () => {
+    const choice = resolveModelChoice(
+      {
+        providers: [
+          { id: 'ali', baseUrl: 'https://ali/v1', apiKey: 'k', models: [{ id: 'text-embedding-v3', kind: 'embedding' }] },
+        ],
+      },
+      {},
+    );
+    expect(choice.kind).toBe('faux');
+    if (choice.kind !== 'faux') return;
+    expect(choice.reason).toContain('只有向量模型');
+  });
+
+  it('纯向量网关不拖垮其他网关 —— 它只是对话侧消失', () => {
+    const choice = resolveModelChoice(
+      {
+        providers: [
+          { id: 'ali', baseUrl: 'https://ali/v1', apiKey: 'k', models: [{ id: 'text-embedding-v3', kind: 'embedding' }] },
+          { id: 'kotei', baseUrl: 'https://a/v1', apiKey: 'k1', models: [{ id: 'qwen3-max' }] },
+        ],
+      },
+      {},
+    );
+    expect(choice.kind).toBe('openai-compat');
+    if (choice.kind !== 'openai-compat') return;
+    expect(choice.providers.map((p) => p.providerId)).toEqual(['kotei']);
+  });
 });
 
 describe('loadConfig', () => {

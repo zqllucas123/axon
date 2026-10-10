@@ -421,12 +421,16 @@ export interface CommandMap {
    *
    * 两种模式：
    * - `payload = {}`：GET /models 拉取网关可用模型清单（result.models）。
-   * - `payload = { model }`：对该模型发一次极小的 chat/completions 探测。
+   * - `payload = { model }`：对该模型发一次极小的真探测（见下）。
    *   /models 探测不可靠——不少 OpenAI 兼容网关根本没实现 /v1/models，
-   *   但 /chat/completions 完全可用；单模型可用性只有真跑一次才作数。
+   *   但对话/向量端点完全可用；单模型可用性只有真跑一次才作数。
+   *
+   * `kind` 决定探测端点：`'embedding'` 打 /embeddings，其余（含缺省）打
+   * /chat/completions。必须由调用方按 `ModelSpec.kind` 传 —— 向量模型在
+   * /chat/completions 上恒 400，用错端点会把「端点不存在」报成「配置错」。
    */
   'provider.test': {
-    payload: { model?: string; providerId?: string };
+    payload: { model?: string; providerId?: string; kind?: 'chat' | 'embedding' };
     result: { ok: boolean; latencyMs: number; models: string[]; error?: string };
   };
 

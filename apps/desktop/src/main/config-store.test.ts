@@ -223,6 +223,38 @@ describe('ConfigStore · patch 校验', () => {
     ).toBe(true);
   });
 
+  // ── M17：向量模型 ──
+
+  it('models[].kind 只认 chat / embedding —— 拼错会让「向量」标记静默失效', async () => {
+    const { path } = await tempConfig();
+    const s = store(path);
+    await s.load();
+    const bad = await s.saveProvider({
+      id: 'ali',
+      models: [{ id: 'text-embedding-v3', kind: 'embeddings' as never }],
+    });
+    expect(bad.accepted).toBe(false);
+    expect(bad.errors[0]?.path).toBe('providers.ali.models.0.kind');
+    expect(
+      (await s.saveProvider({ id: 'ali', models: [{ id: 'text-embedding-v3', kind: 'embedding' }] }))
+        .accepted,
+    ).toBe(true);
+  });
+
+  it('defaultModelRef 拒绝指向向量模型 —— 会话一发就 400，报错离病因太远', async () => {
+    const { path } = await tempConfig({
+      providers: [
+        { id: 'ali', baseUrl: 'https://ali/v1', models: [{ id: 'text-embedding-v3', kind: 'embedding' }] },
+      ],
+    });
+    const s = store(path);
+    await s.load();
+    const res = await s.patch({ defaultModelRef: 'ali:text-embedding-v3' });
+    expect(res.accepted).toBe(false);
+    expect(res.errors[0]?.code).toBe('invalid-value');
+    expect(res.errors[0]?.message).toContain('向量模型');
+  });
+
   it('null = 清除 maxDepth（config.patch 白名单字段）', async () => {
     const { path } = await tempConfig({ maxDepth: 3 });
     const s = store(path);

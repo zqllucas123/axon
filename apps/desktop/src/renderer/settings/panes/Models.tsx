@@ -146,6 +146,9 @@ type TestState =
   | { tag: 'ok'; latencyMs: number }
   | { tag: 'fail'; error: string };
 
+/** 向量模型不参与对话：它没有 /chat/completions，被选成会话模型一发就 400。 */
+const isEmbedding = (m: ModelSpec): boolean => m.kind === 'embedding';
+
 function ModelRow({ model, providerId, isDefault, onSetDefault, onDelete, onSaveCaps }: ModelRowProps): ReactElement {
   const [capsOpen, setCapsOpen] = useState(false);
   const [ctxVal, setCtxVal] = useState(String(model.contextWindow ?? ''));
@@ -159,8 +162,13 @@ function ModelRow({ model, providerId, isDefault, onSetDefault, onDelete, onSave
     if (testTimer.current !== null) { clearTimeout(testTimer.current); testTimer.current = null; }
     setTest({ tag: 'testing' });
     try {
-      // 传 model → 主进程对该模型发一次真 chat/completions 探测（比 /models 靠谱）。
-      const res = await window.axon.invoke('provider.test', { model: model.id, providerId });
+      // 传 model → 主进程对该模型发一次真探测（比 /models 靠谱）。
+      // kind 必须传：向量模型要打 /embeddings，走 chat/completions 恒 400。
+      const res = await window.axon.invoke('provider.test', {
+        model: model.id,
+        providerId,
+        kind: isEmbedding(model) ? 'embedding' : 'chat',
+      });
       if (res.ok) {
         setTest({ tag: 'ok', latencyMs: res.latencyMs });
       } else {
@@ -201,13 +209,28 @@ function ModelRow({ model, providerId, isDefault, onSetDefault, onDelete, onSave
           ) : null}
         </div>
         <div className="provider-model-actions">
+          {/* 向量模型不给「主对话」：它没有 /chat/completions，选了会话一发就 400。 */}
+          {isEmbedding(model) ? null : (
+            <button
+              type="button"
+              className={`provider-pill ${isDefault ? 'on' : ''}`}
+              onClick={onSetDefault}
+              title="设为默认模型"
+            >
+              主对话
+            </button>
+          )}
           <button
             type="button"
-            className={`provider-pill ${isDefault ? 'on' : ''}`}
-            onClick={onSetDefault}
-            title="设为默认模型"
+            className={`provider-pill ${isEmbedding(model) ? 'on embedding' : ''}`}
+            onClick={() => onSaveCaps({ kind: isEmbedding(model) ? undefined : 'embedding' })}
+            title={
+              isEmbedding(model)
+                ? '向量模型（点击取消标记）：不出现在会话模型选择里，供知识库检索用'
+                : '标记为向量模型：打 /embeddings 探测，并进知识库的「向量模型」下拉'
+            }
           >
-            主对话
+            向量
           </button>
           {model.reasoning ? (
             <span className="provider-pill on reasoning">推理</span>
@@ -226,7 +249,7 @@ function ModelRow({ model, providerId, isDefault, onSetDefault, onDelete, onSave
           {test.tag === 'ok' ? (
             <span
               className="provider-test-badge ok"
-              title={`该模型可用（chat/completions 返回 200，${test.latencyMs}ms）`}
+              title={`该模型可用（${isEmbedding(model) ? '/embeddings' : '/chat/completions'} 返回 200，${test.latencyMs}ms）`}
             >
               ✓ {test.latencyMs}ms
             </span>
@@ -252,6 +275,9 @@ function ModelRow({ model, providerId, isDefault, onSetDefault, onDelete, onSave
           </button>
         </div>
       </div>
+      {/* 失败详情摆到行下而不是只塞 title：这条文案（HTTP 码 + 响应体片段）是
+          「模型名错 / 鉴权失败 / 端点不存在」的唯一线索，藏在 tooltip 里等于没有。 */}
+      {test.tag === 'fail' ? <div className="provider-test-error">{test.error}</div> : null}
       {capsOpen ? (
         <div className="provider-model-caps">
           <label className="provider-field">
@@ -370,8 +396,21 @@ function ProviderCard({
     headers: p.headers,
   });
 
-  const commitModels = (next: ModelSpec[] | null) => {
-    void saveProvider({ ...providerBase(), models: next ?? undefined });
+  /**
+   * 提交模型清单（`null` = 清空），必要时同一笔里清掉默认模型的指向。
+   *
+   * 必须**一次** saveProvider 落盘：provider 的写侧是「整体覆盖」，而
+   * `providerBase()` 读的是上一次渲染的 props —— 拆成两次提交，后发的那次会拿
+   * 旧 models 把前一次的改动抹掉。所以 clearDefault 只能在这一笔里一起写。
+   */
+  const commitModels = async (next: ModelSpec[] | null, clearDefault = false): Promise<void> => {
+    const ok = await saveProvider({
+      ...providerBase(),
+      models: next ?? undefined,
+      defaultModel: clearDefault ? undefined : p.defaultModel,
+    });
+    // 顺序不能反：defaultModelRef 的校验要拿 providers 解引用，provider 得先落盘。
+    if (ok && clearDefault) await patchConfig({ defaultModelRef: null });
   };
 
   /**
@@ -446,9 +485,6 @@ function ProviderCard({
   };
 
   // ── 模型操作 ──
-  const writeModels = (next: ModelSpec[]) => {
-    void commitModels(next.length === 0 ? null : next);
-  };
 
   // 「主对话」比的是全局 ref，不是本卡的 defaultModel —— 否则多个网关会各自亮一个胶囊。
   const isDefaultModel = (modelId: string) => defaultRef === formatModelRef(p.id, modelId);
@@ -458,16 +494,27 @@ function ProviderCard({
   };
 
   const handleDelete = (index: number) => {
-    writeModels(models.filter((_, i) => i !== index));
+    const row = models[index];
+    // 删掉「当前主对话」是同一个悬空问题，而且不止是难看：不带 clearDefault 的话
+    // defaultModel 会指向一个已删的模型，saveProvider 的校验判它「不在清单里」
+    // → 整批退回，用户点了删除却什么都没发生（静默失败）。
+    const clearDefault = !!row && isDefaultModel(row.id);
+    void commitModels(models.filter((_, i) => i !== index), clearDefault);
   };
 
   const handleSaveCaps = (index: number, patch: Partial<ModelSpec>) => {
-    writeModels(models.map((m, i) => (i === index ? { ...m, ...patch } : m)));
+    const row = models[index];
+    const next = models.map((m, i) => (i === index ? { ...m, ...patch } : m));
+    // 把「当前主对话」标成向量模型 = defaultModelRef 悬空。同一笔里顺手清掉，
+    // 而不是留一个指不到实体的 ref —— 那会让下次启动静默回落到别的模型，
+    // 而设置页上什么都看不出来。
+    const clearDefault = patch.kind === 'embedding' && !!row && isDefaultModel(row.id);
+    void commitModels(next, clearDefault);
   };
 
   const handleManualAdd = (id: string, name?: string) => {
     if (models.some((m) => m.id.toLowerCase() === id.toLowerCase())) return;
-    writeModels([...models, { id, ...(name ? { name } : {}) }]);
+    void commitModels([...models, { id, ...(name ? { name } : {}) }]);
   };
 
   const protoLabel = 'OpenAI';
@@ -565,6 +612,9 @@ function ProviderCard({
                 ) : null}
               </div>
             </div>
+
+            {/* 拉取失败详情（同模型行：HTTP 码 + 响应体片段不能只躺在 tooltip 里） */}
+            {probe.tag === 'err' ? <div className="provider-test-error">{probe.error}</div> : null}
 
             {/* 拉取选择面板 */}
             {probe.tag === 'pick' ? (

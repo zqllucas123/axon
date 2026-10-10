@@ -11,20 +11,28 @@
 import React, { useCallback, useEffect, useRef, useState, type ReactElement } from 'react';
 import { useApp } from '../state/store.tsx';
 import { Icon } from '../icons.tsx';
-import type { KnowledgeBase, KnowledgeChunk, KnowledgeDoc } from '@axon/protocol';
+import {
+  resolveEmbeddingModels,
+  type KnowledgeBase,
+  type KnowledgeChunk,
+  type KnowledgeDoc,
+  type ProviderConfigView,
+} from '@axon/protocol';
 
 // ── 向量模型选择器 ─────────────────────────────────────────────
 
 /**
- * 常见的 OpenAI-compat embedding 模型候选列表。
- * 用户也可以直接输入自定义模型名。
+ * 可选的向量模型 = 配置里标了「向量」的那些（`ModelSpec.kind === 'embedding'`）。
+ *
+ * 为什么不再用硬编码的预设清单：那些名字在用户的网关上大多不存在，选中后
+ * embedder 仍回落默认模型 —— 一个改标签的假控件。清单跟着配置走，选了就真的换。
  */
-const PRESET_MODELS = [
-  'qwen3.7-text-embedding',
-  'text-embedding-3-small',
-  'text-embedding-3-large',
-  'text-embedding-ada-002',
-];
+function embeddingOptions(providers: readonly ProviderConfigView[] | undefined): { id: string; provider: string }[] {
+  return resolveEmbeddingModels(providers).map(({ provider, model }) => ({
+    id: model.id,
+    provider: provider.name || provider.id,
+  }));
+}
 
 function ModelSelector({
   kbId,
@@ -35,9 +43,13 @@ function ModelSelector({
   current: string;
   onChange: (model: string) => void;
 }): ReactElement {
-  const { updateKbModel } = useApp();
+  const { updateKbModel, config } = useApp();
+  const options = embeddingOptions(config?.config.providers);
+  // 存的模型名不在配置里（历史值 / 模型已被删）= embedder 回落到默认那个。
+  // 那就显示**回落后的真相**，而不是一个 MetaStore 里躺着、实际没在用的名字。
+  const stale = !options.some((o) => o.id === current);
+  const effective = stale ? (options[0]?.id ?? current) : current;
   const [open, setOpen] = useState(false);
-  const [custom, setCustom] = useState('');
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState('');
   const ref = useRef<HTMLDivElement>(null);
@@ -60,7 +72,6 @@ function ModelSelector({
       await updateKbModel(kbId, model.trim());
       onChange(model.trim());
       setOpen(false);
-      setCustom('');
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e));
     } finally {
@@ -73,45 +84,35 @@ function ModelSelector({
       <button
         className="tag s4-model-tag"
         onClick={() => setOpen((v) => !v)}
-        title="点击切换向量模型"
+        title={stale ? `原记录「${current}」不在配置里，实际用的是 ${effective}` : '点击切换向量模型'}
         aria-haspopup="listbox"
         aria-expanded={open}
       >
-        {current}
+        {effective}
         <Icon name="chevD" size={14} />
       </button>
       {open ? (
         <div className="s4-model-popover" role="listbox" aria-label="选择向量模型">
           <div className="s4-model-popover-head">向量模型</div>
-          {PRESET_MODELS.map((m) => (
+          {options.length === 0 ? (
+            <div className="s4-model-empty">
+              还没有向量模型 —— 到 设置 → 模型配置 给某个模型点一下「向量」。
+            </div>
+          ) : null}
+          {options.map((opt) => (
             <button
-              key={m}
+              key={`${opt.provider}:${opt.id}`}
               role="option"
-              aria-selected={m === current}
-              className={`s4-model-option${m === current ? ' is-current' : ''}`}
-              onClick={() => void apply(m)}
+              aria-selected={opt.id === effective}
+              className={`s4-model-option${opt.id === effective ? ' is-current' : ''}`}
+              onClick={() => void apply(opt.id)}
               disabled={saving}
             >
-              {m === current ? <Icon name="check" size={14} /> : <span className="s4-model-opt-gap" />}
-              {m}
+              {opt.id === effective ? <Icon name="check" size={14} /> : <span className="s4-model-opt-gap" />}
+              {opt.id}
+              <span className="s4-model-opt-provider">{opt.provider}</span>
             </button>
           ))}
-          <div className="s4-model-custom-row">
-            <input
-              className="field-input s4-model-custom-input"
-              placeholder="自定义模型名…"
-              value={custom}
-              onChange={(e) => setCustom(e.target.value)}
-              onKeyDown={(e) => { if (e.key === 'Enter') void apply(custom); }}
-            />
-            <button
-              className="btn btn-small"
-              onClick={() => void apply(custom)}
-              disabled={saving || !custom.trim()}
-            >
-              确认
-            </button>
-          </div>
           {err ? <div className="field-err">{err}</div> : null}
           <div className="s4-model-warn">
             切换模型后，已有向量块不会自动重新摄入，需手动删除并重新添加来源。

@@ -540,6 +540,8 @@ body[data-chrome='custom'] .st-win .st-sidebar { padding-top: 0; }
   color: #fff;
 }
 .st-win .provider-pill.on.reasoning { background: #6c47b8; border-color: #6c47b8; }
+/* 「向量」用 info 蓝，与「推理」的紫、「主对话」的黑都拉开，三颗胶囊同时亮也认得出 */
+.st-win .provider-pill.on.embedding { background: var(--sem-info); border-color: var(--sem-info); }
 .st-win .provider-icon-btn {
   display: flex;
   align-items: center;
@@ -710,6 +712,18 @@ body[data-chrome='custom'] .st-win .st-sidebar { padding-top: 0; }
 .st-win .provider-test-badge.ok { color: var(--sem-ok, #2d7a4f); }
 .st-win .provider-test-badge.warn { color: var(--sem-warn, #b5820a); }
 .st-win .provider-test-badge.fail { color: var(--sem-err); }
+/* 探测失败详情（网关级与模型级共用）。等宽小字换行显示，整段 HTTP 码 + 响应体片段可见。 */
+.st-win .provider-test-error {
+  margin: 0 12px 8px;
+  padding: 6px 9px;
+  border-radius: var(--r-sm);
+  background: color-mix(in srgb, var(--sem-err) 8%, transparent);
+  font-family: var(--font-mono);
+  font-size: var(--fs-11);
+  line-height: 1.5;
+  color: var(--sem-err);
+  word-break: break-all;
+}
 /* spinner */
 .st-win .provider-spinner {
   display: inline-block;

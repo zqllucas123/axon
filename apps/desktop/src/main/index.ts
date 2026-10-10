@@ -21,6 +21,7 @@ import { setGlobalDispatcher, ProxyAgent, EnvHttpProxyAgent, Agent as UndiciAgen
 import {
   IPC_COMMAND_CHANNEL,
   ipcEventChannel,
+  resolveEmbeddingModels,
   sessionIdOfPath,
   type AgentPath,
   type AxonMenuId,
@@ -49,7 +50,7 @@ import { ALL_ROLES } from './roles.ts';
 import { BUILTIN_TEAMS } from './teams.ts';
 import { RoleBridge } from './role-bridge.ts';
 import { TeamBridge } from './team-bridge.ts';
-import { KnowledgeBridge, makeKnowledgeManager } from './knowledge-bridge.ts';
+import { KnowledgeBridge, makeKnowledgeManager, type EmbeddingTarget } from './knowledge-bridge.ts';
 import { createKbSearchTool, createKbListTool } from './kb-tools.ts';
 import { ProjectStore } from './project-store.ts';
 import { ConfigStore } from './config-store.ts';
@@ -581,18 +582,36 @@ app.whenReady().then(async () => {
   // M14：在 createHost 之前创建 KnowledgeManager，这样 kb 工具可以在构造时注入
   // host universe（AxonHost.tools 是 readonly，只能在 new 时传入）。
   // 冒烟模式跳过（避免依赖真实 LanceDB 目录）。
-  const providerCfg = rawConfig.provider ?? {};
+  //
+  // M17：端点从 `providers[]` 里挑 —— 先前读的是 legacy `config.provider` 单数键，
+  // 而 M15 的迁移会把它删掉（config-store.migrate），于是这里恒为 undefined、
+  // kbManager 恒为 null，知识库整块功能静默失效。e2e 靠 AXON_KB_EMBED_* 注入桩服务，
+  // 走不到这条真实路径，所以一直是绿的。
+  const embTargets = resolveEmbeddingModels(rawConfig.providers).flatMap(
+    ({ provider, model }): EmbeddingTarget[] =>
+      provider.baseUrl && provider.apiKey && model.id
+        ? [{ model: model.id, endpoint: provider.baseUrl, apiKey: provider.apiKey }]
+        : [],
+  );
   // AXON_KB_EMBED_* 供端到端测试把 embedding 指向本地桩服务（照 AXON_KNOWLEDGE_DIR 的惯例）。
-  const kbEndpoint =
-    process.env.AXON_KB_EMBED_ENDPOINT || (providerCfg as { baseUrl?: string }).baseUrl;
-  const kbApiKey =
-    process.env.AXON_KB_EMBED_KEY || (providerCfg as { apiKey?: string }).apiKey;
-  const kbModel = process.env.AXON_KB_EMBED_MODEL;
-  let kbManager: import('@axon/knowledge').KnowledgeManager | null = null;
-  if (kbEndpoint && kbApiKey && !SMOKE) {
-    kbManager = kbModel
-      ? makeKnowledgeManager(kbEndpoint, kbApiKey, kbModel)
-      : makeKnowledgeManager(kbEndpoint, kbApiKey);
+  // 三件套齐全时**整组替换**，不让真实配置混进 e2e。
+  const stubEndpoint = process.env.AXON_KB_EMBED_ENDPOINT;
+  const stubKey = process.env.AXON_KB_EMBED_KEY;
+  const stubModel = process.env.AXON_KB_EMBED_MODEL;
+  const kbTargets: EmbeddingTarget[] =
+    stubEndpoint && stubKey && stubModel
+      ? [{ model: stubModel, endpoint: stubEndpoint, apiKey: stubKey }]
+      : embTargets;
+  const kbManager: import('@axon/knowledge').KnowledgeManager | null =
+    kbTargets.length && !SMOKE ? makeKnowledgeManager({ targets: kbTargets }) : null;
+  if (kbManager) {
+    console.log(
+      `[desktop] 知识库向量模型：${kbTargets[0]!.model}（共 ${kbTargets.length} 个可选）`,
+    );
+  } else if (!SMOKE) {
+    console.warn(
+      '[desktop] 没有可用的向量模型，知识库未启用 —— 到 设置 → 模型配置 给某个模型勾上「向量」。',
+    );
   }
 
   host = await createHost(rawConfig, kbManager ?? undefined);
@@ -1001,8 +1020,10 @@ app.whenReady().then(async () => {
         if (request.command === 'provider.test') {
           try {
             const { probeProvider } = await import('./provider-probe.ts');
-            const payload = request.payload as { model?: string; providerId?: string } | undefined;
-            const result = await probeProvider(payload?.model, payload?.providerId);
+            const payload = request.payload as
+              | { model?: string; providerId?: string; kind?: 'chat' | 'embedding' }
+              | undefined;
+            const result = await probeProvider(payload?.model, payload?.providerId, payload?.kind);
             return { id: request.id, ok: true, result };
           } catch {
             // provider-probe.ts 尚未交付（W-B 阶段）或探针失败时的兜底。

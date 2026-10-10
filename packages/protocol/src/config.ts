@@ -41,6 +41,16 @@ export interface ModelSpec {
   name?: string;
   /** 模型是否会吐 reasoning/thinking 内容（如 deepseek-r1）。默认 false。 */
   reasoning?: boolean;
+  /**
+   * 模型用途；缺省 `'chat'`。
+   *
+   * 为什么需要这个字段：向量模型（`text-embedding-v3` 之类）常和对话模型挂在
+   * **同一个** OpenAI 兼容网关上，但它没有 `/chat/completions`，只有 `/embeddings`
+   * —— 两边都拿它当对话模型用会恒 400。所以：
+   * 知识库按它挑 embedding 的端点+模型名（`resolveEmbeddingModel`），
+   * 对话侧的模型注册表按它把向量模型排除（`resolveModelChoice`）。
+   */
+  kind?: 'chat' | 'embedding';
   contextWindow?: number;
   maxTokens?: number;
   cost?: Partial<{ input: number; output: number; cacheRead: number; cacheWrite: number }>;
@@ -165,6 +175,40 @@ export function resolveModelRef(
     if (model) return { provider, model };
   }
   return undefined;
+}
+
+/** 该模型是不是向量模型（缺省 = 对话模型）。 */
+export function isEmbeddingModel(model: ModelSpec | undefined): boolean {
+  return model?.kind === 'embedding';
+}
+
+/**
+ * 按 `providers` 顺序挑出所有向量模型（`kind === 'embedding'`）。
+ *
+ * 「顺序即优先级」与 `resolveModelRef` 同一套规则：**首个 = 全局默认向量模型**
+ * （知识库的默认 embedder），其余供单个知识库覆盖（S4 的「向量模型」下拉）。
+ *
+ * 为什么不另设一个顶层 `embeddingModelRef` 字段：用户的心智是「这个模型是向量
+ * 模型」（模型属性），不是「另有一处设置指向它」；而且顶层键要多一份迁移、
+ * 校验和白名单。用例需要「换一个」时，改 `kind` 标记即可。
+ */
+export function resolveEmbeddingModels(
+  providers: readonly ProviderConfig[] | undefined,
+): { provider: ProviderConfig; model: ModelSpec }[] {
+  const out: { provider: ProviderConfig; model: ModelSpec }[] = [];
+  for (const provider of providers ?? []) {
+    for (const model of provider.models ?? []) {
+      if (isEmbeddingModel(model)) out.push({ provider, model });
+    }
+  }
+  return out;
+}
+
+/** 全局默认向量模型 —— 顺序里第一个；一个都没有则 undefined（知识库不启用）。 */
+export function resolveEmbeddingModel(
+  providers: readonly ProviderConfig[] | undefined,
+): { provider: ProviderConfig; model: ModelSpec } | undefined {
+  return resolveEmbeddingModels(providers)[0];
 }
 
 /**

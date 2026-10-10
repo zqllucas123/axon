@@ -18,6 +18,7 @@ import {
   configFieldSpec,
   formatModelRef,
   isConfigPatchPath,
+  isEmbeddingModel,
   isValidProviderId,
   parseModelRef,
   resolveModelRef,
@@ -160,11 +161,20 @@ function validateValue(path: string, value: unknown, raw: Record<string, unknown
   // 允许「先设默认模型、后加提供商」这种顺序，反正解不到会 warn + 回落。
   if (path === 'defaultModelRef' && issues.length === 0 && typeof value === 'string') {
     const providers = (raw['providers'] as ProviderConfig[] | undefined) ?? [];
-    if (providers.length > 0 && !resolveModelRef(providers, value)) {
+    const hit = providers.length > 0 ? resolveModelRef(providers, value) : undefined;
+    if (providers.length > 0 && !hit) {
       issues.push({
         path,
         code: 'invalid-value',
         message: `defaultModelRef=${value} 在已配置的提供商里找不到对应模型`,
+      });
+    } else if (isEmbeddingModel(hit?.model)) {
+      // 指到向量模型上是要拦的：它没有 /chat/completions，会话一发就 400，
+      // 而报错来自网关、离「主对话设错了」很远，用户根本联想不到。
+      issues.push({
+        path,
+        code: 'invalid-value',
+        message: `defaultModelRef=${value} 是向量模型，不能作为主对话模型`,
       });
     }
   }
@@ -218,6 +228,16 @@ function validateProvider(p: ProviderConfig): ConfigIssue[] {
           issues.push({ path: at(`models.${i}.id`), code: 'invalid-value', message: `模型 id 重复：${id}` });
         }
         seen.add(id);
+        // kind 只有两种合法值。放行未知值会让「向量模型」这个标记静默失效
+        // （拼成 'embeddings' 就两边都不认），知识库于是挑不到它。
+        const kind = (m as ModelSpec | undefined)?.kind;
+        if (kind !== undefined && kind !== 'chat' && kind !== 'embedding') {
+          issues.push({
+            path: at(`models.${i}.kind`),
+            code: 'invalid-value',
+            message: `models[${i}].kind 必须是 chat | embedding，收到 ${JSON.stringify(kind)}`,
+          });
+        }
       }
     }
   }

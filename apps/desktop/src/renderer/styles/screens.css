@@ -349,16 +349,19 @@
   width: 12px;
 }
 
-[data-screen='s4'] .s4-model-custom-row {
-  display: flex;
-  gap: 6px;
-  padding: 8px 12px 4px;
+/* 网关名：两个网关挂同名向量模型时，靠它区分选的是哪一个 */
+[data-screen='s4'] .s4-model-opt-provider {
+  margin-left: auto;
+  font-family: var(--font-sans);
+  font-size: var(--fs-11, 11px);
+  color: var(--text-dim);
 }
 
-[data-screen='s4'] .s4-model-custom-input {
-  flex: 1;
+[data-screen='s4'] .s4-model-empty {
+  padding: 8px 12px;
   font-size: var(--fs-12, 12px);
-  font-family: var(--font-mono);
+  color: var(--text-dim);
+  line-height: 1.5;
 }
 
 [data-screen='s4'] .s4-model-warn {

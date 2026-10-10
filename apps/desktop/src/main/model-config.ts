@@ -19,7 +19,7 @@
 import { readFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import { formatModelRef, resolveModelRef, type AxonConfig, type ProviderConfig } from '@axon/protocol';
+import { formatModelRef, isEmbeddingModel, resolveModelRef, type AxonConfig, type ProviderConfig } from '@axon/protocol';
 import type { OpenAICompatModel } from '@axon/kernel';
 
 /**
@@ -114,14 +114,20 @@ export function resolveModelChoice(
       continue;
     }
 
+    // 向量模型不进对话侧注册表：它们只有 /embeddings，被选成会话模型后一发就 400。
+    // 一个都不剩的 provider 走下面既有的 `skipped` 路径 —— 纯向量网关本来就该从
+    // 对话侧消失，但仍能被知识库用（`resolveEmbeddingModel` 读的是原配置）。
+    const declared = p.models?.length ? p.models : [];
+    const models = declared.filter((m) => !isEmbeddingModel(m));
     // env 只能指定模型 id；单价等元数据仍从配置里取（取不到就用 kernel 的默认值）。
-    const models = p.models?.length ? p.models : [];
     const merged =
       isDefaultProvider && envModel && !models.some((m) => m.id === envModel)
         ? [{ id: envModel }, ...models]
         : models;
     if (!merged.length) {
-      skipped.push(`${id}（模型清单为空）`);
+      // 两种空要分开报：只有向量模型的网关从对话侧看是「空的」，但它对知识库有用，
+      // 笼统写「模型清单为空」会让用户去删一个其实配对了的模型。
+      skipped.push(declared.length ? `${id}（只有向量模型，对话侧不可用）` : `${id}（模型清单为空）`);
       continue;
     }
 
