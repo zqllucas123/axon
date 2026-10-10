@@ -1,6 +1,6 @@
 # M15 多模型提供商：方案设计与实施计划
 
-> 状态：**设计评审中**（2026-10-08）
+> 状态：**已完成（2026-10-10）** —— 设计（2026-10-08）到落地跨了两天，实测数据见 §九；拍板见 §5.2 / §5.3
 > 对应架构：01 §6（适配器边界 / L0 provider 层）｜ 依赖里程碑：M6（真实模型接入）、MU-3（设置窗）
 
 ---
@@ -409,11 +409,28 @@ S0/S2 改会话模型 → session.record.modelRef = 新值
 
 ## 九、验收标准
 
-- [ ] `bun run guard` 绿（pi import 白名单未放宽）
-- [ ] `bun run typecheck` 绿（root + renderer）
-- [ ] `bun run test` 绿，528 例不回退 + 新增用例
-- [ ] `bun run build:desktop && bun run verify-lazy` 绿（懒加载未被破坏）
-- [ ] `bun run ui-smoke` 绿（41 条断言不回退）
+**自动化门（2026-10-10 实测）**
+
+- [x] `bun run guard` 绿（pi import 白名单未放宽）
+- [x] `bun run typecheck` 绿（root + renderer）
+- [x] `bun run test` 绿 —— **681 例**全绿（M15 起点 528 例；差额含 M10~M14 与 M15 的累积新增）
+- [x] `bun run build:desktop && bun run verify-lazy` 绿（main.mjs 404 KB / renderer.js 1518 KB）
+- [x] `bun run ui-smoke` 绿（全幕通过，`s0-model-picker` 等钩子可命中；按计划未新增幕次）
+
+### 9.1 实测回填
+
+| 项 | 值 | 证据 |
+|---|---|---|
+| 落地 commit | `772d1ff`（M15 主体：多提供商 + 会话窗模型选择）｜`8119cb6`（同会话收尾：左栏列出无项目归属会话 + 恢复会话屏 chips） | `git log --oneline` |
+| 节奏 | 2026-10-08 设计评审 → 2026-10-10 提交（跨两个工作日，中途插入了成员级模型覆写与选择器位置统一两条用户追加要求） | — |
+| 测试数 | 681 例全绿 | `bun run test` |
+| 打包体积 | main.mjs 404 KB / renderer.js 1518 KB，懒加载未被破坏 | `bun run verify-lazy` |
+
+> 逐条的「设计 vs 实测偏离」没有在落地当时记入本文档（当时的会话直接进了 M16），
+> 故此处只回填可复核的客观项，不复述无法取证的过程细节。
+
+**手工门（待用户验收 —— 点过之后再置 ✅）**
+
 - [ ] 手工：设置页能加/改/删第二个提供商，各自拉模型列表、各自测连通性
 - [ ] 手工：S0 工具栏选择器按提供商分组，选 B 的模型建会话 → 实际走 B 的 baseUrl
 - [ ] 手工：S2 运行中会话跨 provider 切模型 → 下一轮生效
@@ -426,14 +443,14 @@ S0/S2 改会话模型 → session.record.modelRef = 新值
 
 ---
 
-## 十、文档同步
+## 十、文档同步（2026-10-10 收口）
 
-完工后更新：
-
-- `docs/03-实施框架与里程碑.md` §1 状态表 —— 加 M15 行
-- `docs/01-架构决策-方案B.md` §1 进度表 —— 适配器边界那行补「多 provider 共享 registry」
-- `docs/milestones/M6-real-model.md` —— 加一句指向本文档（M6 的「一个网关」结论已被本里程碑取代）
-- `docs/milestones/MU-1-session-team.md` —— 成员覆写一节补「模型覆写」与 §5.2 的五级优先链
-- 本文档状态改为「已完成」并回填实测数据（测试数、实际踩到的坑、设计 vs 实测差异）
+- [x] `docs/03-实施框架与里程碑.md` §1 状态表 —— 加 M15 行
+- [x] `docs/01-架构决策-方案B.md` §1 进度表 —— 适配器边界那行补「多 provider 共享 registry」
+- [x] `docs/milestones/M6-real-model.md` —— 加一句指向本文档（M6 的「一个网关」结论已被本里程碑取代）
+- [x] 本文档状态改为「已完成」并回填实测数据
+- [~] `docs/milestones/MU-1-session-team.md` —— **文件名写错了**（现存文件是 `MU-1-session-container.md`），
+      且该文档没有「成员覆写」一节；五级优先链本文档 §5.2 已写全，MU-1 侧只在
+      §4.7 加了「三层预算已下线」的注记，不再另补一节
 
 
