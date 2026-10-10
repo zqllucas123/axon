@@ -10,8 +10,8 @@
 
 import { useEffect, useState, type ReactElement } from 'react';
 import { useApp } from '../state/store.tsx';
-import { globalChips, groupSessionsByProject, sessionMeta, splitSessions, statusDot } from '../state/selectors.ts';
-import { Icon, type IconName } from '../icons.tsx';
+import { globalChips, groupSessionsByProject, sessionMeta, statusDot, unaffiliatedSessions } from '../state/selectors.ts';
+import { Icon, Spinner, type IconName } from '../icons.tsx';
 import { isCustomTitlebar } from '../chrome.ts';
 import { ProjectCreateDialog } from './ProjectCreateDialog.tsx';
 import type { Screen } from '../state/types.ts';
@@ -35,7 +35,9 @@ const NAV: Array<{ id: Screen; icon: IconName; label: string }> = [
 
 export function Sidebar(): ReactElement {
   const { screen, go, sessions, sessionId, openSession, pending, projects, newSessionInProject, openSettings, openPath } = useApp();
-  const { recent } = splitSessions(sessions);
+  // 「最近」分组 = 不属于任何项目的会话（含正在跑的）。与下面的项目分组一起
+  // 覆盖全集，任何会话都有落点 —— 详见 selectors.unaffiliatedSessions 的头注。
+  const loose = unaffiliatedSessions(projects.entries, sessions);
   const chips = globalChips({ sessions, pending });
   const projectGroups = groupSessionsByProject(projects.entries, sessions);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -64,16 +66,27 @@ export function Sidebar(): ReactElement {
     };
   }, [menuOpen]);
 
-  const row = (s: SessionSummary) => (
+  /**
+   * 一行会话。项目分组与「最近」分组共用这一个 —— 两处各写一遍的话，
+   * 「给会话行加个标记」这种改动就会漏掉一处（composer 刚踩过同样的坑）。
+   * 唯一的差别是项目下的行要缩进（`proj-row`），用参数带进来。
+   */
+  const row = (s: SessionSummary, extraClass = '') => (
     <button
       key={s.record.id}
-      className={`side-row ${screen === 's2' && s.record.id === sessionId ? 'is-active' : ''}`}
+      className={`side-row ${extraClass} ${screen === 's2' && s.record.id === sessionId ? 'is-active' : ''}`}
       data-smoke="session-row"
       data-session={s.record.id}
       onClick={() => openSession(s.record.id)}
       title={s.record.title}
     >
-      <span className={`sdot ${statusDot(s.status)}`} />
+      {/* 正在跑的会话用旋转 spinner 顶掉静态点：静态的橙点和「等待中」的黄点
+          在余光里几乎分不开，而「它还在动吗」恰恰是扫一眼左栏最想知道的事。 */}
+      {s.status === 'running' ? (
+        <Spinner title="进行中" />
+      ) : (
+        <span className={`sdot ${statusDot(s.status)}`} />
+      )}
       <span className="label">{s.record.title}</span>
       <span className="meta">{sessionMeta(s)}</span>
     </button>
@@ -158,20 +171,7 @@ export function Sidebar(): ReactElement {
                         （还没有会话）
                       </div>
                     ) : (
-                      rows.map((s) => (
-                        <button
-                          key={s.record.id}
-                          className={`side-row proj-row ${screen === 's2' && s.record.id === sessionId ? 'is-active' : ''}`}
-                          data-smoke="session-row"
-                          data-session={s.record.id}
-                          onClick={() => openSession(s.record.id)}
-                          title={s.record.title}
-                        >
-                          <span className={`sdot ${statusDot(s.status)}`} />
-                          <span className="label">{s.record.title}</span>
-                          <span className="meta">{sessionMeta(s)}</span>
-                        </button>
-                      ))
+                      rows.map((s) => row(s, 'proj-row'))
                     )}
                     <button
                       className="proj-newsession"
@@ -192,17 +192,22 @@ export function Sidebar(): ReactElement {
           「进行中」分组已删（用户 2026-09-30 拍板）：它列的是**非终止态**会话，
           与上方的「项目」分组是同一批会话的第二种切法 —— 有项目归属的会在项目下
           再出现一次。去掉后左栏只剩「项目」+「最近」两种粒度，不再重复。
-          注意 `splitSessions` 仍在用（`recent` 分组 + S1 的活跃计数），别一起删。
+
+          但那次只删了分组、没给「不归属任何项目、而且还在跑」的会话补落点，
+          于是这批会话在左栏彻底看不见（ui-smoke 建的正是这种，一直点空）。
+          2026-10-09 拍板：不新设区域，把它们并进本组 —— 本组口径因此从
+          「终止态会话」改成「不属于任何项目的会话」，正在跑的用 spinner 区分。
         */}
         <div className="side-section">
           <span>最近</span>
         </div>
-        {recent.length === 0 ? (
+        {loose.length === 0 ? (
           <div className="empty" style={{ padding: '4px 18px 8px' }}>
-            （会话结束后会出现在这里）
+            （不属于任何项目的会话会出现在这里）
           </div>
         ) : (
-          recent.map(row)
+          // 不能写成 `loose.map(row)`：map 的第二参是 index，会被当成 extraClass 传进去。
+          loose.map((s) => row(s))
         )}
       </div>
 

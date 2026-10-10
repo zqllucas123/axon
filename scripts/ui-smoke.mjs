@@ -692,9 +692,16 @@ try {
 
   // 重置回缺省
   await evalJs(`window.axon.invoke('config.reset', {})`);
+  // 缺省字号不写死数字：`--fs-msg` 的缺省是 `var(--fs-14)`，119f7ee（2026-09-29，
+  // 「会话正文字号下调」）把它从 15px 改成 14px 时漏改了这里，而本幕当时已被
+  // 左栏问题挡住、九天没跑到，失配就一直没暴露。改成比对令牌本身，
+  // 以后再调正文字号不必回来同步这个数字。
   const resetOk = await until(
-    `document.body.dataset.density === undefined &&
-     getComputedStyle(document.body).getPropertyValue('--fs-msg').trim() === '15px'`,
+    `(() => {
+       const cs = getComputedStyle(document.body);
+       return document.body.dataset.density === undefined &&
+         cs.getPropertyValue('--fs-msg').trim() === cs.getPropertyValue('--fs-14').trim();
+     })()`,
   );
   log(resetOk, 'config.reset 后外观回缺省（删白名单叶子，不走 patch）');
   if (!resetOk) exit(1);

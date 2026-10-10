@@ -140,6 +140,27 @@ export function groupSessionsByProject(
   }));
 }
 
+/**
+ * 左栏「最近」分组的数据源 —— **不属于任何项目**的会话，按 updatedAt 倒序。
+ *
+ * 为什么判据是「落不进项目分组」而不是「没有 projectId」：项目被删之后，
+ * 它底下的会话还留着一个指向空处的 `projectId`（`groupSessionsByProject` 的
+ * 「悬空 projectId」用例）。只看字段有没有值，这批会话就会既不在项目下、
+ * 也不在这里 —— 在左栏彻底消失。两个分组必须是**全集的一个划分**。
+ *
+ * 也不按状态过滤：进行中的会话同样要出现在这里（用户拍板 2026-10-09）。
+ * 此前这里只放终止态，于是「不归属任何项目、而且还在跑」的会话在左栏无处可去。
+ */
+export function unaffiliatedSessions(
+  projects: ProjectRecord[],
+  sessions: SessionSummary[],
+): SessionSummary[] {
+  const known = new Set(projects.map((p) => p.id));
+  return sessions
+    .filter((s) => s.record.projectId === undefined || !known.has(s.record.projectId))
+    .sort((a, b) => b.record.updatedAt - a.record.updatedAt);
+}
+
 /** 顶栏 chip 的跨会话口径（全局屏用；会话屏一律用 sessionChips）。 */
 export function globalChips(input: {
   sessions: SessionSummary[];
