@@ -1,6 +1,6 @@
 # M12 知识库核心：方案设计与实施计划
 
-> 状态：**设计评审中**
+> 状态：**已实施（2026-10-04）** —— 核心管道全部落地，验收项除「DevTools 手工演示」外均有自动化覆盖，见 §十一 实施回填
 > 日期：2026-10-03
 > 对应架构：新增 L2 知识层（`packages/knowledge`）
 > 依赖里程碑：M6（真实模型接入，OpenAI-compat 网关已通）、MU-3（UI 框架就绪）
@@ -302,6 +302,24 @@ bridge.query(kbId, query, topK=5)
 - `docs/03-实施框架与里程碑.md` §1 表格：M12 加行，状态 ✅
 - `docs/01-架构决策-方案B.md` §1 进度表：新增 `packages/knowledge` 行
 - 本文件状态行改为「已完成」
+
+---
+
+## 十一、实施回填（2026-10-10 补齐）
+
+> 落地时没有回填本文档，状态一直停在「设计评审中」。此处只补可复核的客观项。
+
+| 项 | 值 |
+|---|---|
+| 落地 commit | `d63c88b`（核心管道）；随后 `dc7241b` / `fecffc1`（来源类型 html→web、真实抓取网页正文）、`948217d`（embedding 模型换 `qwen3.7-text-embedding`）、`cff67f2`（knowledge 包 external 依赖声明） |
+| 落点 | `packages/knowledge/src/{ingest,chunker,embedder,store,kb,manager}.ts`（+ `index.ts`）；主进程 `apps/desktop/src/main/knowledge-bridge.ts` |
+| 测试 | `packages/knowledge/src/*.test.ts` 共 6 个文件（ingest / chunker / embedder / fetch-web / kb / manager）；全量 681 例在 2026-10-10 复跑全绿 |
+| 验收项对照 | guard / typecheck / test（总数 681 ≥ 568 ✅）/ build+verify-lazy（lancedb、mammoth、cheerio 均 external，由 `cff67f2` 声明）/ ui-smoke 均绿 |
+| 拍板落实 | D1 LanceDB ✅、D2 复用 OpenAI-compat 端点 ✅（后换 qwen 模型）、D3 全局共享 ✅、D4 逐文件扫描 ✅、D5 M12/M13 拆分 ✅ |
+
+**仍未做的**：「DevTools 中 `kb.create → kb.addSource(md) → kb.query` 返回有意义结果」这一条手工演示
+没有在文档里留证据（后续 `fecffc1` 的 commit message 记了「端到端验证」，但那是 web 抓取链路）；
+`~/.axon/knowledge/` 目录布局与 `kb.delete` 清表两项由 `kb.test.ts` / `manager.test.ts` 覆盖，未做人工复核。
 
 ---
 
