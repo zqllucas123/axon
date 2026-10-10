@@ -28,11 +28,18 @@ import { ingest } from './ingest/index.ts';
 export type ProgressCallback = (p: IndexingProgressPayload) => void;
 export type DoneCallback = (p: IndexingDonePayload) => void;
 export type ErrorCallback = (p: IndexingErrorPayload) => void;
+/** 按模型名构造 Embedder；用于运行时切换 per-KB 向量模型。 */
+export type EmbedderFactory = (model: string) => Embedder;
 
 export interface KnowledgeManagerOptions {
   /** ~/.axon/knowledge or equivalent */
   baseDir: string;
   embedder: Embedder;
+  /**
+   * 可选工厂：当 KB 配置了与默认 embedder 不同的模型时，
+   * 用此工厂按需创建对应的 Embedder 实例（会被缓存）。
+   */
+  embedderFactory?: EmbedderFactory;
   onProgress?: ProgressCallback;
   onDone?: DoneCallback;
   onError?: ErrorCallback;
@@ -44,7 +51,10 @@ const EMBED_BATCH = 64;
 export class KnowledgeManager {
   private readonly meta: KbMetaStore;
   private readonly store: KnowledgeStore;
-  private readonly embedder: Embedder;
+  private readonly defaultEmbedder: Embedder;
+  private readonly embedderFactory?: EmbedderFactory;
+  /** 按模型名缓存 Embedder，避免重复构造。 */
+  private readonly embedderCache = new Map<string, Embedder>();
   private onProgress?: ProgressCallback;
   private onDone?: DoneCallback;
   private onError?: ErrorCallback;
@@ -52,10 +62,26 @@ export class KnowledgeManager {
   constructor(opts: KnowledgeManagerOptions) {
     this.meta = new KbMetaStore(opts.baseDir);
     this.store = new KnowledgeStore(opts.baseDir);
-    this.embedder = opts.embedder;
+    this.defaultEmbedder = opts.embedder;
+    this.embedderFactory = opts.embedderFactory;
     this.onProgress = opts.onProgress;
     this.onDone = opts.onDone;
     this.onError = opts.onError;
+  }
+
+  /** 取得指定 KB 应使用的 Embedder（优先匹配 KB 配置的模型）。 */
+  private _embedderFor(kb: KnowledgeBase): Embedder {
+    const model = kb.embeddingModel;
+    if (model === this.defaultEmbedder.model) return this.defaultEmbedder;
+    const cached = this.embedderCache.get(model);
+    if (cached) return cached;
+    if (this.embedderFactory) {
+      const e = this.embedderFactory(model);
+      this.embedderCache.set(model, e);
+      return e;
+    }
+    // 没有工厂时降级用默认（查询时向量维度可能不匹配，让上层收错误提示）
+    return this.defaultEmbedder;
   }
 
   /** 运行时绑定进度回调（主进程 KnowledgeBridge 在 getSender 就绪后调用）。 */
@@ -77,7 +103,17 @@ export class KnowledgeManager {
 
   async createKb(name: string, description: string): Promise<KnowledgeBase> {
     await mkdir(join(this.meta['baseDir'], '..'), { recursive: true }).catch(() => {});
-    return this.meta.create(name, description, this.embedder.model);
+    return this.meta.create(name, description, this.defaultEmbedder.model);
+  }
+
+  /**
+   * 更新知识库记录的向量模型标识。
+   * 只更新元数据，不重新摄入现有文档；后续新增文档会用新模型编码。
+   */
+  async updateEmbeddingModel(kbId: string, model: string): Promise<void> {
+    const kb = await this.meta.get(kbId);
+    if (!kb) throw new Error(`知识库 ${kbId} 不存在`);
+    await this.meta.update({ ...kb, embeddingModel: model });
   }
 
   /**
@@ -125,6 +161,9 @@ export class KnowledgeManager {
         return;
       }
 
+      const kb = await this.meta.get(kbId);
+      const embedder = kb ? this._embedderFor(kb) : this.defaultEmbedder;
+
       const docId = randomUUID();
       let totalChunks = 0;
 
@@ -143,7 +182,7 @@ export class KnowledgeManager {
       for (let i = 0; i < allChunks.length; i += EMBED_BATCH) {
         const batch = allChunks.slice(i, i + EMBED_BATCH);
         const texts = batch.map((c) => c.text);
-        const vectors = await this.embedder.embed(texts);
+        const vectors = await embedder.embed(texts);
 
         const records = batch.map((c, j) => ({
           chunkId: randomUUID(),
@@ -190,7 +229,9 @@ export class KnowledgeManager {
   // ── 查询 ──────────────────────────────────────────────────────
 
   async query(kbId: string, queryText: string, topK = 5): Promise<KnowledgeChunk[]> {
-    const [queryVec] = await this.embedder.embed([queryText]);
+    const kb = await this.meta.get(kbId);
+    const embedder = kb ? this._embedderFor(kb) : this.defaultEmbedder;
+    const [queryVec] = await embedder.embed([queryText]);
     if (!queryVec) return [];
     return this.store.search(kbId, queryVec, topK);
   }

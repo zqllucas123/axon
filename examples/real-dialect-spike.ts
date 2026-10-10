@@ -36,7 +36,8 @@ if (choice.kind !== 'openai-compat') {
   process.exit(1);
 }
 // 上面的 guard 已经 narrow 到 openai-compat；下面的绑定让 TS 知道形状。
-const compat = choice;
+// spike 脚本只验证单网关链路，取第一个可用 provider 即可。
+const compat = choice.providers[0]!;
 
 console.log(`网关 ${compat.baseUrl}`);
 console.log(`模型 ${compat.defaultModel}　key ${maskKey(compat.apiKey)}`);
@@ -75,7 +76,7 @@ interface Frame {
 const frames: Frame[] = [];
 const innerSeen = new Map<string, number>();
 
-const source = build(choice.models);
+const source = build(compat.models);
 const agent = createAxonEngine({
   systemPrompt: '你是 Axon 的开发执行体。需要事实时必须调用工具，不许编造。先思考再回答。',
   model: source.model,
@@ -150,7 +151,7 @@ console.log(`     tokens in ${bare?.usage?.input ?? 0} / out ${bare?.usage?.outp
 console.log(`     cost.total = ${bare?.usage?.cost?.total ?? 0}`);
 
 // 同一模型，注入一个真实量级的单价（$/百万 token），只看 cost 是否随之变非零。
-const priced = build(choice.models.map((m) => ({ ...m, cost: { input: 0.27, output: 1.1 } })));
+const priced = build(compat.models.map((m) => ({ ...m, cost: { input: 0.27, output: 1.1 } })));
 const agent2 = createAxonEngine({
   systemPrompt: '回答简洁。',
   model: priced.model,
@@ -173,7 +174,7 @@ console.log(`  ⇒ ${costIsConfigGap ? '成本归零是【配置缺 cost 字段�
 // ══ 闸口 4：stopReason=length 时 pi 会不会自己续写 ═══════════
 
 console.log('\n══ 闸口 4：length 截断与自动续写 ══');
-const tiny = build(choice.models.map((m) => ({ ...m, maxTokens: 48 })));
+const tiny = build(compat.models.map((m) => ({ ...m, maxTokens: 48 })));
 const agent3 = createAxonEngine({
   systemPrompt: '你必须写得很长很详细，不要精简。',
   model: tiny.model,

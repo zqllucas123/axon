@@ -125,6 +125,19 @@ export function getKey(key: string, configPath = CONFIG_PATH): string | null {
   }
 }
 
+/**
+ * 删除一个 key（明文与密文槽位都删）。
+ *
+ * 两条都删而不是只删当前模式对应的那条：safeStorage 的可用性会随环境变化
+ * （CI 里不可用、装机后可用），只删一条会在环境切换后把旧值又「复活」出来。
+ */
+export async function deleteKey(key: string, configPath = CONFIG_PATH): Promise<void> {
+  const raw = readRawSync(configPath);
+  delAt(raw, key);
+  delAt(raw, ctPath(key));
+  await writeRawAsync(raw, configPath);
+}
+
 /** 判断 key 是否已存储（不解密）。 */
 export function hasKey(key: string, configPath = CONFIG_PATH): boolean {
   const raw = readRawSync(configPath);

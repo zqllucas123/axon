@@ -297,6 +297,40 @@ export interface UsageTotals {
  */
 export type AxonThinkingLevel = 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh';
 
+/**
+ * 生效模型的来源档位 —— 回答「这个 model 值是谁定的」。
+ *
+ * 前五档与模型解析的五级优先链一一对应（会话 host 的 pickModelSource 命中第几级就写第几档），
+ * `runtime` 是 S2 运行中手动切换。
+ *
+ * 为什么不把来源揉进 model 字符串（如 `member:kt:deepseek`）：那样每个读 model 的地方
+ * 都得先解析再剥前缀，而 model 本身要直接喂给 `selectModel`。两个字段各司其职更便宜。
+ */
+export type ModelOrigin =
+  /** 团队成员覆写（S3 成员编辑器点名指定）。 */
+  | 'member'
+  /** 会话窗选择（S0 新建会话时选的模型）。 */
+  | 'session'
+  /** 角色类型声明（RoleDefinition.model）。 */
+  | 'role'
+  /** 全局默认 `config.defaultModelRef`。 */
+  | 'default'
+  /** 兜底：首个可用 provider 的默认模型。 */
+  | 'fallback'
+  /** S2 运行时手动切换（`agent.setModel`）。 */
+  | 'runtime';
+
+/**
+ * 这两档是「用户显式钉过」的语义：会话级模型变更**不许**冲掉它们。
+ * 其余档位都是继承来的，跟随会话变。
+ */
+export const PINNED_MODEL_ORIGINS: readonly ModelOrigin[] = Object.freeze(['member', 'runtime']);
+
+/** 该来源是否为用户显式指定（会话级变更应跳过）。 */
+export function isPinnedModelOrigin(origin: ModelOrigin | undefined): boolean {
+  return !!origin && PINNED_MODEL_ORIGINS.includes(origin);
+}
+
 export interface AgentSnapshot {
   path: AgentPath;
   role: string;
@@ -318,11 +352,20 @@ export interface AgentSnapshot {
   /** 当前在等哪些后代（waits 图的出边）；空表示没在等人。 */
   waitingOn?: AgentPath[];
   /**
-   * 当前生效的模型 id。spawn 时按「角色声明 / provider 默认」解析写入；
-   * 用户在会话输入区切换模型后随之更新（`agent.model.changed` 事件下发）。
+   * 当前生效的模型引用 `providerId:modelId`（M15 起；旧落盘记录可能是裸 modelId，
+   * 由 `resolveModelRef` 按 providers 顺序兼容解析）。
    * 未接真 provider（faux）时缺省。
    */
   model?: string;
+  /**
+   * `model` 这个值**从哪来**。与 `model` 同写同改，不许只改一个。
+   *
+   * 存在的唯一理由：改会话模型时要知道谁该跟着变。
+   * `member`/`runtime` 是用户显式钉过的，不许被会话级变更冲掉；其余档位都跟随。
+   * 没有这个字段就只有两种错法 —— 无脑全改（踩掉成员点名指定），或一个不改
+   * （会话选择器形同虚设）。
+   */
+  modelOrigin?: ModelOrigin;
   /** 当前推理深度档位；缺省视为 'off'。 */
   thinkingLevel?: AxonThinkingLevel;
 }

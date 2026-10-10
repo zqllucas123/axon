@@ -13,6 +13,7 @@
 import { useState, useEffect, type ReactElement } from 'react';
 import { useApp } from '../state/store.tsx';
 import { Icon } from '../icons.tsx';
+import { ComposerBar } from './ComposerBar.tsx';
 import { EnginePicker } from './EnginePicker.tsx';
 import { Inspector } from './Inspector.tsx';
 import { WorkspacePanel } from './WorkspacePanel.tsx';
@@ -184,55 +185,46 @@ export function SessionMain(): ReactElement {
                 </div>
               </div>
             ) : null}
-            <div className="composer">
-              <textarea
-                className="ph"
-                value={text}
-                onChange={(e) => setText(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' && !e.shiftKey) {
-                    e.preventDefault();
-                    send();
-                  }
-                }}
-                placeholder={focus ? `发给 ${focus.displayName}…（Enter 发送，Shift+Enter 换行）` : '先选一个成员…'}
-                data-smoke="composer"
-                style={{ width: '100%', border: 0, background: 'none', resize: 'none', outline: 'none', font: 'inherit' }}
-              />
-              <div className="row">
-                {/* 与 S0 对齐的三枚工具按钮；附件仍是占位，引擎 popover 在会话中只读（建会话时已定）。 */}
-                <button className="tool-btn" disabled title="尚未支持：协议里没有附件面">
-                  <Icon name="paperclip" size={16} />
-                </button>
-                <EnginePicker value={current.record.engineId ?? null} />
-                <button
-                  className={`tool-btn${current.record.executor === 'team' ? ' is-on' : ''}`}
-                  onClick={() => setEscalateOpen(true)}
-                  data-smoke="mode-trigger"
-                  disabled={!!current.record.engineId}
-                  title={
-                    current.record.engineId
-                      ? '外部引擎会话暂不支持叫人组队'
-                      : current.record.executor === 'team'
-                      ? `团队模式 · ${current.record.teamId ?? '未知团队'}（点击切换）`
-                      : '执行模式：单兵（点击叫人升级为团队）'
-                  }
-                >
-                  <Icon name="users" size={16} />
-                </button>
-                <span className="spacer" />
-                {/* 外部引擎用它自己的模型设置，Axon 网关的模型表对它没有意义 —— 不显示选择器。 */}
-                {focusPath && !current.record.engineId ? <ModelPicker focusPath={focusPath} /> : null}
-                <button
-                  className="send"
-                  onClick={running ? () => focusPath && void interrupt(focusPath) : send}
-                  title={running ? '中断任务' : '发送（Enter）'}
-                  disabled={!focusPath}
-                >
-                  <Icon name={running ? 'pause' : 'arrowUp'} size={16} />
-                </button>
-              </div>
-            </div>
+            {/* 外壳（容器 / textarea / 工具栏三段式布局）由 ComposerBar 收口，与 S0 共用一份；
+                这里只给出本屏的控件行为：附件无协议面、引擎只读、模式走「叫人」弹层。 */}
+            <ComposerBar
+              value={text}
+              onChange={setText}
+              onSubmit={send}
+              placeholder={focus ? `发给 ${focus.displayName}…（Enter 发送，Shift+Enter 换行）` : '先选一个成员…'}
+              textareaSmoke="composer"
+              left={
+                <>
+                  <button className="tool-btn" disabled title="尚未支持：协议里没有附件面">
+                    <Icon name="paperclip" size={16} />
+                  </button>
+                  <EnginePicker value={current.record.engineId ?? null} />
+                  <button
+                    className={`tool-btn${current.record.executor === 'team' ? ' is-on' : ''}`}
+                    onClick={() => setEscalateOpen(true)}
+                    data-smoke="mode-trigger"
+                    disabled={!!current.record.engineId}
+                    title={
+                      current.record.engineId
+                        ? '外部引擎会话暂不支持叫人组队'
+                        : current.record.executor === 'team'
+                        ? `团队模式 · ${current.record.teamId ?? '未知团队'}（点击切换）`
+                        : '执行模式：单兵（点击叫人升级为团队）'
+                    }
+                  >
+                    <Icon name="users" size={16} />
+                  </button>
+                </>
+              }
+              /* 外部引擎用它自己的模型设置，Axon 网关的模型表对它没有意义 —— 不显示选择器。 */
+              right={focusPath && !current.record.engineId ? <ModelPicker focusPath={focusPath} /> : null}
+              send={{
+                icon: running ? 'pause' : 'arrowUp',
+                onClick: running ? () => focusPath && void interrupt(focusPath) : send,
+                title: running ? '中断任务' : '发送（Enter）',
+                disabled: !focusPath,
+              }}
+            />
           </div>
         </>
       ) : sessionView === 'ledger' ? (

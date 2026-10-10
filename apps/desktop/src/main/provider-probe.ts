@@ -20,6 +20,7 @@
  * ────────────────────────────────────────────────────────────────
  */
 
+import { parseModelRef, type AxonConfig } from '@axon/protocol';
 import { loadConfig, resolveModelChoice } from './model-config.ts';
 import { getKey } from './keychain.ts';
 
@@ -133,21 +134,50 @@ async function tryChat(
   return { ok: true, latencyMs, models: [model] };
 }
 
-/** 解析出可用的网关配置（含 keychain 注入的 apiKey）；faux 时返回 error。 */
-async function resolveEffective(): Promise<
+/**
+ * 解析出要探测的那个网关（含 keychain 注入的 apiKey）；不可用时返回 error。
+ *
+ * `providerId` 来自 UI：设置页每个 provider 卡片上的「测试 / 拉取模型列表」都要
+ * 打到**自己**那一行，不能统一打默认 provider —— 否则新加的网关永远测不到。
+ * 不传时回落到默认 provider（`defaultRef` 指向的那个），兼容无 id 的旧调用。
+ */
+async function resolveEffective(providerId?: string): Promise<
   | { ok: true; baseUrl: string; apiKey: string }
   | { ok: false; error: string }
 > {
   const { config } = await loadConfig();
-  // keychain 迁移后 config.json 里已无明文 apiKey，从 keychain 解密后注入，
+  // keychain 迁移后 config.json 里已无明文 apiKey，逐个从 keychain 解密后注入，
   // 否则 resolveModelChoice 会误判「未配置 apiKey」而降级到 faux（测试连接永远失败）。
-  const plainKey = getKey('provider.apiKey');
-  const effective = plainKey
-    ? { ...config, provider: { ...(config.provider ?? {}), apiKey: plainKey } }
-    : config;
+  const list = config.providers?.length
+    ? config.providers
+    : config.provider
+      ? [{ ...config.provider, id: config.provider.id || 'default' }]
+      : [];
+  const effective: AxonConfig = {
+    ...config,
+    providers: list.map((p) => {
+      const id = p.id || 'default';
+      const plain = getKey(`providerKeys.${id}.apiKey`);
+      return plain ? { ...p, id, apiKey: plain } : { ...p, id };
+    }),
+  };
+
   const choice = resolveModelChoice(effective);
   if (choice.kind === 'faux') return { ok: false, error: choice.reason };
-  return { ok: true, baseUrl: choice.baseUrl, apiKey: choice.apiKey };
+
+  // 指定了 id 就必须命中它；命中不了是真错误（UI 上那张卡片还没存盘，或 id 打错），
+  // 静默回落到别的 provider 会让用户看到「测试通过」却测的是另一个网关。
+  if (providerId) {
+    const hit = choice.providers.find((p) => p.providerId === providerId);
+    if (!hit) {
+      return { ok: false, error: `提供商 ${providerId} 不可用（缺 baseUrl / apiKey，或模型清单为空）` };
+    }
+    return { ok: true, baseUrl: hit.baseUrl, apiKey: hit.apiKey };
+  }
+
+  const defaultId = parseModelRef(choice.defaultRef)?.providerId;
+  const target = choice.providers.find((p) => p.providerId === defaultId) ?? choice.providers[0]!;
+  return { ok: true, baseUrl: target.baseUrl, apiKey: target.apiKey };
 }
 
 /**
@@ -163,8 +193,8 @@ async function resolveEffective(): Promise<
  * 4. 超时 15000ms（chat 探测可能比列表慢；AbortController + setTimeout）
  * 5. HTTP 非 2xx（如 403）视为「连通但有问题」，不再 fallback
  */
-export async function probeProvider(model?: string): Promise<ProbeResult> {
-  const resolved = await resolveEffective();
+export async function probeProvider(model?: string, providerId?: string): Promise<ProbeResult> {
+  const resolved = await resolveEffective(providerId);
   if (!resolved.ok) return { ok: false, latencyMs: 0, models: [], error: resolved.error };
 
   const { baseUrl, apiKey } = resolved;

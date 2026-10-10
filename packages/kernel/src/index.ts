@@ -27,6 +27,7 @@ export {
   createRegistry,
   createFauxSource,
   createOpenAICompatSource,
+  createMultiProviderSource,
   withTurnCost,
   withDsmlParsing,
   scriptedSource,

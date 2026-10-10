@@ -16,13 +16,12 @@ import {
   useState,
   type ReactElement,
 } from 'react';
-import type { ModelSpec } from '@axon/protocol';
+import { formatModelRef, type ModelSpec, type ProviderConfigView } from '@axon/protocol';
 import { useSettings } from '../SettingsStore.tsx';
 import {
   InputField,
   SettingsRow,
   envLock,
-  useFieldPatch,
 } from '../fields.tsx';
 
 // ─── 图标 ────────────────────────────────────────────────────
@@ -60,12 +59,16 @@ function TrashIcon(): ReactElement {
 
 // ─── API Key 行（聚焦即可输入，与原版保持一致） ──────────────
 
-function ApiKeyRow(): ReactElement {
-  const { saving, error, commit } = useFieldPatch('provider.apiKey');
-  const { config } = useSettings();
-  const p = config?.config.provider;
-  const env = config?.envOverrides ?? [];
-  const lock = envLock(env, 'provider.apiKey');
+function ApiKeyRow({
+  p,
+  env,
+  onSave,
+}: {
+  p: ProviderConfigView | undefined;
+  env: readonly import('@axon/protocol').EnvOverride[];
+  onSave: (apiKey: string | null) => void;
+}): ReactElement {
+  const lock = envLock(env, `providers.${p?.id ?? ''}.apiKey`);
   const isSet = p?.apiKeySet === true;
   const masked = p?.apiKeyMasked;
 
@@ -78,11 +81,10 @@ function ApiKeyRow(): ReactElement {
   const submit = useCallback((): void => {
     const val = text.trim();
     if (val === '') return;
-    void commit(val).then((ok) => { if (ok) setText(''); });
-  }, [text, commit]);
+    onSave(val);
+    setText('');
+  }, [text, onSave]);
 
-  // 已配置且未在编辑时，用实心圆点展示（像密码框），让「这里存了 key」一眼可见；
-  // 聚焦即清空，方便直接粘贴新 key。真实掩码（sk-***xyz）挪到下方 hint 里备查。
   const showDots = isSet && !focused && text === '';
 
   return (
@@ -95,7 +97,7 @@ function ApiKeyRow(): ReactElement {
           autoComplete="new-password"
           value={showDots ? '••••••••••••' : text}
           placeholder={focused || isSet ? '粘贴新的 API Key' : '未配置'}
-          disabled={Boolean(lock) || saving}
+          disabled={Boolean(lock)}
           onChange={(e) => setText(e.target.value)}
           onFocus={() => setFocused(true)}
           onBlur={() => { setFocused(false); submit(); }}
@@ -108,14 +110,12 @@ function ApiKeyRow(): ReactElement {
           <button
             type="button"
             className="provider-btn ghost"
-            disabled={saving}
-            onClick={() => void commit(null)}
+            onClick={() => onSave(null)}
           >
             清除
           </button>
         ) : null}
       </div>
-      {error ? <div className="provider-field-err">{error}</div> : null}
       {lock ? (
         <div className="provider-field-hint">
           被环境变量 <code>{lock.env}</code> 覆盖，改动不会生效
@@ -133,6 +133,8 @@ function ApiKeyRow(): ReactElement {
 
 interface ModelRowProps {
   model: ModelSpec;
+  /** 探测要打到哪个网关 —— 多 provider 下不能让它默认落到第一个。 */
+  providerId: string;
   isDefault: boolean;
   onSetDefault: () => void;
   onDelete: () => void;
@@ -145,7 +147,7 @@ type TestState =
   | { tag: 'ok'; latencyMs: number }
   | { tag: 'fail'; error: string };
 
-function ModelRow({ model, isDefault, onSetDefault, onDelete, onSaveCaps }: ModelRowProps): ReactElement {
+function ModelRow({ model, providerId, isDefault, onSetDefault, onDelete, onSaveCaps }: ModelRowProps): ReactElement {
   const [capsOpen, setCapsOpen] = useState(false);
   const [ctxVal, setCtxVal] = useState(String(model.contextWindow ?? ''));
   const [maxVal, setMaxVal] = useState(String(model.maxTokens ?? ''));
@@ -159,7 +161,7 @@ function ModelRow({ model, isDefault, onSetDefault, onDelete, onSaveCaps }: Mode
     setTest({ tag: 'testing' });
     try {
       // 传 model → 主进程对该模型发一次真 chat/completions 探测（比 /models 靠谱）。
-      const res = await window.axon.invoke('provider.test', { model: model.id });
+      const res = await window.axon.invoke('provider.test', { model: model.id, providerId });
       if (res.ok) {
         setTest({ tag: 'ok', latencyMs: res.latencyMs });
       } else {
@@ -341,17 +343,49 @@ function ManualAddRow({ onAdd }: { onAdd: (id: string, name?: string) => void })
 
 // ─── Provider Card ────────────────────────────────────────────
 
-function ProviderCard(): ReactElement {
-  const { config } = useSettings();
-  const p = config?.config.provider;
+function ProviderCard({
+  p,
+  defaultRef,
+  initialExpanded,
+}: {
+  p: ProviderConfigView;
+  /** 全局默认模型（`providerId:modelId`）—— 「主对话」胶囊全局只亮一个。 */
+  defaultRef: string | undefined;
+  initialExpanded: boolean;
+}): ReactElement {
+  const { config, saveProvider, deleteProvider, patch: patchConfig } = useSettings();
   const env = config?.envOverrides ?? [];
-  const models = p?.models ?? [];
-  const defaultModel = p?.defaultModel;
+  const models = p.models ?? [];
 
-  const { saving: modelsSaving, commit: commitModels } = useFieldPatch('provider.models');
-  const { commit: commitDefault } = useFieldPatch('provider.defaultModel');
+  const [expanded, setExpanded] = useState(initialExpanded);
+  const [confirmDel, setConfirmDel] = useState(false);
 
-  const [expanded, setExpanded] = useState(true);
+  // Convenience: build a minimal ProviderConfig for saveProvider.
+  // p is ProviderConfigView (masked), so apiKey must be provided only when changed.
+  const providerBase = () => ({
+    id: p.id,
+    name: p.name,
+    baseUrl: p.baseUrl,
+    models: p.models as ModelSpec[] | undefined,
+    defaultModel: p.defaultModel,
+    headers: p.headers,
+  });
+
+  const commitModels = (next: ModelSpec[] | null) => {
+    void saveProvider({ ...providerBase(), models: next ?? undefined });
+  };
+
+  /**
+   * 「主对话」= 全局默认模型，所以要同时写两处：provider 自己的 defaultModel
+   * （让这张卡自洽）和顶层 defaultModelRef（resolveModelChoice 真正读的那个）。
+   * 顺序不能反：defaultModelRef 的校验会拿 providers 解引用，provider 没先落盘
+   * 就会被判 invalid-value 整批退回。
+   */
+  const commitDefault = async (model: string | null) => {
+    const ok = await saveProvider({ ...providerBase(), defaultModel: model ?? undefined });
+    if (!ok) return;
+    await patchConfig({ defaultModelRef: model ? formatModelRef(p.id, model) : null });
+  };
 
   // ── 拉取模型列表 ──
   type ProbePhase =
@@ -374,7 +408,7 @@ function ProviderCard(): ReactElement {
   const runFetch = async () => {
     setProbe({ tag: 'loading' });
     try {
-      const res = await window.axon.invoke('provider.test', {});
+      const res = await window.axon.invoke('provider.test', { providerId: p.id });
       if (!res.ok) {
         setProbe({ tag: 'err', error: res.error ?? '连接失败' });
         return;
@@ -417,8 +451,11 @@ function ProviderCard(): ReactElement {
     void commitModels(next.length === 0 ? null : next);
   };
 
+  // 「主对话」比的是全局 ref，不是本卡的 defaultModel —— 否则多个网关会各自亮一个胶囊。
+  const isDefaultModel = (modelId: string) => defaultRef === formatModelRef(p.id, modelId);
+
   const handleSetDefault = (modelId: string) => {
-    void commitDefault(modelId === defaultModel ? null : modelId);
+    void commitDefault(isDefaultModel(modelId) ? null : modelId);
   };
 
   const handleDelete = (index: number) => {
@@ -468,7 +505,12 @@ function ProviderCard(): ReactElement {
             <div className="provider-field-row-2col">
               <div className="provider-field">
                 <label className="provider-field-label">名称</label>
-                <ProviderInlineInput path="provider.name" placeholder="My Gateway" lock={envLock(env, 'provider.name')} />
+                <ProviderInlineInput
+                  value={p.name ?? ''}
+                  placeholder="My Gateway"
+                  lock={envLock(env, `providers.${p.id}.name`)}
+                  onSave={(v) => void saveProvider({ ...providerBase(), name: v || undefined })}
+                />
               </div>
               <div className="provider-field">
                 <label className="provider-field-label">API 协议</label>
@@ -479,14 +521,15 @@ function ProviderCard(): ReactElement {
             <div className="provider-field">
               <label className="provider-field-label">Base URL</label>
               <ProviderInlineInput
-                path="provider.baseUrl"
+                value={p.baseUrl ?? ''}
                 placeholder="https://api.example.com/v1"
                 mono
-                lock={envLock(env, 'provider.baseUrl')}
+                lock={envLock(env, `providers.${p.id}.baseUrl`)}
+                onSave={(v) => void saveProvider({ ...providerBase(), baseUrl: v || undefined })}
               />
             </div>
 
-            <ApiKeyRow />
+            <ApiKeyRow p={p} env={env} onSave={(key) => void saveProvider({ ...providerBase(), apiKey: key ?? '' })} />
 
 
           </div>
@@ -557,7 +600,7 @@ function ProviderCard(): ReactElement {
                   <button
                     type="button"
                     className="provider-btn primary"
-                    disabled={pickSelected.size === 0 || modelsSaving}
+                    disabled={pickSelected.size === 0}
                     onClick={confirmPick}
                   >
                     添加所选（{pickSelected.size}）
@@ -577,7 +620,8 @@ function ProviderCard(): ReactElement {
                 <ModelRow
                   key={`${m.id}-${i}`}
                   model={m}
-                  isDefault={m.id === defaultModel}
+                  providerId={p.id}
+                  isDefault={isDefaultModel(m.id)}
                   onSetDefault={() => handleSetDefault(m.id)}
                   onDelete={() => handleDelete(i)}
                   onSaveCaps={(patch) => handleSaveCaps(i, patch)}
@@ -587,45 +631,59 @@ function ProviderCard(): ReactElement {
             </div>
           </div>
 
-          {/* 删除整个 provider（危险区，清空配置） */}
+          {/* 删除整个网关 */}
+          <div className="provider-card-danger">
+            {confirmDel ? (
+              <>
+                <span className="provider-field-hint">
+                  删除「{p.name || p.id}」及其 {models.length} 个模型？API Key 会一并从加密存储移除。
+                </span>
+                <button type="button" className="provider-btn ghost" onClick={() => setConfirmDel(false)}>
+                  取消
+                </button>
+                <button
+                  type="button"
+                  className="provider-btn danger"
+                  onClick={() => void deleteProvider(p.id)}
+                >
+                  确认删除
+                </button>
+              </>
+            ) : (
+              <button type="button" className="provider-btn ghost danger" onClick={() => setConfirmDel(true)}>
+                <TrashIcon />
+                删除此网关
+              </button>
+            )}
+          </div>
         </div>
       ) : null}
     </div>
   );
 }
 
-// ─── 内联输入（复用 useFieldPatch，不用 SettingsRow 包装） ───
+// ─── 内联输入（受控，字段失焦时回调 onSave） ───────────────────
 
 function ProviderInlineInput({
-  path,
+  value,
   placeholder,
   mono,
   lock,
+  onSave,
 }: {
-  path: Parameters<typeof useFieldPatch>[0];
+  value: string;
   placeholder?: string;
   mono?: boolean;
   lock?: ReturnType<typeof envLock>;
+  onSave: (next: string) => void;
 }): ReactElement {
-  const { saving, error, commit } = useFieldPatch(path);
-  const { config } = useSettings();
-
-  const getVal = (): string => {
-    if (!config) return '';
-    const p = config.config.provider;
-    if (path === 'provider.name') return p?.name ?? '';
-    if (path === 'provider.baseUrl') return p?.baseUrl ?? '';
-    return '';
-  };
-
-  const truth = lock ? (lock.value ?? '') : getVal();
-  const [text, setText] = useState(truth);
-  useEffect(() => setText(truth), [truth]);
+  const [text, setText] = useState(value);
+  useEffect(() => setText(value), [value]);
 
   const submit = () => {
     const raw = text.trim();
-    if (raw === truth) return;
-    void commit(raw === '' ? null : raw).then((ok) => { if (!ok) setText(truth); });
+    if (raw === value) return;
+    onSave(raw);
   };
 
   return (
@@ -634,25 +692,48 @@ function ProviderInlineInput({
         className={['settings-input', mono ? 'mono' : ''].filter(Boolean).join(' ')}
         value={text}
         placeholder={placeholder}
-        disabled={Boolean(lock) || saving}
+        disabled={Boolean(lock)}
         onChange={(e) => setText(e.target.value)}
         onBlur={submit}
-        onKeyDown={(e) => { if (e.key === 'Enter') submit(); if (e.key === 'Escape') setText(truth); }}
+        onKeyDown={(e) => { if (e.key === 'Enter') submit(); if (e.key === 'Escape') setText(value); }}
       />
-      {error ? <div className="provider-field-err">{error}</div> : null}
     </>
   );
 }
 
 // ─── 主 Pane ─────────────────────────────────────────────────
 
+/** 在已有 id 里挑一个不冲突的 `gatewayN`。 */
+function nextProviderId(taken: readonly string[]): string {
+  const set = new Set(taken);
+  for (let i = 2; ; i += 1) {
+    const id = `gateway${i}`;
+    if (!set.has(id)) return id;
+  }
+}
+
 export function ModelsPane(): ReactElement {
-  const { config } = useSettings();
+  const { config, saveProvider } = useSettings();
   if (!config) return <div className="empty">读取配置中…</div>;
 
   const env = config.envOverrides;
   const hard = config.config.budgetUsd;
   const res = config.resolution;
+
+  // legacy 单 provider 的兜底：迁移后 providers[] 恒有值，但 config.json 是用户
+  // 可手改的文件，空数组时还得能加出第一张卡。
+  const providers = config.config.providers?.length
+    ? config.config.providers
+    : config.config.provider
+      ? [config.config.provider]
+      : [];
+
+  const addProvider = () => {
+    const id = nextProviderId(providers.map((p) => p.id));
+    // 空壳卡片：baseUrl / apiKey 留给用户在卡里填。saveProvider 按 id upsert，
+    // 所以这一下就是「新增」。
+    void saveProvider({ id, name: `网关 ${providers.length + 1}` });
+  };
 
   return (
     <section className="st-pane" data-pane="model">
@@ -681,9 +762,26 @@ export function ModelsPane(): ReactElement {
         </SettingsRow>
       </div>
 
-      {/* Provider Card */}
+      {/* 网关列表：一张卡一个 provider */}
       <div className="st-sec">网关与模型</div>
-      <ProviderCard />
+      {providers.length === 0 ? (
+        <div className="provider-list-empty">
+          还没有网关 —— 添加一个 OpenAI 兼容网关，填入 Base URL 与 API Key。
+        </div>
+      ) : (
+        providers.map((p) => (
+          <ProviderCard
+            key={p.id}
+            p={p}
+            defaultRef={config.config.defaultModelRef ?? undefined}
+            initialExpanded={providers.length === 1}
+          />
+        ))
+      )}
+      <button type="button" className="provider-add-btn" onClick={addProvider} data-smoke="add-provider">
+        <span className="provider-add-plus">+</span>
+        <span>添加网关</span>
+      </button>
 
       {/* 预算 */}
       <div className="st-sec">预算</div>

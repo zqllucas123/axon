@@ -97,6 +97,11 @@ export class KnowledgeBridge {
         const p = payload as { kbId: string };
         return mgr.listDocs(p.kbId);
       }
+      case 'kb.updateModel': {
+        const p = payload as { kbId: string; model: string };
+        await mgr.updateEmbeddingModel(p.kbId, p.model);
+        return { updated: true };
+      }
       default:
         return undefined;
     }

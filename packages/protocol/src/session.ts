@@ -64,9 +64,10 @@ export type SessionStatus = 'open' | 'closed';
  *
  * v1 → v2（M9）：SessionRecord 新增 `engineId`、`externalSessionId`、`resumeCursor`。
  * v2 → v3（M10）：SessionRecord 新增 `parentSessionId`、`parentAgentPath`、`childSessionIds`。
+ * v3 → v4（M15）：SessionRecord 新增 `modelRef`（会话级模型，`providerId:modelId`）。
  * 字段全部可选，旧记录正常读出，新字段缺省即 undefined。
  */
-export const SESSION_SCHEMA_VERSION = 3;
+export const SESSION_SCHEMA_VERSION = 4;
 
 /**
  * 落盘**外箱**版本（M5）：会话目录布局与文件集的版本。
@@ -190,6 +191,14 @@ export interface SessionRecord {
   budget?: SessionBudgetSpec;
   /** 会话级并发上限（团队 maxConcurrent 实例化到本会话的副本）。 */
   maxConcurrent?: number;
+  /**
+   * 会话级模型（M15），`providerId:modelId` 复合键（见 `formatModelRef`）。
+   *
+   * 优先级：角色/成员 overrides.model > 本字段 > config.defaultModelRef。
+   * 即建会话时选的模型盖过全局默认，但不越过角色显式声明（「角色只能减能」）。
+   * 解析不到时静默回落全局默认 —— 配置坏了不能让会话起不来。
+   */
+  modelRef?: string;
   /**
    * 外部引擎 id（M9）。缺省或 undefined = 走内置 pi 引擎（历史会话兼容）。
    * 值域与 `AgentToolId`（`@axon/protocol/agent-tools`）对齐。
@@ -357,6 +366,11 @@ export interface CreateSessionPayload {
   budget?: SessionBudgetSpec;
   /** 会话级并发；不填则从团队档继承。 */
   maxConcurrent?: number;
+  /**
+   * 会话级模型（M15），`providerId:modelId` 复合键。
+   * 缺省 = 跟全局 `defaultModelRef`。见 `SessionRecord.modelRef` 的优先级说明。
+   */
+  modelRef?: string;
   /**
    * 用户通过原生文件选择器选中、希望放入本次会话工作目录的文件绝对路径列表。
    * 主进程负责把它们复制进 record.cwd（不修改原文件）；渲染层不自己写文件。

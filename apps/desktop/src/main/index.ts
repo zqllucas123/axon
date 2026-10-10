@@ -28,13 +28,14 @@ import {
   type EventMap,
   type OpenPathKind,
   type ProjectKind,
+  type ProviderConfig,
   type RequestEnvelope,
   type ResponseEnvelope,
 } from '@axon/protocol';
 import {
   Type,
   createFauxSource,
-  createOpenAICompatSource,
+  createMultiProviderSource,
   fauxAssistantMessage,
   fauxToolCall,
   lastUserText,
@@ -274,7 +275,7 @@ function applyProxyConfig(config: AxonConfig): void {
     const noProxy = config.proxy?.noProxy;
     if (noProxy) {
       // undici ProxyAgent 支持 noProxyHosts 以跳过特定目标。
-      (options as Record<string, unknown>).noProxyHosts = noProxy
+      (options as unknown as Record<string, unknown>).noProxyHosts = noProxy
         .split(',')
         .map((h) => h.trim())
         .filter(Boolean);
@@ -302,22 +303,29 @@ async function buildModelSource(config: AxonConfig): Promise<{ source: ModelSour
   const choice = resolveModelChoice(config);
 
   if (choice.kind === 'openai-compat') {
-    const real = createOpenAICompatSource({
-      providerId: choice.providerId,
-      providerName: choice.providerName,
-      baseUrl: choice.baseUrl,
-      apiKey: choice.apiKey,
-      models: choice.models,
-      defaultModel: choice.defaultModel,
-      ...(choice.headers ? { headers: choice.headers } : {}),
-    });
+    const real = createMultiProviderSource(
+      choice.providers.map((p) => ({
+        providerId: p.providerId,
+        providerName: p.providerName,
+        baseUrl: p.baseUrl,
+        apiKey: p.apiKey,
+        models: p.models,
+        defaultModel: p.defaultModel,
+        ...(p.headers ? { headers: p.headers } : {}),
+      })),
+      choice.defaultRef,
+    );
+    // 多网关时日志逐个列出，否则排查「这次到底发到哪个 baseUrl」只能靠猜。
+    const detail = choice.providers
+      .map((p) => `${p.providerId} @ ${p.baseUrl}（key ${maskKey(p.apiKey)}）`)
+      .join('；');
     return {
       // withDsmlParsing：部分网关（未开 tool-call-parser 的 vLLM/SGLang）把
       // DeepSeek 工具调用以 <｜DSML｜calls> special token 吐回明文；这层把它
       // 重建为标准 toolCall 内容块，让 agent-loop 能正常执行工具。
       // 若网关侧修复后可直接把 withDsmlParsing(real) 换回 real。
       source: withDsmlParsing(real),
-      label: `真模型 ${choice.providerId}/${choice.defaultModel} @ ${choice.baseUrl}（key ${maskKey(choice.apiKey)}）`,
+      label: `真模型 ${choice.defaultRef}（共 ${choice.providers.length} 个提供商：${detail}）`,
     };
   }
 
@@ -829,6 +837,24 @@ app.whenReady().then(async () => {
           return { id: request.id, ok: true, result };
         }
 
+        // 多提供商写侧（M15）：provider 是数组，点号路径表达不了「第几个的哪个
+        // 字段」，所以整卡提交走这两条，而不是 config.patch。落盘成功后同样要
+        // applyConfigPatch —— 否则改完模型源要重启才生效。
+        if (request.command === 'provider.save') {
+          const result = await configStore!.saveProvider(
+            (request.payload as { provider: ProviderConfig }).provider,
+          );
+          if (result.accepted) await applyConfigPatch();
+          return { id: request.id, ok: true, result };
+        }
+        if (request.command === 'provider.delete') {
+          const result = await configStore!.deleteProvider(
+            (request.payload as { id: string }).id,
+          );
+          if (result.deleted) await applyConfigPatch();
+          return { id: request.id, ok: true, result };
+        }
+
         // 外壳类（MU-3 E-3）：枚举 → 真路径的解析只在主进程做，
         // 渲染层拿不到、也不该拿到任意路径的 open 能力。
         if (request.command === 'shell.openPath') {
@@ -989,8 +1015,8 @@ app.whenReady().then(async () => {
         if (request.command === 'provider.test') {
           try {
             const { probeProvider } = await import('./provider-probe.ts');
-            const model = (request.payload as { model?: string } | undefined)?.model;
-            const result = await probeProvider(model);
+            const payload = request.payload as { model?: string; providerId?: string } | undefined;
+            const result = await probeProvider(payload?.model, payload?.providerId);
             return { id: request.id, ok: true, result };
           } catch {
             // provider-probe.ts 尚未交付（W-B 阶段）或探针失败时的兜底。

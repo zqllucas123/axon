@@ -19,7 +19,7 @@
 import { readFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import type { AxonConfig } from '@axon/protocol';
+import { formatModelRef, resolveModelRef, type AxonConfig, type ProviderConfig } from '@axon/protocol';
 import type { OpenAICompatModel } from '@axon/kernel';
 
 /**
@@ -30,18 +30,35 @@ import type { OpenAICompatModel } from '@axon/kernel';
  */
 export type { AxonConfig };
 
-/** 解析结果：要么用 faux，要么给出一份完整可用的真 provider 规格。 */
+/** 一个已解析完毕、可直接建 ModelSource 的 provider 规格。 */
+export interface ResolvedProvider {
+  providerId: string;
+  providerName: string;
+  baseUrl: string;
+  apiKey: string;
+  models: OpenAICompatModel[];
+  /** provider 内默认模型（裸 id）。 */
+  defaultModel: string;
+  headers?: Record<string, string>;
+}
+
+/**
+ * 解析结果：要么用 faux，要么给出 **N 份**可用的真 provider 规格。
+ *
+ * M15 起 `providers` 是数组：一个 pi registry 能装多个 provider，
+ * `stream()` 按 `model.provider` 自己路由（`pi-ai/dist/models.js:352,380`），
+ * 所以多网关不需要多个 ModelSource，只需要多条 provider 注册。
+ *
+ * `defaultRef` 是 `providerId:modelId` 复合键 —— 两个网关挂同名模型是常态，
+ * 裸 id 无法寻址（见 protocol 的 `formatModelRef`）。
+ */
 export type ModelChoice =
   | { kind: 'faux'; reason: string }
   | {
       kind: 'openai-compat';
-      providerId: string;
-      providerName: string;
-      baseUrl: string;
-      apiKey: string;
-      models: OpenAICompatModel[];
-      defaultModel: string;
-      headers?: Record<string, string>;
+      providers: ResolvedProvider[];
+      /** 全局默认模型的复合键 `providerId:modelId`，保证能在 providers 里解到。 */
+      defaultRef: string;
     };
 
 export const CONFIG_PATH = process.env.AXON_CONFIG || join(homedir(), '.axon', 'config.json');
@@ -69,51 +86,102 @@ export function resolveModelChoice(
 ): ModelChoice {
   if (env.AXON_PROVIDER === 'faux') return { kind: 'faux', reason: 'AXON_PROVIDER=faux 显式指定' };
 
-  const p = config.provider ?? {};
-  const baseUrl = env.AXON_BASE_URL || p.baseUrl;
-  const apiKey = env.AXON_API_KEY || p.apiKey;
-  if (!baseUrl || !apiKey) {
-    return { kind: 'faux', reason: '未配置 provider.baseUrl / provider.apiKey，降级到 faux' };
+  // legacy 形状兜底：`ConfigStore.load()` 会把 `provider{}` 迁成 `providers[]`，
+  // 但这个函数也被不过 store 的调用点直接用（测试、provider-probe），所以这里也接一手。
+  const list: ProviderConfig[] = config.providers?.length
+    ? config.providers
+    : config.provider
+      ? [{ ...config.provider, id: config.provider.id || 'default' }]
+      : [];
+  if (!list.length) {
+    return { kind: 'faux', reason: '没有任何已配置的模型提供商，降级到 faux' };
   }
 
-  // env 只能指定模型 id；单价等元数据仍从配置里取（取不到就用 kernel 的默认值）。
-  const models = p.models?.length ? p.models : [];
+  // env 覆盖只作用于**第一个** provider（= 设置页里的默认那个）：
+  // CI 与冒烟脚本靠 AXON_BASE_URL/AXON_API_KEY/AXON_MODEL 注入单网关，
+  // 让它扫过所有 provider 会把用户真实配置也一起改写。
   const envModel = env.AXON_MODEL;
-  const merged = envModel && !models.some((m) => m.id === envModel)
-    ? [{ id: envModel }, ...models]
-    : models;
-  if (!merged.length) {
-    return { kind: 'faux', reason: '配置了网关但没有任何模型（provider.models 为空），降级到 faux' };
-  }
+  const resolved: ResolvedProvider[] = [];
+  const skipped: string[] = [];
 
-  const defaultModel = envModel || p.defaultModel || merged[0]!.id;
-  if (!merged.some((m) => m.id === defaultModel)) {
-    return { kind: 'faux', reason: `defaultModel=${defaultModel} 不在 models 清单里，降级到 faux` };
-  }
-
-  // M6：cost 全零告警。cost 字段缺失或全为 0 时 BudgetGuard 永远算不出花费，
-  // 预算熔断静默失效。这里只 warn 不降级——模型可能确实免费，不该强制要求填单价。
-  for (const m of merged) {
-    const c = m.cost;
-    const allZero = !c || Object.values(c).every((v) => !v);
-    if (allZero) {
-      console.warn(
-        `[M6] models[${m.id}] cost 字段全零或缺失，BudgetGuard 将无法触发。` +
-        `请在 ~/.axon/config.json 的 provider.models 里补充 cost（单位：美元/百万 token）。`,
-      );
+  for (const [i, p] of list.entries()) {
+    const isDefaultProvider = i === 0;
+    const baseUrl = (isDefaultProvider ? env.AXON_BASE_URL : undefined) || p.baseUrl;
+    const apiKey = (isDefaultProvider ? env.AXON_API_KEY : undefined) || p.apiKey;
+    const id = p.id || 'default';
+    if (!baseUrl || !apiKey) {
+      skipped.push(`${id}（缺 baseUrl 或 apiKey）`);
+      continue;
     }
+
+    // env 只能指定模型 id；单价等元数据仍从配置里取（取不到就用 kernel 的默认值）。
+    const models = p.models?.length ? p.models : [];
+    const merged =
+      isDefaultProvider && envModel && !models.some((m) => m.id === envModel)
+        ? [{ id: envModel }, ...models]
+        : models;
+    if (!merged.length) {
+      skipped.push(`${id}（模型清单为空）`);
+      continue;
+    }
+
+    // defaultModel 写错（不在清单）时回落到清单首个，而不是把整个 provider 丢掉。
+    // M15 的权衡：单 provider 时代「写错就降级 faux」还能接受，多网关下一个 typo
+    // 会连带掐掉其他好网关；回落 + 告警让用户仍能开工，错配也不至于无声无息。
+    const within = (isDefaultProvider ? envModel : undefined) || p.defaultModel || merged[0]!.id;
+    let defaultModel = within;
+    if (!merged.some((m) => m.id === within)) {
+      defaultModel = merged[0]!.id;
+      console.warn(`[M15] ${id} 的 defaultModel=${within} 不在模型清单内，回落 ${defaultModel}`);
+    }
+
+    // M6：cost 全零告警。cost 字段缺失或全为 0 时 BudgetGuard 永远算不出花费，
+    // 预算熔断静默失效。这里只 warn 不降级——模型可能确实免费，不该强制要求填单价。
+    for (const m of merged) {
+      const c = m.cost;
+      if (!c || Object.values(c).every((v) => !v)) {
+        console.warn(
+          `[M6] ${id}/${m.id} cost 字段全零或缺失，BudgetGuard 将无法触发。` +
+            `请在 ~/.axon/config.json 的 providers[].models 里补充 cost（单位：美元/百万 token）。`,
+        );
+      }
+    }
+
+    resolved.push({
+      providerId: id,
+      providerName: p.name || id,
+      baseUrl,
+      apiKey,
+      models: merged,
+      defaultModel,
+      ...(p.headers ? { headers: p.headers } : {}),
+    });
   }
 
-  return {
-    kind: 'openai-compat',
-    providerId: p.id ?? 'axon-gateway',
-    providerName: p.name ?? p.id ?? 'Axon Gateway',
-    baseUrl,
-    apiKey,
-    models: merged,
-    defaultModel,
-    ...(p.headers ? { headers: p.headers } : {}),
-  };
+  if (!resolved.length) {
+    return {
+      kind: 'faux',
+      reason: `已配置的提供商都不可用：${skipped.join('、')}，降级到 faux`,
+    };
+  }
+
+  // 全局默认：配了 defaultModelRef 且能解到就用它，否则回落首个 provider 的内部默认。
+  // 「解不到就回落」而不是降级 faux：删掉某个 provider 后 ref 会悬空，
+  // 那时该让会话照常起来（provider.delete 会顺手改指，这里是双保险）。
+  const first = resolved[0]!;
+  const fallbackRef = formatModelRef(first.providerId, first.defaultModel);
+  const wanted = config.defaultModelRef;
+  let defaultRef = fallbackRef;
+  if (wanted) {
+    const hit = resolveModelRef(
+      resolved.map((r) => ({ id: r.providerId, models: r.models })),
+      wanted,
+    );
+    if (hit) defaultRef = formatModelRef(hit.provider.id, hit.model.id);
+    else console.warn(`[M15] defaultModelRef=${wanted} 解析不到，回落 ${fallbackRef}`);
+  }
+
+  return { kind: 'openai-compat', providers: resolved, defaultRef };
 }
 
 /** 日志用：绝不能把 key 原样打出来。 */

@@ -28,16 +28,18 @@ if (choice.kind !== 'openai-compat') {
   process.exit(1);
 }
 
-console.log(`网关 ${choice.baseUrl}`);
-console.log(`模型 ${choice.defaultModel}　key ${maskKey(choice.apiKey)}\n`);
+// spike 脚本只验证单网关链路，取第一个可用 provider 即可
+const p = choice.providers[0]!;
+console.log(`网关 ${p.baseUrl}`);
+console.log(`模型 ${p.defaultModel}　key ${maskKey(p.apiKey)}\n`);
 
 const source = createOpenAICompatSource({
-  providerId: choice.providerId,
-  providerName: choice.providerName,
-  baseUrl: choice.baseUrl,
-  apiKey: choice.apiKey,
-  models: choice.models,
-  defaultModel: choice.defaultModel,
+  providerId: p.providerId,
+  providerName: p.providerName,
+  baseUrl: p.baseUrl,
+  apiKey: p.apiKey,
+  models: p.models,
+  defaultModel: p.defaultModel,
 });
 
 // ── 一个有副作用可观察的工具：模型必须真的调它，否则答不出来 ──

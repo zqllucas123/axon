@@ -16,7 +16,11 @@ import {
   CONFIG_PATCH_PATHS,
   ENV_OVERRIDE_SPECS,
   configFieldSpec,
+  formatModelRef,
   isConfigPatchPath,
+  isValidProviderId,
+  parseModelRef,
+  resolveModelRef,
   type AxonConfig,
   type AxonConfigView,
   type ConfigIssue,
@@ -32,21 +36,32 @@ import {
 import { chmod, mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { CONFIG_PATH, loadConfig, maskKey, resolveModelChoice } from './model-config.ts';
-import { getKey, hasKey, setKey } from './keychain.ts';
+import { deleteKey, getKey, hasKey, setKey } from './keychain.ts';
 
-/** 密钥类的读侧掩码：`sk-***xyz`；未配置时不给字段。解密明文只在此函数内，不出 config-store。 */
-function maskConfig(config: AxonConfig, configPath: string): AxonConfigView {
-  const { provider, ...rest } = config;
-  const keychainPlain = hasKey('provider.apiKey', configPath) ? getKey('provider.apiKey', configPath) : null;
-  if (!provider && keychainPlain === null) return { ...rest };
-  const { apiKey, ...providerRest } = provider ?? ({} as ProviderConfig);
+/** 一个 provider 的 keychain key 路径。id 不含点号由 `isValidProviderId` 保证。 */
+function providerKeyPath(id: string): string {
+  return `providerKeys.${id}.apiKey`;
+}
+
+/** 单个 provider 的读侧脱敏。解密明文只在本函数内，不出 config-store。 */
+function maskProvider(p: ProviderConfig, configPath: string): ProviderConfigView {
+  const { apiKey, ...rest } = p;
+  const path = providerKeyPath(p.id);
+  const keychainPlain = hasKey(path, configPath) ? getKey(path, configPath) : null;
   const effectiveKey = keychainPlain ?? apiKey;
-  const view: ProviderConfigView = {
-    ...providerRest,
+  return {
+    ...rest,
     apiKeySet: typeof effectiveKey === 'string' && effectiveKey.length > 0,
     ...(effectiveKey ? { apiKeyMasked: maskKey(effectiveKey) } : {}),
   };
-  return { ...rest, provider: view };
+}
+
+/** 密钥类的读侧掩码：`sk-***xyz`；未配置时不给字段。 */
+function maskConfig(config: AxonConfig, configPath: string): AxonConfigView {
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const { provider: _legacy, providers, providerKeys: _keys, ...rest } = config as AxonConfig & { providerKeys?: unknown };
+  if (!providers?.length) return { ...rest };
+  return { ...rest, providers: providers.map((p) => maskProvider(p, configPath)) };
 }
 
 /** 点号路径的读写（只覆盖白名单里那两层深度：顶层键与 provider.*）。 */
@@ -102,6 +117,15 @@ function validateValue(path: string, value: unknown, raw: Record<string, unknown
       issues.push({ path, code: 'invalid-type', message: `${path} 必须是字符串` });
     } else if (spec.secret !== true && value.trim() === '' && path !== 'defaultCwd') {
       issues.push({ path, code: 'invalid-value', message: `${path} 不能为空（要清除请传 null）` });
+    } else if (path === 'proxy.url' && value !== '') {
+      try {
+        const u = new URL(value);
+        if (!['http:', 'https:', 'socks5:'].includes(u.protocol)) {
+          issues.push({ path, code: 'invalid-value', message: 'proxy.url 协议须为 http://、https:// 或 socks5://' });
+        }
+      } catch {
+        issues.push({ path, code: 'invalid-value', message: 'proxy.url 不是合法 URL，请填 http://host:port 形式' });
+      }
     }
   } else if (spec.kind === 'number') {
     if (typeof value !== 'number' || !Number.isFinite(value)) {
@@ -125,46 +149,93 @@ function validateValue(path: string, value: unknown, raw: Record<string, unknown
         message: `${path} 必须是 ${(spec.values ?? []).join(' | ')}，收到 ${JSON.stringify(value)}`,
       });
     }
-  } else if (spec.kind === 'string' && path === 'proxy.url' && typeof value === 'string' && value !== '') {
-    try {
-      const u = new URL(value);
-      if (!['http:', 'https:', 'socks5:'].includes(u.protocol)) {
-        issues.push({ path, code: 'invalid-value', message: 'proxy.url 协议须为 http://、https:// 或 socks5://' });
-      }
-    } catch {
-      issues.push({ path, code: 'invalid-value', message: 'proxy.url 不是合法 URL，请填 http://host:port 形式' });
-    }
   } else if (spec.kind === 'json') {
     if (typeof value !== 'object' || value === null) {
       issues.push({ path, code: 'invalid-type', message: `${path} 必须是对象或数组` });
-    } else if (path === 'provider.headers') {
-      const entries = Object.entries(value as Record<string, unknown>);
-      if (entries.some(([, v]) => typeof v !== 'string')) {
-        issues.push({ path, code: 'invalid-value', message: 'provider.headers 的值必须都是字符串' });
-      }
-    } else if (path === 'provider.models') {
-      if (!Array.isArray(value)) {
-        issues.push({ path, code: 'invalid-type', message: 'provider.models 必须是数组' });
-      } else {
-        for (const [i, m] of (value as unknown[]).entries()) {
-          if (typeof m !== 'object' || m === null || typeof (m as ModelSpec).id !== 'string' || !(m as ModelSpec).id) {
-            issues.push({ path, code: 'invalid-value', message: `provider.models[${i}] 缺少 id` });
-          }
-        }
-      }
     }
   }
 
-  // 跨字段：defaultModel 必须在该清单里（否则启动时静默降级到 faux，
-  // 用户会以为「保存成功了但模型没换」）。
-  if (path === 'provider.defaultModel' && issues.length === 0 && typeof value === 'string') {
-    const models = (getPath(raw, 'provider.models') as ModelSpec[] | undefined) ?? [];
-    if (models.length > 0 && !models.some((m) => m.id === value)) {
+  // 跨字段：defaultModelRef 必须能在现有 providers 里解到（否则启动时静默降级，
+  // 用户会以为「保存成功了但模型没换」）。providers 为空时不校验：
+  // 允许「先设默认模型、后加提供商」这种顺序，反正解不到会 warn + 回落。
+  if (path === 'defaultModelRef' && issues.length === 0 && typeof value === 'string') {
+    const providers = (raw['providers'] as ProviderConfig[] | undefined) ?? [];
+    if (providers.length > 0 && !resolveModelRef(providers, value)) {
       issues.push({
         path,
         code: 'invalid-value',
-        message: `defaultModel=${value} 不在 provider.models 清单里（现有：${models.map((m) => m.id).join(', ')}）`,
+        message: `defaultModelRef=${value} 在已配置的提供商里找不到对应模型`,
       });
+    }
+  }
+
+  return issues;
+}
+
+/**
+ * 整体校验一个 provider（`provider.save` 用）。
+ *
+ * 与 `validateValue` 的分工：那个管点号路径的单字段，这个管「一张卡提交上来的
+ * 整个对象」。issue 的 path 用 `providers.<id>.<field>` 形式，让 UI 能逐字段标红。
+ */
+function validateProvider(p: ProviderConfig): ConfigIssue[] {
+  const issues: ConfigIssue[] = [];
+  const at = (field: string) => `providers.${p?.id ?? '?'}.${field}`;
+
+  if (!isValidProviderId(p?.id)) {
+    issues.push({
+      path: at('id'),
+      code: 'invalid-value',
+      message: 'id 必须是字母或数字开头，只含字母、数字、下划线、连字符（不能有点号或冒号）',
+    });
+  }
+  if (p?.baseUrl !== undefined) {
+    if (typeof p.baseUrl !== 'string' || p.baseUrl.trim() === '') {
+      issues.push({ path: at('baseUrl'), code: 'invalid-value', message: 'Base URL 不能为空' });
+    } else {
+      try {
+        const u = new URL(p.baseUrl);
+        if (!['http:', 'https:'].includes(u.protocol)) {
+          issues.push({ path: at('baseUrl'), code: 'invalid-value', message: 'Base URL 必须是 http:// 或 https://' });
+        }
+      } catch {
+        issues.push({ path: at('baseUrl'), code: 'invalid-value', message: 'Base URL 不是合法 URL' });
+      }
+    }
+  }
+  if (p?.models !== undefined) {
+    if (!Array.isArray(p.models)) {
+      issues.push({ path: at('models'), code: 'invalid-type', message: 'models 必须是数组' });
+    } else {
+      const seen = new Set<string>();
+      for (const [i, m] of p.models.entries()) {
+        const id = (m as ModelSpec | undefined)?.id;
+        if (typeof id !== 'string' || !id) {
+          issues.push({ path: at(`models.${i}.id`), code: 'invalid-value', message: `models[${i}] 缺少 id` });
+          continue;
+        }
+        if (seen.has(id)) {
+          issues.push({ path: at(`models.${i}.id`), code: 'invalid-value', message: `模型 id 重复：${id}` });
+        }
+        seen.add(id);
+      }
+    }
+  }
+  if (p?.defaultModel !== undefined && p.defaultModel !== '') {
+    const models = Array.isArray(p.models) ? p.models : [];
+    if (models.length > 0 && !models.some((m) => m?.id === p.defaultModel)) {
+      issues.push({
+        path: at('defaultModel'),
+        code: 'invalid-value',
+        message: `defaultModel=${p.defaultModel} 不在该提供商的模型清单里（现有：${models.map((m) => m?.id).join(', ')}）`,
+      });
+    }
+  }
+  if (p?.headers !== undefined) {
+    if (typeof p.headers !== 'object' || p.headers === null || Array.isArray(p.headers)) {
+      issues.push({ path: at('headers'), code: 'invalid-type', message: 'headers 必须是对象' });
+    } else if (Object.values(p.headers).some((v) => typeof v !== 'string')) {
+      issues.push({ path: at('headers'), code: 'invalid-value', message: 'headers 的值必须都是字符串' });
     }
   }
 
@@ -220,29 +291,77 @@ export class ConfigStore {
     const { config, error } = await loadConfig(this.configPath);
     this.raw = config as Record<string, unknown>;
     this.lastError = error;
-    // 启动时迁移：若 config.json 里还有明文 apiKey，自动加密迁移并删明文
-    const provider = (this.raw as Record<string, unknown>)['provider'];
-    const plainApiKey =
-      typeof provider === 'object' && provider !== null
-        ? (provider as Record<string, unknown>)['apiKey']
-        : undefined;
-    if (typeof plainApiKey === 'string' && plainApiKey.length > 0) {
-      await setKey('provider.apiKey', plainApiKey, this.configPath);
-      const { config: migrated } = await loadConfig(this.configPath);
-      this.raw = migrated as Record<string, unknown>;
-      console.log('[keychain] apiKey 已自动迁移到 safeStorage');
+    await this.migrate();
+  }
+
+  /**
+   * 两步迁移，幂等（已迁完的配置走进来是空操作）：
+   *
+   * 1. **形状**：`provider{}` → `providers[{id:'default'}]`，`provider.defaultModel`
+   *    → 顶层 `defaultModelRef`。老用户升级后不该看到空的提供商列表。
+   * 2. **密钥**：config.json 里残留的明文 apiKey → safeStorage，并删明文。
+   *    旧 keychain 路径 `provider.apiKey` 也一并搬到 `providerKeys.default.apiKey`。
+   */
+  private async migrate(): Promise<void> {
+    const raw = this.raw;
+    const legacy = raw['provider'];
+    const hasLegacyShape = typeof legacy === 'object' && legacy !== null && !Array.isArray(legacy);
+    const needsShape = hasLegacyShape && !Array.isArray(raw['providers']);
+
+    if (needsShape) {
+      const { apiKey: _drop, defaultModel, ...rest } = legacy as Record<string, unknown>;
+      raw['providers'] = [{ id: 'default', ...rest, ...(defaultModel ? { defaultModel } : {}) }];
+      if (!raw['defaultModelRef'] && typeof defaultModel === 'string' && defaultModel) {
+        raw['defaultModelRef'] = formatModelRef('default', defaultModel);
+      }
+      console.log('[migrate] provider{} → providers[default]');
     }
+
+    // 明文 key：优先取 provider.apiKey（老形状），其次 providers[].apiKey（手写新形状）。
+    const pending: { id: string; key: string }[] = [];
+    const legacyPlain = hasLegacyShape ? (legacy as Record<string, unknown>)['apiKey'] : undefined;
+    if (typeof legacyPlain === 'string' && legacyPlain) pending.push({ id: 'default', key: legacyPlain });
+    for (const p of (raw['providers'] as ProviderConfig[] | undefined) ?? []) {
+      if (typeof p?.apiKey === 'string' && p.apiKey && p.id) pending.push({ id: p.id, key: p.apiKey });
+    }
+    // 旧 keychain 路径的搬迁（明文已清但 key 还在老槽位）。
+    if (!pending.some((x) => x.id === 'default') && hasKey('provider.apiKey', this.configPath)) {
+      const old = getKey('provider.apiKey', this.configPath);
+      if (old) pending.push({ id: 'default', key: old });
+    }
+
+    if (pending.length === 0) {
+      if (needsShape) await this.persist(raw);
+      return;
+    }
+    for (const { id, key } of pending) {
+      await setKey(providerKeyPath(id), key, this.configPath);
+    }
+    // setKey 会重写 config.json（删明文），重新读回以拿到干净的 raw，
+    // 再把形状迁移的结果盖回去落盘 —— 否则 providers[] 会被回读覆盖掉。
+    const { config: reloaded } = await loadConfig(this.configPath);
+    const next = reloaded as Record<string, unknown>;
+    if (needsShape) {
+      next['providers'] = raw['providers'];
+      if (raw['defaultModelRef']) next['defaultModelRef'] = raw['defaultModelRef'];
+      delete next['provider'];
+    }
+    this.raw = next;
+    await this.persist(next);
+    console.log(`[keychain] ${pending.length} 个 apiKey 已迁移到 safeStorage`);
   }
 
   /** 未脱敏的原始配置（**只允许主进程内部用**：建模型源、造 HostOptions）。
    * keychain 迁移后 this.raw 里没有 apiKey 明文，从 keychain 解密后注入。 */
   rawConfig(): AxonConfig {
     const base = this.raw as AxonConfig;
-    const plain = getKey('provider.apiKey', this.configPath);
-    if (plain === null) return base;
+    if (!base.providers?.length) return base;
     return {
       ...base,
-      provider: base.provider ? { ...base.provider, apiKey: plain } : { apiKey: plain },
+      providers: base.providers.map((p) => {
+        const plain = getKey(providerKeyPath(p.id), this.configPath);
+        return plain === null ? p : { ...p, apiKey: plain };
+      }),
     };
   }
 
@@ -253,14 +372,27 @@ export class ConfigStore {
     return resolveModelChoice(this.rawConfig(), this.env);
   }
 
-  /** 被环境变量实际覆盖的字段（只算「env 真的有值」的那些）。 */
+  /**
+   * 被环境变量实际覆盖的字段（只算「env 真的有值」的那些）。
+   *
+   * 多 provider 下 env 只锁**第一个** provider 的字段（与 `resolveModelChoice`
+   * 的覆盖范围严格一致，见 model-config.ts 的注释）：path 用
+   * `providers.<id>.<field>`，和 `validateProvider` 的报错路径同构，
+   * 设置页按这个 path 去查锁即可。没有任何 provider 时不产锁 ——
+   * 锁一个不存在的 id 只会让界面显示一条点不到的提示。
+   */
   envOverrides(): EnvOverride[] {
+    const first = (this.raw['providers'] as ProviderConfig[] | undefined)?.[0];
+    if (!first?.id) return [];
     const out: EnvOverride[] = [];
-    for (const { env, path } of ENV_OVERRIDE_SPECS) {
+    for (const { env, field } of ENV_OVERRIDE_SPECS) {
       const value = this.env[env];
       if (value === undefined || value === '') continue;
-      const secret = isConfigPatchPath(path) && configFieldSpec(path).secret === true;
-      out.push({ path, env, value: secret ? maskKey(value) : value });
+      out.push({
+        path: `providers.${first.id}.${field}`,
+        env,
+        value: field === 'apiKey' ? maskKey(value) : value,
+      });
     }
     return out;
   }
@@ -269,10 +401,18 @@ export class ConfigStore {
     if (this.lastError) return { degraded: true, reason: this.lastError };
     const choice = this.modelChoice();
     if (choice.kind === 'faux') return { degraded: true, reason: choice.reason };
+    // defaultRef 由 resolveModelChoice 保证能在 providers 里解到，这里的 ?? 只是类型兜底。
+    const hit = resolveModelRef(
+      choice.providers.map((p) => ({ id: p.providerId, models: p.models })),
+      choice.defaultRef,
+    );
+    const owner = choice.providers.find((p) => p.providerId === hit?.provider.id) ?? choice.providers[0]!;
     return {
       degraded: false,
-      effectiveModel: choice.defaultModel,
-      providerId: choice.providerId,
+      effectiveModel: hit?.model.id ?? owner.defaultModel,
+      effectiveModelRef: choice.defaultRef,
+      providerId: owner.providerId,
+      providerName: owner.providerName,
     };
   }
 
@@ -295,17 +435,18 @@ export class ConfigStore {
     patch: ConfigPatch,
   ): Promise<{ accepted: boolean; errors: ConfigIssue[]; config: ConfigSnapshot }> {
     const errors: ConfigIssue[] = [];
-    const locked = new Set(this.envOverrides().map((o) => o.path));
+    const lockedBy = new Map(this.envOverrides().map((o) => [o.path, o.env]));
     const draft: Record<string, unknown> = structuredClone(this.raw);
     let pendingApiKey: string | undefined;
 
     for (const [path, value] of Object.entries(patch)) {
       if (value === undefined) continue;
-      if (locked.has(path)) {
+      const lock = lockedBy.get(path);
+      if (lock) {
         errors.push({
           path,
           code: 'env-locked',
-          message: `${path} 已被环境变量覆盖（${ENV_OVERRIDE_SPECS.find((s) => s.path === path)?.env}），写入不会生效`,
+          message: `${path} 已被环境变量覆盖（${lock}），写入不会生效`,
         });
         continue;
       }
@@ -340,6 +481,114 @@ export class ConfigStore {
   }
 
   /**
+   * 创建或整体覆盖一个 provider（按 `id` upsert，`provider.save`）。
+   *
+   * 与 `patch` 的分工：patch 管点号路径的单字段，这里管「一张卡整体提交」——
+   * provider 现在是数组，点号路径表达不了「第几个的哪个字段」（见 config.ts
+   * 对 `ConfigPatchPath` 的说明）。校验失败整体不落盘，回 issues 让 UI 逐字段标红。
+   *
+   * apiKey 的三态（协议里写死的）：不传 = 不动已存的 key，空串 = 清除，
+   * 有值 = 写 keychain。明文**绝不**进 draft，因此也不会落到 config.json。
+   */
+  async saveProvider(
+    provider: ProviderConfig,
+  ): Promise<{ accepted: boolean; errors: ConfigIssue[]; config: ConfigSnapshot }> {
+    const errors = validateProvider(provider);
+    if (errors.length > 0) {
+      return { accepted: false, errors, config: this.snapshot() };
+    }
+
+    // env 锁只作用于第一个 provider（= 默认那个）。对被锁的字段报 env-locked
+    // 并保留文件原值——与 config.patch 的 env-locked 语义同构：写了不生效，
+    // 静默失败是最坏的体验。非默认 provider 不受 env 影响。
+    const lockedBy = new Map(this.envOverrides().map((o) => [o.path, o.env]));
+    const fieldPath = (field: string) => `providers.${provider.id}.${field}`;
+
+    const { apiKey, ...rest } = provider;
+    const existing = (this.raw['providers'] as ProviderConfig[] | undefined)?.find(
+      (p) => p.id === provider.id,
+    );
+
+    // 对被锁字段回退到已存值，让其余字段照常更新
+    const merged: ProviderConfig = { ...rest };
+    for (const field of ['baseUrl', 'apiKey', 'defaultModel'] as const) {
+      const path = fieldPath(field);
+      const lock = lockedBy.get(path);
+      if (lock) {
+        errors.push({
+          path,
+          code: 'env-locked',
+          message: `${path} 已被环境变量覆盖（${lock}），写入不会生效`,
+        });
+        if (existing) {
+          const existingVal = (existing as unknown as Record<string, unknown>)[field];
+          if (existingVal !== undefined) (merged as unknown as Record<string, unknown>)[field] = existingVal;
+          else delete (merged as unknown as Record<string, unknown>)[field];
+        } else {
+          delete (merged as unknown as Record<string, unknown>)[field];
+        }
+      }
+    }
+
+    const draft: Record<string, unknown> = structuredClone(this.raw);
+    const list = Array.isArray(draft['providers']) ? ([...draft['providers']] as ProviderConfig[]) : [];
+    const at = list.findIndex((p) => p?.id === provider.id);
+    // 整体覆盖而非合并：UI 提交的是整张卡的当前值，合并会让「删掉一个 header」
+    // 这种操作永远生效不了。但 env-locked 字段已在上一步回退到原值。
+    if (at === -1) list.push(merged);
+    else list[at] = merged;
+    draft['providers'] = list;
+
+    const result = await this.commit(draft, errors);
+    if (!result.accepted) return result;
+
+    if (apiKey !== undefined) {
+      const path = providerKeyPath(provider.id);
+      if (apiKey === '') await deleteKey(path, this.configPath);
+      else await setKey(path, apiKey, this.configPath);
+      const { config: updated } = await loadConfig(this.configPath);
+      this.raw = updated as Record<string, unknown>;
+      return { ...result, config: this.snapshot() };
+    }
+    return result;
+  }
+
+  /**
+   * 删除一个 provider 及其 keychain 条目（`provider.delete`，幂等）。
+   *
+   * `defaultModelRef` 指向被删对象时顺手改指到剩余首个 provider 的默认模型 ——
+   * 否则下次启动会静默降级到 faux，用户只看到「模型没了」却看不到原因。
+   */
+  async deleteProvider(
+    id: string,
+  ): Promise<{ deleted: boolean; errors: ConfigIssue[]; config: ConfigSnapshot }> {
+    const draft: Record<string, unknown> = structuredClone(this.raw);
+    const list = Array.isArray(draft['providers']) ? ([...draft['providers']] as ProviderConfig[]) : [];
+    const next = list.filter((p) => p?.id !== id);
+    if (next.length === list.length) {
+      // 不存在视为已删除：不写盘，也不报错。
+      return { deleted: false, errors: [], config: this.snapshot() };
+    }
+    draft['providers'] = next;
+
+    const ref = draft['defaultModelRef'];
+    if (typeof ref === 'string' && parseModelRef(ref)?.providerId === id) {
+      const fallback = next[0];
+      const model = fallback?.defaultModel ?? fallback?.models?.[0]?.id;
+      if (fallback?.id && model) draft['defaultModelRef'] = formatModelRef(fallback.id, model);
+      else delete draft['defaultModelRef'];
+    }
+
+    const result = await this.commit(draft, []);
+    if (!result.accepted) return { deleted: false, errors: result.errors, config: result.config };
+
+    await deleteKey(providerKeyPath(id), this.configPath);
+    const { config: updated } = await loadConfig(this.configPath);
+    this.raw = updated as Record<string, unknown>;
+    return { deleted: true, errors: [], config: this.snapshot() };
+  }
+
+  /**
    * 恢复出厂（`config.reset`，S8 危险区）—— 把**白名单内**的字段删回缺省。
    *
    * 为什么不能用 `patch` 逐个置 null 代替：那样会被 env-locked 挡住（被环境变量
@@ -362,6 +611,23 @@ export class ConfigStore {
       }
     }
     return this.commit(draft, []);
+  }
+
+  /**
+   * 纯落盘（不碰 lastError、不产 snapshot）。migrate 用它把迁移结果写回去 ——
+   * 迁移失败不该拦住启动，所以这里吞异常只 warn：内存里的 raw 已经是迁移后的
+   * 形状，本次运行照常工作，下次启动会再试一遍（migrate 幂等）。
+   */
+  private async persist(draft: Record<string, unknown>): Promise<void> {
+    try {
+      await this.io.mkdir(dirname(this.configPath));
+      const tmp = `${this.configPath}.tmp-${Date.now()}`;
+      await this.io.writeFile(tmp, `${JSON.stringify(draft, null, 2)}\n`, 0o600);
+      await this.io.rename(tmp, this.configPath);
+      await this.io.chmod(this.configPath, 0o600).catch(() => null);
+    } catch (err) {
+      console.warn(`[migrate] 写回 ${this.configPath} 失败：${err instanceof Error ? err.message : String(err)}`);
+    }
   }
 
   /** 原子落盘 + 接管内存真相。patch 与 reset 共用同一条写路径。 */

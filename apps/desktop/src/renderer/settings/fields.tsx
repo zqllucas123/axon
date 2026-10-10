@@ -33,10 +33,13 @@ import { useSettings } from './SettingsStore.tsx';
 // 公共：env 锁与字段级提交
 // ─────────────────────────────────────────────────────────────
 
-/** 该路径是否被环境变量锁定；锁定则返回那条覆盖记录（含 env 名与生效值）。 */
+/** 该路径是否被环境变量锁定；锁定则返回那条覆盖记录（含 env 名与生效值）。
+ *
+ * M15 起 env override 路径形如 `providers.<id>.baseUrl`（动态字符串），
+ * 因此 path 接受 string 而非只接受 ConfigPatchPath。 */
 export function envLock(
   overrides: readonly EnvOverride[],
-  path: ConfigPatchPath,
+  path: string,
 ): EnvOverride | undefined {
   return overrides.find((o) => o.path === path);
 }

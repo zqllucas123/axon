@@ -82,14 +82,89 @@ export interface ProxyConfig {
   noProxy?: string;
 }
 
+/**
+ * 一个模型提供商（网关）。
+ *
+ * `id` 是**身份字段**：它进 keychain 的点号路径（`providerKeys.<id>.apiKey`），
+ * 也进模型引用的复合键（`<id>:<modelId>`）。所以必须唯一、稳定、**不含点号**
+ * —— 带点会把 keychain 路径劈开，带冒号会把模型 ref 劈错。
+ * 校验规则见 `isValidProviderId`。
+ *
+ * 为什么用 id 而不是数组下标做身份：下标会随设置页里的重排失效，
+ * 而 keychain 里的密文是跟着 id 走的。
+ */
 export interface ProviderConfig {
-  id?: string;
+  id: string;
   name?: string;
   baseUrl?: string;
   apiKey?: string;
   models?: ModelSpec[];
+  /** provider **内**的默认模型 id（裸 id，不带 providerId 前缀）。 */
   defaultModel?: string;
   headers?: Record<string, string>;
+}
+
+/** provider id 的合法形状：字母数字起头，后接字母数字/下划线/连字符。 */
+const PROVIDER_ID_RE = /^[a-z0-9][a-z0-9_-]*$/i;
+
+/**
+ * provider id 是否合法。
+ *
+ * 不接受点号与冒号不是洁癖：点号会劈开 keychain 的点号路径，
+ * 冒号会让 `parseModelRef` 把 id 当成 `provider:model` 再切一刀。
+ */
+export function isValidProviderId(id: unknown): id is string {
+  return typeof id === 'string' && PROVIDER_ID_RE.test(id);
+}
+
+// ─────────────────────────────────────────────────────────────
+// 模型引用（modelRef）
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * 模型引用 = `providerId:modelId`。
+ *
+ * 为什么不能只用裸 modelId：两个网关挂同名模型是常态
+ * （公司内网网关与公有云都叫 `deepseek-v3`），裸 id 无法寻址。
+ * 冒号是分隔符，所以 providerId 不许含冒号（`isValidProviderId` 已堵）。
+ */
+export function formatModelRef(providerId: string, modelId: string): string {
+  return `${providerId}:${modelId}`;
+}
+
+/**
+ * 拆 modelRef。**无冒号 = 裸 modelId**（兼容既有角色文件与落盘记录）。
+ *
+ * 只切第一个冒号：模型 id 自身可能含冒号（如 ollama 的 `qwen3:8b`）。
+ */
+export function parseModelRef(ref: string): { providerId?: string; modelId: string } {
+  const at = ref.indexOf(':');
+  if (at <= 0) return { modelId: ref };
+  return { providerId: ref.slice(0, at), modelId: ref.slice(at + 1) };
+}
+
+/**
+ * 把 modelRef 解到具体的 provider + 模型。
+ *
+ * 裸 id（无 providerId）按 `providers` 顺序取**首个**挂了该模型的 provider ——
+ * 这是旧数据（角色文件里的 `model: "deepseek-v3"`、M15 前的落盘记录）的兼容路径，
+ * 所以不做数据迁移：顺序即优先级，用户在设置页重排就能改默认落点。
+ *
+ * 解析失败回 undefined，由调用方决定降级还是报错（主进程一律 warn + 回落，
+ * 沿用 `host.ts` 既有纪律：配置坏了不能让会话起不来）。
+ */
+export function resolveModelRef(
+  providers: readonly ProviderConfig[] | undefined,
+  ref: string | undefined,
+): { provider: ProviderConfig; model: ModelSpec } | undefined {
+  if (!ref || !providers?.length) return undefined;
+  const { providerId, modelId } = parseModelRef(ref);
+  const pool = providerId ? providers.filter((p) => p.id === providerId) : providers;
+  for (const provider of pool) {
+    const model = provider.models?.find((m) => m.id === modelId);
+    if (model) return { provider, model };
+  }
+  return undefined;
 }
 
 /**
@@ -99,7 +174,31 @@ export interface ProviderConfig {
  * 冒烟、CI、新克隆的仓库都应该能直接 `bun run dev`。
  */
 export interface AxonConfig {
-  provider?: ProviderConfig;
+  /**
+   * **legacy 单 provider 字段**（M15 前的形状）。
+   *
+   * 只在 `ConfigStore.load()` 的迁移里读一次 —— 读到就搬进 `providers[]`
+   * 并把这个键删掉，之后永不写入。保留类型是为了让迁移代码有类型可依，
+   * 不是为了让新代码读它：新代码一律走 `providers`。
+   *
+   * `id` 在这里是**可选**的：M15 之前磁盘上根本没有这个字段，迁移时由
+   * `LEGACY_PROVIDER_ID` 补上。写成必填会让迁移代码被迫先编一个 id 才能读。
+   */
+  provider?: Omit<ProviderConfig, 'id'> & { id?: string };
+  /**
+   * 模型提供商清单（有序，**顺序即设置界面里的顺序**）。
+   *
+   * 为什么是数组而不是 `Record<id, ...>`：顺序要稳定（用户能重排，裸模型 id
+   * 的消歧也按这个顺序取首个匹配），而 JS 对象键序在增删后不可靠。
+   */
+  providers?: ProviderConfig[];
+  /**
+   * 全局默认模型，`providerId:modelId` 形式（见 `formatModelRef`）。
+   *
+   * 与各 provider 自己的 `defaultModel` 的分工：后者是「这个网关内部默认用哪个」，
+   * 前者是「跨网关时那个主对话用哪个」。只有它能跨 provider。
+   */
+  defaultModelRef?: string;
   /** 预算硬线（美元）；缺省/0 = 不设限（与 BudgetGuard 的 hard<=0 同义）。 */
   budgetUsd?: number;
   /** 预算软线（美元）；缺省 = hard × 0.8。 */
@@ -174,8 +273,10 @@ export interface ProviderConfigView extends Omit<ProviderConfig, 'apiKey'> {
 }
 
 /** 配置文件的读侧视图。 */
-export interface AxonConfigView extends Omit<AxonConfig, 'provider'> {
+export interface AxonConfigView extends Omit<AxonConfig, 'provider' | 'providers'> {
+  /** legacy 单 provider 的读侧镜像：迁移后恒为 undefined，新代码别读。 */
   provider?: ProviderConfigView;
+  providers?: ProviderConfigView[];
 }
 
 /** 某个字段被环境变量覆盖的事实（UX 03 §4.2 的「环境变量已锁定」标注）。 */
@@ -204,6 +305,10 @@ export interface ConfigResolution {
   /** 生效的模型 id / provider（未降级时）。 */
   effectiveModel?: string;
   providerId?: string;
+  /** provider 显示名（顶栏胶囊用；缺省回落 providerId）。 */
+  providerName?: string;
+  /** 生效模型的复合键 `providerId:modelId` —— 多 provider 下 effectiveModel 可能重名。 */
+  effectiveModelRef?: string;
 }
 
 export interface ConfigSnapshot {
@@ -229,12 +334,10 @@ export interface ConfigSnapshot {
  * 理由是「没人读的死配置」；到 MU-3（S8 外观 pane + 主窗消费）才有了读侧。
  */
 export type ConfigPatchPath =
-  | 'provider.baseUrl'
-  | 'provider.apiKey'
-  | 'provider.defaultModel'
-  | 'provider.name'
-  | 'provider.headers'
-  | 'provider.models'
+  // provider.* 六条在 M15 移出白名单：provider 现在是**数组**，点号路径表达不了
+  // 「第几个 provider 的哪个字段」，而带下标的路径（providers.0.baseUrl）会随 UI 重排失效。
+  // 改由 `provider.save` / `provider.delete` 两条 IPC 整体提交（与 role.save/team.save 同构）。
+  | 'defaultModelRef'
   | 'budgetUsd'
   | 'budgetSoftUsd'
   | 'maxConcurrent'
@@ -271,12 +374,7 @@ export interface ConfigFieldSpec {
 const MAX_TIMEOUT_MS = 24 * 60 * 60 * 1000;
 
 export const CONFIG_FIELD_SPECS: readonly ConfigFieldSpec[] = Object.freeze([
-  { path: 'provider.baseUrl', kind: 'string', note: '网关根地址，形如 https://host/path/v1（不含 /chat/completions）' },
-  { path: 'provider.apiKey', kind: 'string', secret: true, note: 'API key；明文只写不读，读侧只回掩码' },
-  { path: 'provider.defaultModel', kind: 'string', note: '默认模型 id；必须在 provider.models 清单里' },
-  { path: 'provider.name', kind: 'string', note: 'provider 显示名（顶栏与设置界面用）' },
-  { path: 'provider.headers', kind: 'json', note: '自定义请求头（企业网关鉴权常用）' },
-  { path: 'provider.models', kind: 'json', note: '模型清单：id 必填，cost 为美元/百万 token' },
+  { path: 'defaultModelRef', kind: 'string', note: '全局默认模型，形如 providerId:modelId；必须能在 providers 里解析到' },
   { path: 'budgetUsd', kind: 'number', min: 0, note: '全局预算硬线（美元）；0 = 不设限' },
   { path: 'budgetSoftUsd', kind: 'number', min: 0, note: '全局预算软线（美元）；缺省 = 硬线 × 0.8' },
   { path: 'maxConcurrent', kind: 'number', min: 0, max: 64, note: '全局并发上限（同时 running）；0 = 不限' },
@@ -344,11 +442,22 @@ export interface ConfigIssue {
  * `AXON_PROVIDER=faux`（强制假模型）与 `AXON_CONFIG`（配置文件路径）不在这张表里：
  * 它们改变的是「读哪个文件 / 走哪条路」，不是某个字段的值。
  */
-export const ENV_OVERRIDE_SPECS: readonly { env: string; path: ConfigPatchPath }[] = Object.freeze([
-  { env: 'AXON_BASE_URL', path: 'provider.baseUrl' },
-  { env: 'AXON_API_KEY', path: 'provider.apiKey' },
-  { env: 'AXON_MODEL', path: 'provider.defaultModel' },
-]);
+/**
+ * 这三条锁的是**默认 provider 的字段**，不是白名单路径。
+ *
+ * M15 起 provider 是数组，所以 path 不再是 `ConfigPatchPath`（白名单里已无 provider.*），
+ * 而是运行时拼出的 `providers.<defaultId>.<field>` —— 具体 id 要等配置加载后才知道。
+ * 这里只声明「哪个 env 锁哪个字段名」，拼接由主进程的 `config-store` 完成。
+ *
+ * 为什么只锁默认 provider：这三个 env 是 CI 与冒烟脚本的入口（一套 baseUrl/key/model
+ * 跑通全链路），没有「第二个网关」的概念。多 provider 是用户态配置，env 不该能凭空造出一个。
+ */
+export const ENV_OVERRIDE_SPECS: readonly { env: string; field: keyof ProviderConfig }[] =
+  Object.freeze([
+    { env: 'AXON_BASE_URL', field: 'baseUrl' },
+    { env: 'AXON_API_KEY', field: 'apiKey' },
+    { env: 'AXON_MODEL', field: 'defaultModel' },
+  ]);
 
 // ─────────────────────────────────────────────────────────────
 // 缺省值（解析用；不写进文件）

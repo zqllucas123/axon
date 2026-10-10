@@ -1062,12 +1062,12 @@ export function S3Teams(): ReactElement {
           <div className="ctx-backdrop" onMouseDown={closeCtxMenu} />
           <div className="menu team-ctx-menu" style={{ position: 'fixed', left: ctxMenu.x, top: ctxMenu.y }}>
             <button className="menu-item" onClick={() => { ctxRename(); }}>
-              <Icon name="pen" size={14} className="i" />
+              <Icon name="pen" size={14} />
               重命名
             </button>
             <div className="menu-sep" />
             <button className="menu-item danger" onClick={() => { void ctxDelete(); }}>
-              <Icon name="trash" size={14} className="i" />
+              <Icon name="trash" size={14} />
               删除团队
             </button>
           </div>

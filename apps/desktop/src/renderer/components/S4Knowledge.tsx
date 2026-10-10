@@ -8,10 +8,119 @@
  * 意图：createKb / deleteKb / addKbSource / removeKbDoc / queryKb / listKbDocs。
  */
 
-import React, { useCallback, useEffect, useState, type ReactElement } from 'react';
+import React, { useCallback, useEffect, useRef, useState, type ReactElement } from 'react';
 import { useApp } from '../state/store.tsx';
 import { Icon } from '../icons.tsx';
 import type { KnowledgeBase, KnowledgeChunk, KnowledgeDoc } from '@axon/protocol';
+
+// ── 向量模型选择器 ─────────────────────────────────────────────
+
+/**
+ * 常见的 OpenAI-compat embedding 模型候选列表。
+ * 用户也可以直接输入自定义模型名。
+ */
+const PRESET_MODELS = [
+  'qwen3.7-text-embedding',
+  'text-embedding-3-small',
+  'text-embedding-3-large',
+  'text-embedding-ada-002',
+];
+
+function ModelSelector({
+  kbId,
+  current,
+  onChange,
+}: {
+  kbId: string;
+  current: string;
+  onChange: (model: string) => void;
+}): ReactElement {
+  const { updateKbModel } = useApp();
+  const [open, setOpen] = useState(false);
+  const [custom, setCustom] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState('');
+  const ref = useRef<HTMLDivElement>(null);
+
+  // 点击外部关闭
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [open]);
+
+  const apply = useCallback(async (model: string) => {
+    if (!model.trim() || model === current) { setOpen(false); return; }
+    setSaving(true);
+    setErr('');
+    try {
+      await updateKbModel(kbId, model.trim());
+      onChange(model.trim());
+      setOpen(false);
+      setCustom('');
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSaving(false);
+    }
+  }, [kbId, current, updateKbModel, onChange]);
+
+  return (
+    <div className="s4-model-selector" ref={ref}>
+      <button
+        className="tag s4-model-tag"
+        onClick={() => setOpen((v) => !v)}
+        title="点击切换向量模型"
+        aria-haspopup="listbox"
+        aria-expanded={open}
+      >
+        {current}
+        <Icon name="chevD" size={14} />
+      </button>
+      {open ? (
+        <div className="s4-model-popover" role="listbox" aria-label="选择向量模型">
+          <div className="s4-model-popover-head">向量模型</div>
+          {PRESET_MODELS.map((m) => (
+            <button
+              key={m}
+              role="option"
+              aria-selected={m === current}
+              className={`s4-model-option${m === current ? ' is-current' : ''}`}
+              onClick={() => void apply(m)}
+              disabled={saving}
+            >
+              {m === current ? <Icon name="check" size={14} /> : <span className="s4-model-opt-gap" />}
+              {m}
+            </button>
+          ))}
+          <div className="s4-model-custom-row">
+            <input
+              className="field-input s4-model-custom-input"
+              placeholder="自定义模型名…"
+              value={custom}
+              onChange={(e) => setCustom(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') void apply(custom); }}
+            />
+            <button
+              className="btn btn-small"
+              onClick={() => void apply(custom)}
+              disabled={saving || !custom.trim()}
+            >
+              确认
+            </button>
+          </div>
+          {err ? <div className="field-err">{err}</div> : null}
+          <div className="s4-model-warn">
+            切换模型后，已有向量块不会自动重新摄入，需手动删除并重新添加来源。
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+}
 
 type SourceType = 'web' | 'docx' | 'md' | 'repo';
 
@@ -158,8 +267,9 @@ function AddSourceDialog({ kbId, onClose }: { kbId: string; onClose: () => void 
 
 // ── 知识库详情面板 ─────────────────────────────────────────────
 
-function KbDetail({ kb, onBack }: { kb: KnowledgeBase; onBack: () => void }): ReactElement {
+function KbDetail({ kb: initialKb, onBack }: { kb: KnowledgeBase; onBack: () => void }): ReactElement {
   const { kbJobs, removeKbDoc, queryKb, listKbDocs } = useApp();
+  const [kb, setKb] = useState<KnowledgeBase>(initialKb);
   const [docs, setDocs] = useState<KnowledgeDoc[]>([]);
   const [addOpen, setAddOpen] = useState(false);
   const [query, setQuery] = useState('');
@@ -201,7 +311,11 @@ function KbDetail({ kb, onBack }: { kb: KnowledgeBase; onBack: () => void }): Re
         {kb.description ? <span className="s4-kb-desc">{kb.description}</span> : null}
         <span className="spacer" />
         <span className="tag">{kb.docCount} 篇 · {kb.chunkCount} 块</span>
-        <span className="tag">{kb.embeddingModel}</span>
+        <ModelSelector
+          kbId={kb.id}
+          current={kb.embeddingModel}
+          onChange={(model) => setKb((prev) => ({ ...prev, embeddingModel: model }))}
+        />
       </div>
 
       {/* 摄入进度 */}
@@ -340,16 +454,20 @@ function KbList({ onOpen }: { onOpen: (kb: KnowledgeBase) => void }): ReactEleme
           {kbs.map((kb) => (
             <div
               key={kb.id}
-              className="s4-kb-card card"
+              className="s4-kb-card"
               role="button"
               tabIndex={0}
               onClick={() => onOpen(kb)}
               onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') onOpen(kb); }}
             >
-              <div className="card-head">
-                <Icon name="book" size={16} />
-                <span className="name">{kb.name}</span>
-                <span className="spacer" />
+              <div className="s4-card-body">
+                <div className="s4-card-icon">
+                  <Icon name="book" size={16} />
+                </div>
+                <div className="s4-card-content">
+                  <span className="s4-card-name">{kb.name}</span>
+                  {kb.description ? <span className="s4-card-desc">{kb.description}</span> : null}
+                </div>
                 <button
                   className="act s4-del-btn"
                   title="删除知识库"
@@ -359,12 +477,17 @@ function KbList({ onOpen }: { onOpen: (kb: KnowledgeBase) => void }): ReactEleme
                   <Icon name="trash" size={14} />
                 </button>
               </div>
-              {kb.description ? <div className="card-body s4-kb-card-desc">{kb.description}</div> : null}
-              <div className="s4-kb-stats">
-                <span className="tag">{kb.docCount} 篇文档</span>
-                <span className="tag">{kb.chunkCount} 向量块</span>
+              <div className="s4-card-stats">
+                <div className="s4-stat">
+                  <span className="s4-stat-num">{kb.docCount}</span>
+                  <span className="s4-stat-label">篇文档</span>
+                </div>
+                <div className="s4-stat-sep" />
+                <div className="s4-stat">
+                  <span className="s4-stat-num">{kb.chunkCount}</span>
+                  <span className="s4-stat-label">向量块</span>
+                </div>
               </div>
-              <div className="s4-kb-model">{kb.embeddingModel}</div>
             </div>
           ))}
         </div>

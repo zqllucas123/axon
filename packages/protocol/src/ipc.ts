@@ -20,7 +20,7 @@ import type {
   UsageTotals,
 } from './agent.ts';
 import type { AgentToolsSnapshot } from './agent-tools.ts';
-import type { ConfigIssue, ConfigPatch, ConfigSnapshot } from './config.ts';
+import type { ConfigIssue, ConfigPatch, ConfigSnapshot, ProviderConfig } from './config.ts';
 import type {
   AddSourcePayload,
   IndexingDonePayload,
@@ -429,8 +429,35 @@ export interface CommandMap {
    *   但 /chat/completions 完全可用；单模型可用性只有真跑一次才作数。
    */
   'provider.test': {
-    payload: { model?: string };
+    payload: { model?: string; providerId?: string };
     result: { ok: boolean; latencyMs: number; models: string[]; error?: string };
+  };
+
+  // ── M15：多提供商写侧 ──
+
+  /**
+   * 创建或整体覆盖一个 provider（按 `provider.id` upsert）。
+   *
+   * 为什么不走 `config.patch`：patch 的路径是点号字符串，表达不了「第几个 provider
+   * 的哪个字段」—— 而带下标的路径（`providers.0.baseUrl`）会随设置页里的重排失效。
+   * 与 `role.save` / `team.save` 同构：**校验失败整体不落盘**，回 issues 让 UI 逐字段标红。
+   *
+   * apiKey 走 keychain（`providerKeys.<id>.apiKey`），明文不进 config.json；
+   * 不传该字段 = 不动已存的 key，传空串 = 清除。
+   */
+  'provider.save': {
+    payload: { provider: ProviderConfig };
+    result: { accepted: boolean; errors: ConfigIssue[]; config: ConfigSnapshot };
+  };
+  /**
+   * 删除一个 provider（连带它的 keychain 条目）。不存在视为已删除（幂等）。
+   *
+   * 若 `defaultModelRef` 指向被删的 provider，这里**顺手改指**到剩余首个 provider
+   * 的默认模型 —— 否则下次启动会静默降级到 faux，用户只看到「模型没了」。
+   */
+  'provider.delete': {
+    payload: { id: string };
+    result: { deleted: boolean; errors: ConfigIssue[]; config: ConfigSnapshot };
   };
 
   // ── M12：知识库 ──
@@ -457,6 +484,11 @@ export interface CommandMap {
   };
   /** 列出知识库下的全部文档元数据。 */
   'kb.listDocs': { payload: { kbId: string }; result: KnowledgeDoc[] };
+  /**
+   * 更新知识库配置的向量模型。
+   * 仅影响后续摄入；现有向量块使用旧模型编码，需重新摄入才能与新模型对齐。
+   */
+  'kb.updateModel': { payload: { kbId: string; model: string }; result: { updated: boolean } };
 }
 
 /** `shell.openPath` 的可达集（主进程解成真路径）。 */

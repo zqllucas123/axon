@@ -191,6 +191,8 @@ export interface StoreValue {
   queryKb: (kbId: string, query: string, topK?: number) => Promise<KnowledgeChunk[]>;
   /** 列出知识库下的文档（`kb.listDocs`）。 */
   listKbDocs: (kbId: string) => Promise<KnowledgeDoc[]>;
+  /** 更新知识库的向量模型配置（`kb.updateModel`）。 */
+  updateKbModel: (kbId: string, model: string) => Promise<void>;
   /**
    * 本次运行期内已处理的待办流水（S5 「已处理」段，拍板 P-5）。
    *
@@ -1126,6 +1128,15 @@ export function AppProvider({ children }: { children: ReactNode }): ReactElement
     [call],
   );
 
+  const updateKbModel = useCallback(
+    async (kbId: string, model: string): Promise<void> => {
+      await call(() => window.axon.invoke('kb.updateModel', { kbId, model }));
+      // 同步本地 kbs 状态，避免再发一次 kb.list
+      setKbs((prev) => prev.map((k) => k.id === kbId ? { ...k, embeddingModel: model } : k));
+    },
+    [call],
+  );
+
   /** 右栏单槽 toggle：点已激活的槽 = 收起。 */
   const setRightPanel = useCallback((panel: RightPanel): void => {
     setRightPanelState((prev) => (prev === panel ? 'none' : panel));
@@ -1220,6 +1231,7 @@ export function AppProvider({ children }: { children: ReactNode }): ReactElement
     removeKbDoc,
     queryKb,
     listKbDocs,
+    updateKbModel,
     // 派生（不存第二份真相）：已结算的待办就是 `pending` 里 state!=='pending' 那些。
     resolvedFeed: pending.filter((p) => p.state !== 'pending'),
     dismissError: () => setError(null),

@@ -83,6 +83,15 @@ check('pi import 收敛在边界层', () => {
     'packages/kernel/src/engine.ts',
     'packages/kernel/src/engine.contract.test.ts',
     'packages/kernel/src/provider.ts',
+    // DSML 解析测试：职责就是拿 pi 的真实事件流（createAssistantMessageEventStream）
+    // 喂给 withDsmlParsing，验证我们对 pi 产物结构的假设。绕开 pi 用假事件流，
+    // 测的就不是真链路了 —— 与 engine.contract.test.ts 同一条理由。
+    //
+    // 补白名单而非改测试：该文件 7d1aff9（M8）就这么写了，guard 却一直报红，
+    // 说明是白名单漏登记，不是测试越界。AGENTS.md §4.2 要求放宽前先改 guard，
+    // 这一条就是那个动作；**本条未经用户拍板**，要收紧随时可删（代价是
+    // provider.dsml.test.ts 得改用假事件流，会丢掉对真实 pi 产物的锁定）。
+    'packages/kernel/src/provider.dsml.test.ts',
   ]);
   const roots = ['packages', 'apps', 'examples'];
   const offenders = [];

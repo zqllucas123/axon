@@ -485,15 +485,23 @@ export class AxonHost {
   }
 
   /**
-   * M6 per-role 模型映射：按角色声明的 model id 从 modelSource 里选出对应的 ModelSource。
-   * 角色没声明 model、modelSource 不支持 selectModel、或 id 不在清单里时，fallback 全局默认。
+   * M6 per-role 模型映射 + M15 会话级模型：解析出该用哪个 ModelSource。
+   *
+   * 优先级 **角色声明 > 会话 modelRef > 全局默认**：角色显式声明的模型最硬
+   * （「角色只能减能」的方向），会话选择盖过全局默认但不越过角色。
+   * 每一级解析失败都降级到下一级并 warn —— 配置坏了不能让会话起不来。
    */
-  private pickModelSource(roleModel?: string): ModelSource {
-    if (roleModel && this.modelSource.selectModel) {
+  private pickModelSource(roleModel?: string, sessionId?: string): ModelSource {
+    const sessionRef = sessionId !== undefined ? this.sessions.get(sessionId)?.modelRef : undefined;
+    for (const [ref, label] of [
+      [roleModel, 'per-role model'],
+      [sessionRef, '会话模型'],
+    ] as const) {
+      if (!ref || !this.modelSource.selectModel) continue;
       try {
-        return this.modelSource.selectModel(roleModel);
+        return this.modelSource.selectModel(ref);
       } catch {
-        console.warn(`[axon] per-role model "${roleModel}" 不在清单里，fallback 全局默认`);
+        console.warn(`[axon] ${label} "${ref}" 不在清单里，fallback 下一级`);
       }
     }
     return this.modelSource;
@@ -749,10 +757,9 @@ export class AxonHost {
     });
     this.registry.setSessionLimit(sessionId, limit);
 
-    // ② 成员（计划里已拓扑排序：父先于子）
-    const spawned = this.spawnMembers(sessionId, plan);
-
-    // ③ 记录
+    // ② 记录：必须在挂成员**之前**落。spawnMembers 要读 `record.cwd`（外部引擎
+    //    成员的工作目录），pickModelSource 要读 `record.modelRef`（会话级模型）——
+    //    先 spawn 再建记录的话这两处都读到 undefined。
     const now = Date.now();
     const record: SessionRecord = {
       id: sessionId,
@@ -769,10 +776,14 @@ export class AxonHost {
       ...(payload.budget !== undefined ? { budget: payload.budget } : {}),
       ...(limit > 0 ? { maxConcurrent: limit } : {}),
       ...(engineId !== undefined ? { engineId } : {}),
+      ...(payload.modelRef !== undefined ? { modelRef: payload.modelRef } : {}),
       ...(payload.parentSessionId !== undefined ? { parentSessionId: payload.parentSessionId } : {}),
       ...(payload.parentAgentPath !== undefined ? { parentAgentPath: payload.parentAgentPath } : {}),
     };
     this.sessions.create(record);
+
+    // ③ 成员（计划里已拓扑排序：父先于子）——记录已落，cwd/modelRef 读得到
+    const spawned = this.spawnMembers(sessionId, plan);
 
     // M10：子任务 session 反向追加到父 session 的 childSessionIds
     if (payload.parentSessionId !== undefined) {

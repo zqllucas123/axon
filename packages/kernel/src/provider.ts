@@ -166,6 +166,43 @@ export function createOpenAICompatSource(
 } {
   if (!spec.models.length) throw new Error('createOpenAICompatSource: models 不能为空');
   const providerId = spec.providerId ?? 'axon-gateway';
+  const built = buildProvider(spec);
+
+  const registry = createRegistry();
+  registry.setProvider(built.provider);
+  const streamFn = streamFnOf(registry);
+  const models = built.models;
+
+  const pick = (id: string): Model<'openai-completions'> => {
+    const found = models.find((m) => m.id === id);
+    if (!found) {
+      throw new Error(
+        `模型 ${id} 不在网关 ${providerId} 的清单里（已配置：${models.map((m) => m.id).join(', ')}）`,
+      );
+    }
+    return found;
+  };
+
+  return {
+    model: pick(spec.defaultModel ?? models[0]!.id),
+    streamFn,
+    models,
+    selectModel: (id) => ({ model: pick(id), streamFn }),
+  };
+}
+
+/**
+ * 一个 spec → 一个 pi provider + 它的 model 清单。
+ *
+ * 从 {@link createOpenAICompatSource} 里抽出来给 {@link createMultiProviderSource} 复用：
+ * 多网关与单网关唯一的区别是往几个 provider 进同一个 registry，model 的构造规则完全一样。
+ */
+function buildProvider(spec: OpenAICompatSpec): {
+  providerId: string;
+  provider: ReturnType<typeof createProvider<'openai-completions'>>;
+  models: Model<'openai-completions'>[];
+} {
+  const providerId = spec.providerId ?? 'axon-gateway';
   // baseUrl 末尾斜杠会让 openai SDK 拼出 `//chat/completions`，部分网关 404。
   const baseUrl = spec.baseUrl.replace(/\/+$/, '');
 
@@ -193,25 +230,76 @@ export function createOpenAICompatSource(
     api: openAICompletionsApi(),
   });
 
+  return { providerId, provider, models };
+}
+
+/**
+ * 多网关合成一个 {@link ModelSource} —— M15 的多提供商入口。
+ *
+ * 为什么一个 source 吃得下 N 个网关：pi 的 `MutableModels` 本来就是多 provider 容器，
+ * `setProvider` 按 `provider.id` upsert、`stream()` 按 `model.provider` 自己路由
+ * （`pi-ai/dist/models.js:37,352,380`）。所以这里只要往**同一个 registry** 逐个塞 provider，
+ * 一个 streamFn 就能把请求发到各自的 baseUrl，不需要 N 个 source 再做外层分发。
+ *
+ * `selectModel` 吃复合键 `providerId:modelId`（见 protocol 的 `formatModelRef`），
+ * 也兼容裸 modelId —— 旧角色文件与 M15 前的落盘记录里存的都是裸 id，
+ * 按注册顺序取首个匹配，与 `resolveModelRef` 的裸 id 语义保持一致。
+ */
+export function createMultiProviderSource(
+  specs: OpenAICompatSpec[],
+  defaultRef?: string,
+): ModelSource & {
+  models: Model<'openai-completions'>[];
+  selectModel: (ref: string) => ModelSource;
+} {
+  if (!specs.length) throw new Error('createMultiProviderSource: specs 不能为空');
+
   const registry = createRegistry();
-  registry.setProvider(provider);
+  const models: Model<'openai-completions'>[] = [];
+  for (const spec of specs) {
+    if (!spec.models.length) continue;
+    const built = buildProvider(spec);
+    registry.setProvider(built.provider);
+    models.push(...built.models);
+  }
+  if (!models.length) throw new Error('createMultiProviderSource: 没有任何可用模型');
+
   const streamFn = streamFnOf(registry);
 
-  const pick = (id: string): Model<'openai-completions'> => {
-    const found = models.find((m) => m.id === id);
+  const pick = (ref: string): Model<'openai-completions'> => {
+    // 只切第一个冒号：模型 id 自身可能含冒号（ollama 的 `qwen3:8b`）。
+    const at = ref.indexOf(':');
+    const providerId = at > 0 ? ref.slice(0, at) : undefined;
+    const modelId = at > 0 ? ref.slice(at + 1) : ref;
+    const found = providerId
+      ? models.find((m) => m.provider === providerId && m.id === modelId)
+      : models.find((m) => m.id === modelId);
     if (!found) {
       throw new Error(
-        `模型 ${id} 不在网关 ${providerId} 的清单里（已配置：${models.map((m) => m.id).join(', ')}）`,
+        `模型 ${ref} 不在任何已配置网关的清单里（已配置：${models
+          .map((m) => `${m.provider}:${m.id}`)
+          .join(', ')}）`,
       );
     }
     return found;
   };
 
+  const resolveDefault = (): Model<'openai-completions'> => {
+    if (defaultRef) {
+      try {
+        return pick(defaultRef);
+      } catch {
+        console.warn(`[axon] 默认模型 ${defaultRef} 解析不到，回落首个可用模型`);
+      }
+    }
+    return models[0]!;
+  };
+
   return {
-    model: pick(spec.defaultModel ?? models[0]!.id),
+    model: resolveDefault(),
     streamFn,
     models,
-    selectModel: (id) => ({ model: pick(id), streamFn }),
+    selectModel: (ref) => ({ model: pick(ref), streamFn }),
   };
 }
 

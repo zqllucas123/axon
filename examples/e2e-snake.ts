@@ -32,15 +32,17 @@ if (choice.kind !== 'openai-compat') {
   process.exit(1);
 }
 
+// spike 脚本只验证单网关链路，取第一个可用 provider 即可
+const p = choice.providers[0]!;
 const modelSource = createOpenAICompatSource({
-  providerId: choice.providerId,
-  providerName: choice.providerName,
-  baseUrl: choice.baseUrl,
-  apiKey: choice.apiKey,
-  models: choice.models,
-  defaultModel: choice.defaultModel,
+  providerId: p.providerId,
+  providerName: p.providerName,
+  baseUrl: p.baseUrl,
+  apiKey: p.apiKey,
+  models: p.models,
+  defaultModel: p.defaultModel,
 });
-console.log(`模型  ${choice.defaultModel} @ ${choice.baseUrl}`);
+console.log(`模型  ${p.defaultModel} @ ${p.baseUrl}`);
 console.log(`团队  全栈小队`);
 console.log(`目标  /Users/lucaszhou/works/prjs/test/贪吃蛇\n`);
 

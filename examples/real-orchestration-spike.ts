@@ -29,15 +29,17 @@ if (choice.kind !== 'openai-compat') {
   process.exit(1);
 }
 
+// spike 脚本只验证单网关链路，取第一个可用 provider 即可
+const p = choice.providers[0]!;
 const modelSource = createOpenAICompatSource({
-  providerId: choice.providerId,
-  providerName: choice.providerName,
-  baseUrl: choice.baseUrl,
-  apiKey: choice.apiKey,
-  models: choice.models,
-  defaultModel: choice.defaultModel,
+  providerId: p.providerId,
+  providerName: p.providerName,
+  baseUrl: p.baseUrl,
+  apiKey: p.apiKey,
+  models: p.models,
+  defaultModel: p.defaultModel,
 });
-console.log(`模型 ${choice.defaultModel} @ ${choice.baseUrl}\n`);
+console.log(`模型 ${p.defaultModel} @ ${p.baseUrl}\n`);
 
 // 事件流即观测面：真模型下它是唯一能看清编排在干嘛的东西。
 const timeline: string[] = [];

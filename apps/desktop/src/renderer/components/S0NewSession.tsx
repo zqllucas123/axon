@@ -29,7 +29,9 @@
 import { useEffect, useRef, useState, type ReactElement } from 'react';
 import { useApp } from '../state/store.tsx';
 import { Icon } from '../icons.tsx';
+import { ComposerBar } from './ComposerBar.tsx';
 import { EnginePicker } from './EnginePicker.tsx';
+import { ModelSelect } from './ModelPicker.tsx';
 import type { SessionExecutor } from '@axon/protocol';
 
 /** 工作区元信息（`workspace.inspect` 的结果形状）。 */
@@ -76,6 +78,9 @@ export function S0NewSession(): ReactElement {
   const [modeOpen, setModeOpen] = useState(false);
   // 执行引擎：null = Axon 内置；否则是外部 Agent 工具的 id（随 session.create 下发）。
   const [engineId, setEngineId] = useState<string | null>(null);
+  // 本会话模型（`providerId:modelId`）：null = 跟全局默认。外部引擎自带模型配置，
+  // 这个值只对 Axon 内置引擎有意义，所以选外部引擎时清掉（与 teamId 同一条联动规则）。
+  const [modelRef, setModelRef] = useState<string | null>(null);
   const [attachments, setAttachments] = useState<string[]>([]);
   // 这次会话的工作目录。普通会话由下面的 effect 向主进程要一个临时目录；
   // 项目会话不用它 —— 目录锁在项目上（用户手选的路径也落在这里）。
@@ -190,6 +195,8 @@ export function S0NewSession(): ReactElement {
       executor,
       ...(needTeam && teamId ? { teamId } : {}),
       ...(engineId ? { engineId } : {}),
+      // 外部引擎自带模型配置，modelRef 对它没意义（联动里已清，这里兜一道）。
+      ...(modelRef && !engineId ? { modelRef } : {}),
       initialPrompt: task.trim(),
       ...(attachments.length > 0 ? { attachments } : {}),
     });
@@ -292,7 +299,7 @@ export function S0NewSession(): ReactElement {
                     title="取消选择团队"
                     aria-label={`取消选择团队 ${teamId}`}
                   >
-                    <Icon name="x" size={12} />
+                    <Icon name="x" size={14} />
                   </button>
                 </span>
               ) : null}
@@ -315,7 +322,7 @@ export function S0NewSession(): ReactElement {
                         title="移除此附件"
                         aria-label={`移除 ${name}`}
                       >
-                        <Icon name="x" size={12} />
+                        <Icon name="x" size={14} />
                       </button>
                     </span>
                   );
@@ -324,22 +331,18 @@ export function S0NewSession(): ReactElement {
             </div>
           ) : null}
 
-          <div className="composer">
-            <textarea
-              ref={textRef}
-              value={task}
-              onChange={(e) => setTask(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' && !e.shiftKey) {
-                  e.preventDefault();
-                  void start();
-                }
-              }}
-              placeholder="描述你的任务…（Enter 开始，Shift+Enter 换行）"
-              data-smoke="session-task"
-              rows={2}
-            />
-            <div className="row">
+          {/* 外壳（容器 / textarea / 工具栏三段式布局）由 ComposerBar 收口，与 S2 共用一份；
+              这里只给出本屏的控件行为：附件可加、引擎可选、模式是 popover。 */}
+          <ComposerBar
+            value={task}
+            onChange={setTask}
+            onSubmit={() => void start()}
+            placeholder="描述你的任务…（Enter 开始，Shift+Enter 换行）"
+            textareaRef={textRef}
+            textareaSmoke="session-task"
+            rows={2}
+            left={
+              <>
               {/* 引擎 popover：Axon + 本机已安装且已接入的外部工具（见文件头注释 3 与 EnginePicker）。 */}
               <button
                 className={`tool-btn${attachments.length > 0 ? ' is-on' : ''}`}
@@ -358,10 +361,12 @@ export function S0NewSession(): ReactElement {
                   if (id) {
                     setPicked('engine');
                     setTeamId(null);
+                    // 外部引擎的模型由它自己的配置决定，Axon 的 modelRef 管不到它 ——
+                    // 留着会在工具栏显示一个不生效的选择，所以清掉。
+                    setModelRef(null);
                   }
                 }}
               />
-
               <div className="s0-mode">
                 <button
                   className={`tool-btn${modeOpen ? ' is-on' : ''}`}
@@ -431,18 +436,25 @@ export function S0NewSession(): ReactElement {
                 ) : null}
               </div>
 
-              <span className="spacer" />
-              <button
-                className="send"
-                onClick={() => void start()}
-                disabled={!ready}
-                data-smoke="start-session"
-                title={needTeam && !teamId ? '先选一个团队' : '开始（⌘/Ctrl + Enter）'}
-              >
-                <Icon name={busy ? 'clock' : 'arrowUp'} size={16} />
-              </button>
-            </div>
-          </div>
+              </>
+            }
+            /* 外部引擎自带模型配置，Axon 的模型表对它没意义 —— 不渲染。 */
+            right={
+              engineId ? null : (
+                <ModelSelect
+                  {...(modelRef !== null ? { value: modelRef } : {})}
+                  onChange={(ref) => setModelRef(ref ?? null)}
+                />
+              )
+            }
+            send={{
+              icon: busy ? 'clock' : 'arrowUp',
+              onClick: () => void start(),
+              disabled: !ready,
+              smoke: 'start-session',
+              title: needTeam && !teamId ? '先选一个团队' : '开始（⌘/Ctrl + Enter）',
+            }}
+          />
         </div>
       </div>
     </div>

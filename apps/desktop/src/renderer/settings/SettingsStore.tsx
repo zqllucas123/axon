@@ -31,6 +31,7 @@ import type {
   ConfigPatch,
   ConfigSnapshot,
   OpenPathKind,
+  ProviderConfig,
   RoleEntry,
   StorageIssue,
 } from '@axon/protocol';
@@ -66,6 +67,10 @@ export interface SettingsValue {
   error: string | null;
   /** 改一项或多项；返回是否被接受。 */
   patch: (patch: ConfigPatch) => Promise<boolean>;
+  /** 创建或整体覆盖一个 provider（M15）；返回是否被接受。 */
+  saveProvider: (provider: ProviderConfig) => Promise<boolean>;
+  /** 删除一个 provider（M15）；返回是否已删除。 */
+  deleteProvider: (id: string) => Promise<boolean>;
   /** 恢复出厂（清白名单字段，保留未知键）。 */
   reset: () => Promise<boolean>;
   /** 在系统文件管理器里打开/定位一个已知位置。 */
@@ -198,6 +203,29 @@ export function SettingsProvider({ children }: { children: ReactNode }): ReactEl
     }
   }, []);
 
+  const saveProvider = useCallback(async (provider: ProviderConfig): Promise<boolean> => {
+    try {
+      const res = await window.axon.invoke('provider.save', { provider });
+      setConfig(res.config);
+      setIssues(res.errors);
+      return res.accepted;
+    } catch (e) {
+      setError(messageOf(e));
+      return false;
+    }
+  }, []);
+
+  const deleteProvider = useCallback(async (id: string): Promise<boolean> => {
+    try {
+      const res = await window.axon.invoke('provider.delete', { id });
+      setConfig(res.config);
+      return res.deleted;
+    } catch (e) {
+      setError(messageOf(e));
+      return false;
+    }
+  }, []);
+
   const value: SettingsValue = {
     config,
     storage,
@@ -206,6 +234,8 @@ export function SettingsProvider({ children }: { children: ReactNode }): ReactEl
     issues,
     error,
     patch,
+    saveProvider,
+    deleteProvider,
     reset,
     openPath,
     setPolicy,

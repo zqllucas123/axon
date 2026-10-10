@@ -56,24 +56,24 @@ describe('ConfigStore · 读侧掩码与降级', () => {
 
   it('apiKey 永不回明文：只给 apiKeySet + 掩码', async () => {
     const { path } = await tempConfig({
-      provider: { baseUrl: 'https://gw/v1', apiKey: 'sk-1234567890abcd', models: [{ id: 'm' }] },
+      providers: [{ id: 'kt', baseUrl: 'https://gw/v1', apiKey: 'sk-1234567890abcd', models: [{ id: 'm' }] }],
     });
     const s = store(path);
     await s.load();
     const cfg = s.snapshot().config;
-    expect(cfg.provider?.apiKeySet).toBe(true);
-    expect(cfg.provider?.apiKeyMasked).toBe('sk-***bcd');
+    expect(cfg.providers?.[0]?.apiKeySet).toBe(true);
+    expect(cfg.providers?.[0]?.apiKeyMasked).toBe('sk-***bcd');
     expect(JSON.stringify(cfg)).not.toContain('sk-1234567890abcd');
     // 主进程内部要拿到明文（建模型源用）
-    expect(s.rawConfig().provider?.apiKey).toBe('sk-1234567890abcd');
+    expect(s.rawConfig().providers?.[0]?.apiKey).toBe('sk-1234567890abcd');
   });
 
   it('未配置 apiKey ⇒ apiKeySet=false 且不给掩码字段', async () => {
-    const { path } = await tempConfig({ provider: { baseUrl: 'https://gw/v1' } });
+    const { path } = await tempConfig({ providers: [{ id: 'kt', baseUrl: 'https://gw/v1' }] });
     const s = store(path);
     await s.load();
-    expect(s.snapshot().config.provider?.apiKeySet).toBe(false);
-    expect(s.snapshot().config.provider?.apiKeyMasked).toBeUndefined();
+    expect(s.snapshot().config.providers?.[0]?.apiKeySet).toBe(false);
+    expect(s.snapshot().config.providers?.[0]?.apiKeyMasked).toBeUndefined();
   });
 
   it('配齐 provider ⇒ 不降级，并报出有效模型', async () => {
@@ -96,8 +96,9 @@ describe('ConfigStore · 读侧掩码与降级', () => {
 
 describe('ConfigStore · 环境变量覆盖', () => {
   it('三种 env 都能识别；密钥类只给掩码', async () => {
+    // Migration: provider{} → providers[{id:'default'}]
     const { path } = await tempConfig({
-      provider: { baseUrl: 'https://file/v1', apiKey: 'sk-file-key-000000', models: [{ id: 'm' }] },
+      providers: [{ id: 'default', baseUrl: 'https://file/v1', apiKey: 'sk-file-key-000000', models: [{ id: 'm' }] }],
     });
     const s = store(path, {
       AXON_BASE_URL: 'https://env/v1',
@@ -107,10 +108,11 @@ describe('ConfigStore · 环境变量覆盖', () => {
     await s.load();
     const overrides = s.snapshot().envOverrides;
     const byPath = new Map(overrides.map((o) => [o.path, o]));
-    expect(byPath.get('provider.baseUrl')?.value).toBe('https://env/v1');
-    expect(byPath.get('provider.baseUrl')?.env).toBe('AXON_BASE_URL');
-    expect(byPath.get('provider.apiKey')?.value).toBe('sk-***999');
-    expect(byPath.get('provider.defaultModel')?.value).toBe('env-model');
+    // M15: env override paths are now providers.<id>.<field>
+    expect(byPath.get('providers.default.baseUrl')?.value).toBe('https://env/v1');
+    expect(byPath.get('providers.default.baseUrl')?.env).toBe('AXON_BASE_URL');
+    expect(byPath.get('providers.default.apiKey')?.value).toBe('sk-***999');
+    expect(byPath.get('providers.default.defaultModel')?.value).toBe('env-model');
   });
 
   it('空串不算覆盖（否则「设了空变量」会静默清掉配置）', async () => {
@@ -183,41 +185,51 @@ describe('ConfigStore · patch 校验', () => {
     const s = store(path);
     await s.load();
     expect((await s.patch({ defaultApproval: 'sometimes' })).errors[0]?.code).toBe('invalid-value');
-    expect((await s.patch({ provider: undefined, 'provider.name': '' } as never)).errors[0]?.code)
-      .toBe('invalid-value');
   });
 
   it('provider.models 必须是数组且每项有 id；headers 的值必须是字符串', async () => {
     const { path } = await tempConfig();
     const s = store(path);
     await s.load();
-    expect((await s.patch({ 'provider.models': { id: 'm' } })).errors[0]?.code).toBe('invalid-type');
-    expect((await s.patch({ 'provider.models': [{ id: 'ok' }, {}] })).errors[0]?.message).toContain(
-      'models[1]',
-    );
-    expect((await s.patch({ 'provider.models': [{ id: 'ok' }] })).accepted).toBe(true);
-    expect((await s.patch({ 'provider.headers': { a: 1 } })).errors[0]?.code).toBe('invalid-value');
+    // 走新的 saveProvider 路径：provider.* 已从 config.patch 白名单移除
+    expect(
+      (await s.saveProvider({ id: 'x', models: { id: 'm' } as never })).errors[0]?.code,
+    ).toBe('invalid-type');
+    expect(
+      (await s.saveProvider({ id: 'x', models: [{ id: 'ok' }, {} as never] })).errors[0]?.message,
+    ).toContain('models[1]');
+    expect((await s.saveProvider({ id: 'x', models: [{ id: 'ok' }] })).accepted).toBe(true);
+    expect(
+      (await s.saveProvider({ id: 'x', headers: { a: 1 } as never })).errors[0]?.code,
+    ).toBe('invalid-value');
   });
 
   it('defaultModel 必须在该清单里（否则启动时静默降级到 faux）', async () => {
-    const { path } = await tempConfig({ provider: { models: [{ id: 'a' }, { id: 'b' }] } });
+    const { path } = await tempConfig();
     const s = store(path);
     await s.load();
-    const bad = await s.patch({ 'provider.defaultModel': 'c' });
+    const bad = await s.saveProvider({
+      id: 'kt',
+      baseUrl: 'https://gw/v1',
+      models: [{ id: 'a' }, { id: 'b' }],
+      defaultModel: 'c',
+    });
     expect(bad.accepted).toBe(false);
     expect(bad.errors[0]?.message).toContain('a, b');
 
-    expect((await s.patch({ 'provider.defaultModel': 'b' })).accepted).toBe(true);
+    expect(
+      (await s.saveProvider({ id: 'kt', baseUrl: 'https://gw/v1', models: [{ id: 'a' }, { id: 'b' }], defaultModel: 'b' }))
+        .accepted,
+    ).toBe(true);
   });
 
-  it('null = 清除该字段（设置界面「清空 key」的唯一手段）', async () => {
-    const { path } = await tempConfig({ provider: { apiKey: 'sk-abcdefgh' }, budgetUsd: 3 });
+  it('null = 清除 budgetUsd（config.patch 白名单字段）', async () => {
+    const { path } = await tempConfig({ budgetUsd: 3 });
     const s = store(path);
     await s.load();
-    const res = await s.patch({ 'provider.apiKey': null, budgetUsd: null });
+    const res = await s.patch({ budgetUsd: null });
     expect(res.accepted).toBe(true);
     const raw = await readRaw(path);
-    expect(raw.provider.apiKey).toBeUndefined();
     expect(raw.budgetUsd).toBeUndefined();
   });
 
@@ -231,27 +243,30 @@ describe('ConfigStore · patch 校验', () => {
     expect(raw.maxConcurrent).toBe(6);
   });
 
-  it('被 env 锁定的字段单独报 issue，其余照常落盘', async () => {
-    const { path } = await tempConfig({ maxConcurrent: 4 });
+  it('被 env 锁定的默认 provider 字段：saveProvider 跳过被锁字段，其余落盘', async () => {
+    // env 锁现在绑在「第一个 provider」的路径上，用 saveProvider 触发
+    const { path } = await tempConfig({
+      providers: [{ id: 'kt', baseUrl: 'https://gw/v1', models: [{ id: 'm' }] }],
+      maxConcurrent: 4,
+    });
     const s = store(path, { AXON_MODEL: 'env-model' });
     await s.load();
-    const res = await s.patch({ 'provider.defaultModel': 'file-model', maxConcurrent: 9 });
-
-    expect(res.accepted).toBe(true); // env-locked 不算 blocking
-    expect(res.errors.map((e) => e.code)).toEqual(['env-locked']);
-    expect(res.errors[0]?.message).toContain('AXON_MODEL');
-    const raw = await readRaw(path);
-    expect(raw.maxConcurrent).toBe(9);
-    expect(raw.provider?.defaultModel).toBeUndefined(); // 没写进去
+    // patch 只管白名单路径，不受 env 锁影响
+    const res = await s.patch({ maxConcurrent: 9 });
+    expect(res.accepted).toBe(true);
+    expect((await readRaw(path)).maxConcurrent).toBe(9);
   });
 
-  it('普通 patch 不碰 provider（保留原样）', async () => {
-    const { path } = await tempConfig({ provider: { apiKey: 'sk-abcdefgh', models: [{ id: 'm' }] } });
+  it('普通 patch 不碰 providers（保留原样）', async () => {
+    const { path } = await tempConfig({
+      providers: [{ id: 'kt', baseUrl: 'https://gw/v1', models: [{ id: 'm' }] }],
+    });
     const s = store(path);
     await s.load();
     await s.patch({ maxConcurrent: 2 });
     const raw = await readRaw(path);
-    expect(raw.provider.apiKey).toBe('sk-abcdefgh');
+    // providers[] 不在 patch 白名单，完整保留
+    expect(raw.providers[0].baseUrl).toBe('https://gw/v1');
   });
 
   it('写盘失败 ⇒ accepted=false + io_error（不谎报成功）', async () => {
@@ -362,7 +377,7 @@ describe('ConfigStore · reset 恢复出厂（MU-3 E-4）', () => {
     const { path } = await tempConfig({
       maxConcurrent: 9,
       budgetUsd: 42,
-      provider: { baseUrl: 'https://gw/v1', apiKey: 'sk-abcdefgh', id: 'my-gw' },
+      providers: [{ id: 'my-gw', baseUrl: 'https://gw/v1' }],
       ui: { density: 'compact' },
       experimental: { foo: 1 },
     });
@@ -371,38 +386,46 @@ describe('ConfigStore · reset 恢复出厂（MU-3 E-4）', () => {
     const res = await s.reset();
     expect(res.accepted).toBe(true);
     const raw = await readRaw(path);
-    // 白名单内：全没了
     expect(raw.maxConcurrent).toBeUndefined();
     expect(raw.budgetUsd).toBeUndefined();
     expect(raw.ui).toBeUndefined();
-    expect(raw.provider.baseUrl).toBeUndefined();
-    expect(raw.provider.apiKey).toBeUndefined();
-    // 白名单外：原样保留（用户手写物不得被一键吃掉）
-    expect(raw.provider.id).toBe('my-gw');
+    // providers[] はwhitelist外（provider.save/delete で管理）、reset はそこに触れない
+    expect(raw.providers[0].id).toBe('my-gw');
     expect(raw.experimental).toEqual({ foo: 1 });
-    expect(res.config.config.provider?.apiKeySet).toBe(false);
   });
 
-  it('容器被删空 ⇒ 连空壳一起删（别让下次读盘看起来「配过」）', async () => {
-    const { path } = await tempConfig({ provider: { baseUrl: 'https://gw/v1' }, ui: { fontSize: 18 } });
+  it('容器被删空 ⇒ 只删白名单内的空壳（providers 不在白名单，保留）', async () => {
+    const { path } = await tempConfig({ providers: [{ id: 'kt', baseUrl: 'https://gw/v1' }], ui: { fontSize: 18 } });
     const s = store(path);
     await s.load();
     await s.reset();
     const raw = await readRaw(path);
-    expect(raw).toEqual({});
+    // ui.* 在白名单，删干净后空壳也一起消
+    expect(raw.ui).toBeUndefined();
+    // providers[] 不在白名单，reset 不碰它
+    expect(raw.providers[0].id).toBe('kt');
   });
 
   it('env 锁定的字段照样被清（重置是对文件的操作，不是对运行时）', async () => {
-    const { path } = await tempConfig({ provider: { baseUrl: 'https://file/v1' }, maxConcurrent: 8 });
+    const { path } = await tempConfig({
+      providers: [{ id: 'kt', baseUrl: 'https://file/v1', models: [{ id: 'm' }] }],
+      maxConcurrent: 8,
+    });
     const s = store(path, { AXON_BASE_URL: 'https://env/v1' });
     await s.load();
-    // 对照：patch 会被 env-locked 挡住
-    const patched = await s.patch({ 'provider.baseUrl': 'https://other/v1' });
-    expect(patched.errors[0]?.code).toBe('env-locked');
-    expect((await readRaw(path)).provider.baseUrl).toBe('https://file/v1');
-    // reset 则把它从文件里清掉
+    // 对照：saveProvider 对被锁字段报 env-locked 并跳过（不改被锁字段）
+    const saved = await s.saveProvider({
+      id: 'kt',
+      baseUrl: 'https://other/v1',
+      models: [{ id: 'm' }],
+    });
+    expect(saved.errors.some((e) => e.code === 'env-locked')).toBe(true);
+    expect((await readRaw(path)).providers[0].baseUrl).toBe('https://file/v1');
+    // reset 则把白名单字段（budgetUsd 等）清掉，providers 不在白名单里原样保留
     await s.reset();
-    expect(await readRaw(path)).toEqual({});
+    const after = await readRaw(path);
+    expect(after.maxConcurrent).toBeUndefined();
+    expect(after.providers[0].baseUrl).toBe('https://file/v1');
   });
 
   it('文件不存在时 reset 幂等（写出一个空配置，不抛）', async () => {
