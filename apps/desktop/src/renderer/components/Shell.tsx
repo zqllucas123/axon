@@ -14,7 +14,7 @@ import { SessionMain, SessionRightPanel } from './S2Session.tsx';
 import { S3Teams } from './S3Teams.tsx';
 import { S4Knowledge } from './S4Knowledge.tsx';
 import { S5Inbox } from './S5Inbox.tsx';
-import { S6Budget } from './S6Budget.tsx';
+import { S6Usage } from './S6Usage.tsx';
 import { S7Sessions } from './S7Sessions.tsx';
 import { SettingsScreen } from '../settings/SettingsApp.tsx';
 import { Icon } from '../icons.tsx';
@@ -31,7 +31,7 @@ function Screen(): ReactElement {
     case 's5':
       return <S5Inbox />;
     case 's6':
-      return <S6Budget />;
+      return <S6Usage />;
     case 's7':
       return <S7Sessions />;
     // 's8' 不在这里：它在 Shell 里整屏接管，不进主区路由。

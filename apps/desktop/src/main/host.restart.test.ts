@@ -362,7 +362,7 @@ describe('重启 · 恢复语义', () => {
     expect(settled[0]?.summary).toContain('应用重启');
   });
 
-  it('全局预算接着上次算：已花按 rollup 之和种子化，UI 也看得见（§4.5）', async () => {
+  it('累计用量接着上次算：落盘 rollup 透进会话摘要（UI 的唯一取数源，§4.5）', async () => {
     const root = await tempRoot();
     const first = await boot(root);
     const solo = first.host.createSession({ title: '花钱的', executor: 'engine' });
@@ -388,9 +388,12 @@ describe('重启 · 恢复语义', () => {
     const items = await first.persistence.listRecords();
 
     const second = await boot(root, items);
-    // 冷启动：registry 里没有节点，全局已花只能来自种子化
+    // 冷启动：registry 里没有节点（会话还在盘上），累计用量只能从落盘 rollup 来。
+    // 断言打在**会话摘要**上而不是某个专用快照命令：渲染层（顶栏 chip / S1 / S6）
+    // 读的就是 session.list 的 `usage`，摘要接不上账，屏上就是 $0.00。
     expect(second.host.storageStatus().loadedCount).toBe(0);
-    expect(second.host.budgetSnapshot().spentUsd).toBeCloseTo(1.25, 6);
+    const summary = second.host.listSessions().find((s) => s.record.id === solo.record.id);
+    expect(summary?.usage.costUsd).toBeCloseTo(1.25, 6);
     expect(solo.record.id.length).toBeGreaterThan(0);
   });
 });

@@ -45,7 +45,6 @@ async function boot(root: string) {
     tools: [],
     emit: (event, payload) => events.push({ event, payload }),
     persistence,
-    budget: { hardUsd: 10 },
     approvalTimeoutMs: 100, // 极短，验证提问不受影响
   });
   return { host, events, persistence };

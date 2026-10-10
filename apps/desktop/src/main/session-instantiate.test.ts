@@ -271,7 +271,7 @@ describe('planTeam —— 计划与拓扑序', () => {
     expect(plan.members).toHaveLength(1);
   });
 
-  it('team 原样带出（摘要/UI 要引用它的 name 与 budget）', () => {
+  it('team 原样带出（摘要/UI 要引用它的 name）', () => {
     const t = team();
     expect(planTeam(t, { roles: ROLES }).team).toBe(t);
   });

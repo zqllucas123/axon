@@ -52,7 +52,6 @@ async function boot(root: string) {
     tools: [],
     emit: (event, payload) => events.push({ event, payload }),
     persistence,
-    budget: { hardUsd: 10 },
     approvalTimeoutMs: 500,
   });
 

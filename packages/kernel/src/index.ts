@@ -52,7 +52,8 @@ export {
   isDescendantOf,
 } from './fork.ts';
 
-export { BudgetGuard, type BudgetLimits, type BudgetState } from './budget.ts';
+/* BudgetGuard 已删（2026-10-10，用户决策）：token 成本熔断整体下线。
+   用量统计（UsageTotals）保留 —— 它回答「花了多少」，与「拦不拦」是两件事。 */
 
 export {
   Ledger,

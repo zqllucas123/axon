@@ -5,7 +5,7 @@
  *  - `UsageView`：本会话用量（会话预算卡 + 按成员表）—— 第三个视图
  *  - `EscalateSheet`：「叫人」选团队浮层（原型只画了入口按钮，浮层是实现新增）
  *
- * 数据全部来自已有命令（`ledger.query` / `session.get` / `budget` 摘要），零新增协议；
+ * 数据全部来自已有命令（`ledger.query` / `session.get` / 会话摘要的 usage），零新增协议；
  * 缺口一律整块不渲染（MU-2 §4.6）：不显示消息级成本、不显示生效 model/审批档。
  */
 
@@ -132,12 +132,11 @@ export function LedgerView(): ReactElement {
   );
 }
 
-/** 用量视图：会话预算卡 + 按成员表（口径与顶栏 chip 同源：会话摘要的 usage 字段）。 */
+/** 用量视图：会话合计卡 + 按成员表（口径与顶栏 chip 同源：会话摘要的 usage 字段）。 */
 export function UsageView(): ReactElement {
   const { current, details } = useApp();
   if (!current) return <div className="stream" />;
   const members = details[current.record.id]?.members ?? [];
-  const b = current.budget;
   const rows = [...members].sort((a, x) => x.usage.costUsd - a.usage.costUsd);
   const sum = rows.reduce((n, m) => n + m.usage.costUsd, 0);
 
@@ -146,24 +145,20 @@ export function UsageView(): ReactElement {
       <ViewHead title="本会话用量" note="按成员累计（含各自子树）；金额口径与顶栏 chip 同源" />
       <div className="panel" style={{ marginBottom: 14 }}>
         <div className="panel-title">
-          <span>预算</span>
-          <span className={b.tier === 'frozen' ? 'tag err' : b.tier === 'warning' ? 'tag wait' : 'tag ok'}>
-            {b.tier === 'frozen' ? '已熔断' : b.tier === 'warning' ? '接近软线' : '正常'}
-          </span>
-          <span className="spacer" />
-          <span className="mono" style={{ color: 'var(--text-dim)' }}>
-            {b.limitedBy ? `受${b.limitedBy === 'global' ? '全局' : b.limitedBy === 'team' ? '团队' : '会话'}预算限制` : ''}
-          </span>
+          <span>本会话合计</span>
         </div>
         <div className="prow">
           <Icon name="wallet" size={16} />
           <span>已花</span>
-          <span className="val">{money(b.spentUsd, 3)}</span>
+          <span className="val">{money(current.usage.costUsd, 3)}</span>
         </div>
         <div className="prow">
           <Icon name="alert" size={16} />
-          <span>硬线</span>
-          <span className="val">{b.effectiveHardUsd > 0 ? money(b.effectiveHardUsd) : '不设限'}</span>
+          <span>token</span>
+          <span className="val">
+            {current.usage.inputTokens.toLocaleString('en-US')} in ·{' '}
+            {current.usage.outputTokens.toLocaleString('en-US')} out
+          </span>
         </div>
         <div className="prow">
           <Icon name="clock" size={16} />

@@ -53,7 +53,6 @@ async function boot(root: string, scriptRoutes?: Record<string, () => unknown>) 
     tools: [],
     emit: (event, payload) => events.push({ event, payload }),
     persistence,
-    budget: { hardUsd: 10 },
   });
   return { host, events, persistence };
 }

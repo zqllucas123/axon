@@ -52,11 +52,12 @@ function launchApp() {
       // 冒烟绝不允许碰真网关：开发机上 ~/.axon/config.json 往往配了真 key，
       // 而 AXON_SMOKE_SCRIPT 只替换 streamFn —— 靠它「恰好不发请求」是巧合不是保证。
       AXON_PROVIDER: 'faux',
-      // 冒烟钩子：脚本化回复永不耗尽 + 每轮固定成本 0.05（软线 0.048 / 硬线 0.06），
-      // 恰好两轮 prompt 走完 warning → frozen 两段 UI。
+      // 冒烟钩子：脚本化回复永不耗尽（faux 的响应队列是「每条消费一个」，会耗尽）。
       AXON_SMOKE_SCRIPT: '1',
-      AXON_SMOKE_BUDGET_COST: '0.05',
-      AXON_SMOKE_BUDGET_HARD: '0.06',
+      // 每轮注入固定成本：faux 自身 cost 恒为 0，不注入则 S6/顶栏的金额永远是
+      // $0.00 —— 用量链路只剩空壳可验。原 AXON_SMOKE_BUDGET_COST 随成本熔断
+      // 下线改为现在这个名字（2026-10-10），语义从「喂熔断」变成「喂用量」。
+      AXON_SMOKE_TURN_COST: '0.05',
     },
   });
   // spawn 失败（路径不对、没装 electron）是**异步**报的：不接这个监听就会表现为
@@ -397,13 +398,11 @@ try {
   if (!cleared) exit(1);
 
   // ── 6.5 故意留一条**不批**的审批（MU-3 切片 9）
-  //     一石三鸟：① S5 收件箱才有真的「待处理」卡可验（否则整屏只剩空态）；
+  //     一石二鸟：① S5 收件箱才有真的「待处理」卡可验（否则整屏只剩空态）；
   //     ② 被卡的分身停在 waiting，正是 M5 §4.6 说的「重启前在跑」—— 下面重启幕
-  //     的 `rollup.interruptedAt` 与 S7「上次中断于 …」全靠它做标的；
-  //     ③ 它必须排在烧钱幕**之前**：预算 frozen 是终态，`assertCanStart` 会把
-  //     之后所有 spawn/prompt 一律挡下（packages/kernel/src/budget.ts:94）。
-  //     另起一个分身而不复用 `spawned`：同一个分身被审批卡住时发不了新 prompt，
-  //     而烧钱那两轮还得用它。
+  //     的 `rollup.interruptedAt` 与 S7「上次中断于 …」全靠它做标的。
+  //     另起一个分身而不复用 `spawned`：同一个分身被审批卡住时就发不了新 prompt 了。
+  //     （原先还有第三条理由「必须排在烧钱幕之前」，随成本熔断下线一起失效。）
   const parkedAgent = await evalJs(
     `window.axon.invoke('agent.spawn', { role: 'blank', parent: '${session.root}' }).then(r => r.path)`,
   );
@@ -420,7 +419,6 @@ try {
   if (!parked) exit(1);
 
   // ── 6.7 项目模块：创建项目 → 项目上下文新建会话 → 会话归到项目下。
-  //     必须排在烧钱幕**之前**：预算 frozen 是终态，会挡下之后所有 session 创建。
   //     原生目录选择器无法用 CDP 驱动，工作空间走「路径输入」这条路
   //     （project.create 直接 invoke，等价于弹窗里手输路径后点「创建项目」）。
   const projCwd = '/tmp/axon-smoke-project';
@@ -486,24 +484,14 @@ try {
   log(projSessionRow, '新会话即时出现在项目分组下（session.created → 按 projectId 归组）');
   if (!projSessionRow) exit(1);
 
-  // 回到原冒烟会话：烧钱幕要在它的分身 `spawned` 上继续发 prompt。
+  // 回到原冒烟会话：下面几幕都在它身上验。
   await evalJs(
     `document.querySelector('.side-scroll [data-smoke="session-row"][data-session="${session.id}"]')?.click()`,
   );
   await until(`!!document.querySelector('.inspector [data-smoke="member-row"][data-path="${session.root}"]')`);
 
-  // ─ 7. 预算熔断（M3 切片 6 / MU-2 视觉）：含「烧钱」的 prompt×2 走完 warning → frozen。
-  //     MU-2 起冻结信号是**顶栏预算 chip 变色**（原型 shell.js:258 的 warn/danger 两档），
-  //     旧的 .budget 横幅随 SessionPanel 一起下线 —— 这里断言的是真窗口里的那一枚 chip。
-  await evalJs(`window.axon.invoke('agent.prompt', { path: '${spawned}', text: '烧钱第一轮' })`);
-  const warned = await until(`!!document.querySelector('.status-chips .chip.warn')`);
-  log(warned, '第一轮后预算 chip 转 warn（budget.warning → React 重渲染）');
-  if (!warned) exit(1);
-
-  await evalJs(`window.axon.invoke('agent.prompt', { path: '${spawned}', text: '烧钱第二轮' })`);
-  const frozen = await until(`!!document.querySelector('.status-chips .chip.danger')`);
-  log(frozen, '第二轮后预算 chip 转 danger（budget.frozen → 档位终态）');
-  if (!frozen) exit(1);
+  // ─ 7. 预算熔断幕已删（2026-10-10）：成本熔断（软线/硬线/warning→frozen 档位）整体下线，
+  //     顶栏不再有 warn/danger 两档 chip 可断言。用量仍在记账，它的读侧由 7.6 的 S6 幕覆盖。
 
   // ── 7.5 MU-2 三屏（切片 7/8）：渲染 + 导航 + 懒加载反向断言
   //     懒加载的验收线是「反面」的：列表/树渲染只许读内存缓存，绝不许补拉 session.get。
@@ -570,7 +558,7 @@ try {
     `!!document.querySelector('[data-smoke="team-detail"]') &&
      document.querySelectorAll('[data-smoke="team-detail"] [data-smoke="member-row"]').length >= 2`,
   );
-  log(s3detail, '选中团队后出详情卡（成员行 + 编队/并发/预算表单）');
+  log(s3detail, '选中团队后出详情卡（成员行 + 编队/并发表单）');
   if (!s3detail) exit(1);
   await evalJs(`document.querySelector('[data-smoke="tab-agents"]').click()`);
   const s3agents = await until(`document.querySelectorAll('[data-smoke="agent-row"]').length >= 2`);
@@ -588,7 +576,7 @@ try {
   );
   if (loadedAfterS3 !== loadedBefore) exit(1);
 
-  // ── 7.6 MU-3 四屏（切片 9）：S5 收件箱 / S6 预算 / S7 会话恢复 / S8 设置窗
+  // ── 7.6 MU-3 四屏（切片 9）：S5 收件箱 / S6 用量 / S7 会话恢复 / S8 设置窗
   //     这四屏在四个并行窗口里写，各自只能跑 typecheck（不允许跑 ui-smoke，
   //     会抢 Electron 实例）—— 所以真窗口的验收全部集中在这里。
 
@@ -619,30 +607,24 @@ try {
   );
   if (!s5feed) exit(1);
 
-  // S6 预算：三指标 + 按会话排行。前面烧钱两轮已经把全局档位推到 frozen，
-  // 所以「最严重的会话档位」必须是非 none 的真值（data-tier 把它暴露出来）。
+  // S6 用量：三指标 + 按会话排行。成本熔断下线后这屏只剩「花了多少」的读侧，
+  // 不再有档位（tier）可断言 —— 挂点也随之从 budget-* 改名为 usage-*。
+  // 金额靠 AXON_SMOKE_TURN_COST 注入的非零成本取真值：会话行有 `costUsd > 0`
+  // 过滤，若成本恒为 0，这一行根本不会渲染（断言会假绿成「空态在」）。
   await evalJs(`document.querySelector('[data-smoke="nav-s6"]').click()`);
   const s6 = await until(
-    `!!document.querySelector('[data-smoke="budget-total"]') &&
-     !!document.querySelector('[data-smoke="budget-limits"]') &&
-     !!document.querySelector('[data-smoke="budget-session-row"]')`,
+    `!!document.querySelector('[data-smoke="usage-total"]') &&
+     !!document.querySelector('[data-smoke="usage-tokens"]') &&
+     !!document.querySelector('[data-smoke="usage-session-row"]')`,
   );
-  log(s6, 'S6 预算与用量：三指标 + 按会话排行（只读 session.list 的 usage）');
+  log(s6, 'S6 用量：三指标 + 按会话排行（只读 session.list 的 usage）');
   if (!s6) exit(1);
-  // 会话档位取真值：全局冻结是事件驱动（即时），而会话 usage 在 turn.end 才聚合，
-  // 两者有一拍时差 —— 轮询到会话档位落到 frozen 为止（单次读会撞上 warning 的中间态）。
-  const tierFrozen = await until(
-    `document.querySelector('[data-smoke="budget-tier"]')?.dataset.tier === 'frozen'`,
+  const s6total = await evalJs(
+    `document.querySelector('[data-smoke="usage-total"] .v')?.textContent ?? ''`,
   );
-  const tier = await evalJs(`document.querySelector('[data-smoke="budget-tier"]')?.dataset.tier ?? null`);
-  log(tierFrozen, `S6 最严会话档位取真值（${tier}）`);
-  if (!tierFrozen) exit(1);
-  // 文案自查（拍板 P-8）：BudgetGuard 无日切，全屏不得出现「今日」。
-  const noToday = await evalJs(
-    `!(document.querySelector('[data-screen="s6"]')?.textContent ?? '').includes('今日')`,
-  );
-  log(noToday, 'S6 全屏无「今日」字样（拍板 P-8：BudgetGuard 只有进程内累计，无日切）');
-  if (!noToday) exit(1);
+  const s6nonzero = /^\$\d/.test(s6total) && s6total !== '$0.00';
+  log(s6nonzero, `S6 累计已用取真值（${s6total} —— 成本注入 → ledger → 会话摘要 → 屏）`);
+  if (!s6nonzero) exit(1);
 
   const loadedAfterS6 = await evalJs(loadedExpr);
   log(

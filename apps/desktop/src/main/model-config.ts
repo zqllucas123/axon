@@ -135,13 +135,15 @@ export function resolveModelChoice(
       console.warn(`[M15] ${id} 的 defaultModel=${within} 不在模型清单内，回落 ${defaultModel}`);
     }
 
-    // M6：cost 全零告警。cost 字段缺失或全为 0 时 BudgetGuard 永远算不出花费，
-    // 预算熔断静默失效。这里只 warn 不降级——模型可能确实免费，不该强制要求填单价。
+    // M6：cost 全零告警。cost 字段缺失或全为 0 时，pi 算出的 `usage.cost.total`
+    // 恒为零 —— 用量屏与顶栏的金额会一直是 $0.000，用户以为没花钱。
+    // （原先这条告警的理由是「预算熔断静默失效」，熔断已于 2026-10-10 下线。）
+    // 这里只 warn 不降级——模型可能确实免费，不该强制要求填单价。
     for (const m of merged) {
       const c = m.cost;
       if (!c || Object.values(c).every((v) => !v)) {
         console.warn(
-          `[M6] ${id}/${m.id} cost 字段全零或缺失，BudgetGuard 将无法触发。` +
+          `[M6] ${id}/${m.id} cost 字段全零或缺失，用量金额将恒显示 $0.000。` +
             `请在 ~/.axon/config.json 的 providers[].models 里补充 cost（单位：美元/百万 token）。`,
         );
       }

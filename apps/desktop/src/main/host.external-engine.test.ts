@@ -106,7 +106,6 @@ async function boot(root: string, sdk: ClaudeSdk, records?: SessionListItem[], i
     tools: [],
     emit: (event, payload) => events.push({ event, payload }),
     persistence,
-    budget: { hardUsd: 10 },
     ...(records ? { records } : {}),
   });
   host.setExternalEngineProvider(providerWith(sdk, installed));
@@ -164,7 +163,6 @@ describe('外部引擎会话', () => {
     // 成本进会话用量与预算视图
     const detail = host.getSession(created.record.id)!;
     expect(detail.usage.costUsd).toBeCloseTo(0.02);
-    expect(detail.budget.spentUsd).toBeCloseTo(0.02);
     // 游标落进了会话记录
     expect(detail.record.resumeCursor).toMatchObject({ kind: 'claude-agent-sdk', turnCount: 1, totalCostUsd: 0.02 });
     expect(detail.record.externalSessionId).toBe((detail.record.resumeCursor as any).resume);

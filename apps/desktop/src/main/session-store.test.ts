@@ -12,7 +12,6 @@ import { SESSION_SCHEMA_VERSION, SESSION_TITLE_MAX } from '@axon/protocol';
 import {
   SessionStore,
   buildSessionSummary,
-  computeEffectiveBudget,
   titleFromPrompt,
 } from './session-store.ts';
 
@@ -92,9 +91,9 @@ describe('SessionStore · CRUD 与副本纪律', () => {
     let now = 5_000;
     const store = new SessionStore({ now: () => now });
     store.create(record('s1', { createdAt: 100, updatedAt: 100 }));
-    const after = store.update('s1', { title: '新标题', budget: undefined });
+    const after = store.update('s1', { title: '新标题', teamId: undefined });
     expect(after?.title).toBe('新标题');
-    expect(after?.budget).toBeUndefined();
+    expect(after?.teamId).toBeUndefined();
     expect(after?.updatedAt).toBe(5_000);
     expect(store.update('ghost', { title: 'x' })).toBeUndefined();
   });
@@ -197,83 +196,6 @@ describe('titleFromPrompt —— 单行化 + 截断', () => {
 // 三层预算（G10.4）
 // ─────────────────────────────────────────────────────────────
 
-describe('computeEffectiveBudget · 三层取更严者', () => {
-  it('三档都没写 ⇒ 不设限（0），档位 ok，没有「受谁限制」', () => {
-    const v = computeEffectiveBudget({ global: {} }, 5);
-    expect(v.effectiveHardUsd).toBe(0);
-    expect(v.effectiveSoftUsd).toBe(0);
-    expect(v.tier).toBe('ok');
-    expect(v.limitedBy).toBeUndefined();
-  });
-
-  it('只写全局硬线：软线缺省 = 硬线 × 0.8，两步跃迁', () => {
-    expect(computeEffectiveBudget({ global: { hardUsd: 10 } }, 7.9).tier).toBe('ok');
-    expect(computeEffectiveBudget({ global: { hardUsd: 10 } }, 8).tier).toBe('warning');
-    expect(computeEffectiveBudget({ global: { hardUsd: 10 } }, 10).tier).toBe('frozen');
-  });
-
-  it('0 与缺省同义（不设）；负数是坏数据也当不设', () => {
-    const v = computeEffectiveBudget({ global: { hardUsd: 0, softUsd: -3 } }, 100);
-    expect(v.effectiveHardUsd).toBe(0);
-    expect(v.tier).toBe('ok');
-  });
-
-  it('团队线比全局线更严 ⇒ 生效值取团队，limitedBy=team', () => {
-    const v = computeEffectiveBudget({ global: { hardUsd: 10 }, team: { hardUsd: 4 } }, 3);
-    expect(v.effectiveHardUsd).toBe(4);
-    expect(v.limitedBy).toBe('team');
-    expect(v.effectiveSoftUsd).toBe(3.2); // 团队软线缺省 = 4 × 0.8
-  });
-
-  it('会话线更严 ⇒ limitedBy=session；更松则被忽略（可下调不可上调）', () => {
-    const stricter = computeEffectiveBudget(
-      { global: { hardUsd: 10 }, self: { hardUsd: 2 } },
-      0,
-    );
-    expect(stricter.effectiveHardUsd).toBe(2);
-    expect(stricter.limitedBy).toBe('session');
-
-    const looser = computeEffectiveBudget(
-      { global: { hardUsd: 10 }, self: { hardUsd: 99 } },
-      0,
-    );
-    expect(looser.effectiveHardUsd).toBe(10);
-    expect(looser.limitedBy).toBe('global');
-  });
-
-  it('软线**逐层算完再取严**：团队只写软线、全局只写硬线也不出错', () => {
-    // 全局：软 8（10×0.8）；团队：软 1（显式）。取严 ⇒ 1。
-    const v = computeEffectiveBudget(
-      { global: { hardUsd: 10 }, team: { softUsd: 1 } },
-      1,
-    );
-    expect(v.effectiveHardUsd).toBe(10);
-    expect(v.effectiveSoftUsd).toBe(1);
-    expect(v.tier).toBe('warning');
-    // 拿最终硬线反推软线会得到 8 —— 那是错的，这条用例就是防它的。
-  });
-
-  it('显式软线优先于推导值（同层）', () => {
-    const v = computeEffectiveBudget({ global: { hardUsd: 10, softUsd: 9 } }, 8);
-    expect(v.effectiveSoftUsd).toBe(9);
-    expect(v.tier).toBe('ok');
-  });
-
-  it('把三档原样带出来（UI 要能解释「为什么是 $1.50」）', () => {
-    const v = computeEffectiveBudget(
-      { global: { hardUsd: 10 }, team: { hardUsd: 1.5 }, self: { hardUsd: 3 } },
-      0,
-    );
-    expect(v.global).toEqual({ hardUsd: 10 });
-    expect(v.team).toEqual({ hardUsd: 1.5 });
-    expect(v.self).toEqual({ hardUsd: 3 });
-  });
-
-  it('spentUsd 原样回传（会话已花来自会话根快照）', () => {
-    expect(computeEffectiveBudget({ global: {} }, 1.234).spentUsd).toBe(1.234);
-  });
-});
-
 // ─────────────────────────────────────────────────────────────
 // 会话摘要
 // ─────────────────────────────────────────────────────────────
@@ -310,7 +232,6 @@ describe('buildSessionSummary · 计数口径', () => {
       members,
       ledgerCount: 3,
       pending: [],
-      globalBudget: {},
     });
     expect(s.counts.members).toBe(4);
     expect(s.counts.running).toBe(1);
@@ -325,13 +246,12 @@ describe('buildSessionSummary · 计数口径', () => {
       members,
       ledgerCount: 0,
       pending: [],
-      globalBudget: {},
     });
     expect(s.counts.parked).toBe(1); // tester-1：waiting 且没在等谁
     expect(s.counts.suspended).toBe(1); // architect-1：waiting 且在等 dev-2
   });
 
-  it('usage 取会话根快照（父链已汇总），预算档由它算', () => {
+  it('usage 取会话根快照（父链已汇总）', () => {
     const s = buildSessionSummary({
       record: record('s1'),
       rootPath: ROOT,
@@ -339,12 +259,8 @@ describe('buildSessionSummary · 计数口径', () => {
       members,
       ledgerCount: 0,
       pending: [],
-      globalBudget: { hardUsd: 0.6 },
     });
     expect(s.usage.costUsd).toBe(0.5);
-    // 硬线 0.6 的软线是 0.48：0.5 过软线=warning，还没到硬线
-    expect(s.budget.tier).toBe('warning');
-    expect(s.budget.spentUsd).toBe(0.5);
   });
 
   it('pending 只算本会话的（调用方已过滤，这里只计长度）', () => {
@@ -355,7 +271,6 @@ describe('buildSessionSummary · 计数口径', () => {
       members,
       ledgerCount: 0,
       pending: [pending(`${ROOT}/dev-1`), pending(`${ROOT}/tester-1`)],
-      globalBudget: {},
     });
     expect(s.counts.pending).toBe(2);
   });
@@ -368,7 +283,6 @@ describe('buildSessionSummary · 计数口径', () => {
       members: [snap(`${ROOT}/dev-1`)],
       ledgerCount: 0,
       pending: [],
-      globalBudget: {},
     });
     expect(s.usage.costUsd).toBe(0);
     expect(s.counts.members).toBe(1);
@@ -382,7 +296,6 @@ describe('buildSessionSummary · 计数口径', () => {
       members,
       ledgerCount: 0,
       pending: [],
-      globalBudget: {},
       team: {
         name: '全栈小队',
         description: '',
@@ -404,7 +317,6 @@ describe('buildSessionSummary · 计数口径', () => {
       members,
       ledgerCount: 0,
       pending: [],
-      globalBudget: {},
     });
     expect(s.record.status).toBe('closed');
     expect(s.status).toBe('running');

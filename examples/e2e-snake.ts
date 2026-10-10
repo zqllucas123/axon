@@ -64,7 +64,6 @@ const host = new AxonHost({
   modelSource,
   roles: ALL_ROLES,
   maxConcurrent: 3,   // 与全栈小队的 maxConcurrent 一致
-  budget: { softUsd: 1.0, hardUsd: 1.5 },
   defaultApproval: 'auto',  // e2e 脚本里不需要人工批准每一步
   emit: (event, payload, source) => {
     const p = payload as { status?: string; toolName?: string; error?: unknown; text?: string };
@@ -124,7 +123,6 @@ const session = host.createSession({
     '',
     '交付物：仅 index.html 一个文件，确保代码能在最新版 Chrome/Firefox 中运行。',
   ].join('\n'),
-  budget: { softUsd: 0.8, hardUsd: 1.2 },
 });
 
 rootPath = session.rootPath;

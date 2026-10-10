@@ -301,6 +301,10 @@ export type ConfigPatch = Partial<Record<ConfigPatchPath, unknown>>;  // 白名�
 
 ### 4.7 三层预算（G10.4）
 
+> **已下线（2026-10-10，M16）**：本节描述的三层限额（全局 / 团队 / 会话取更严者 + 软硬线熔断）
+> 已随成本熔断整体删除，`TeamDefinition.budget` / `SessionRecord.budget` / `budgetUsd` 均已不存在，
+> 旧值读出即忽略。保留本节仅作历史记录，见 `docs/milestones/M16-成本熔断下线.md`。
+
 - **真相**：全局 `spentUsd` 由既有 `BudgetGuard` 累计（`budget.ts:61-80`）；会话 `spentUsd` = 会话根快照的 `usage.costUsd`（`registry.ts:293-306` 的父链汇总天然给出）
 - **限额**：`effectiveHard = min(全局 hard(>0), 团队 hard(>0), 会话 hard(>0))`；`effectiveSoft = min(显式 soft，缺省 hard×0.8)`；**`0` 一律表示「不设」**（与全局 hard `0`=关闭熔断同义，`budget.ts:38-40`）
 - **实现**：host 持 `globalBudget`（既有）+ 每会话一个 `sessionBudget`（上限 = `effectiveHard`）；每轮 `turn.end` 同时 `record` 两个口径；跃迁事件带 `scope`/`sessionId`

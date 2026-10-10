@@ -38,10 +38,9 @@ import {
   createMultiProviderSource,
   fauxAssistantMessage,
   fauxToolCall,
-  lastUserText,
   scriptedSource,
-  withTurnCost,
   withDsmlParsing,
+  withTurnCost,
   type ModelSource,
 } from '@axon/kernel';
 import { AxonHost } from './host.ts';
@@ -349,16 +348,15 @@ async function createModelSource(config: AxonConfig): Promise<{ source: ModelSou
   if (SMOKE) {
     modelSource = scriptedSource(modelSource, {}, (text) => smokeReply(text));
   }
-  // AXON_SMOKE_BUDGET_COST / _HARD：每轮注入固定成本 + 硬线阈值，
-  // 供 ui-smoke 驱动预算熔断的 warning→frozen 两段 UI。
+  // AXON_SMOKE_TURN_COST：给每一轮注入固定成本，让用量屏与顶栏金额有非零数可读。
   //
-  // 只给含「烧钱」的 prompt 计费：预算冻结是**终态**（一冻就拒所有新任务），
-  // 若每轮都计费，M4 的账本/审批幕会把额度烧光，幕次之间隐形耦合。
-  if (process.env.AXON_SMOKE_BUDGET_COST) {
-    const cost = Number(process.env.AXON_SMOKE_BUDGET_COST);
-    modelSource = withTurnCost(modelSource, (ctx) =>
-      lastUserText(ctx as never).includes('烧钱') ? cost : 0,
-    );
+  // 它前身是 AXON_SMOKE_BUDGET_COST，当时只给含「烧钱」的 prompt 计费 —— 理由是
+  // 预算 frozen 是**终态**，每轮都计费会把后面的幕次一起冻住。2026-10-10 熔断下线后
+  // 没有终态了，故一律计费。faux 自身 cost 恒为 0（pi-ai providers/faux.js:147），
+  // 不注入的话整条用量链路（ledger → 会话摘要 → S6/顶栏）只能验到「结构在」。
+  if (process.env.AXON_SMOKE_TURN_COST) {
+    const cost = Number(process.env.AXON_SMOKE_TURN_COST);
+    modelSource = withTurnCost(modelSource, () => cost);
   }
   return { source: modelSource, label };
 }
@@ -415,17 +413,6 @@ async function createHost(config: AxonConfig, kbManager?: import('@axon/knowledg
   applyProxyConfig(config);
 
 
-  // 预算硬线：冒烟 env 优先，否则读配置。接了真模型之后这行不再是演习——
-  // faux 时代 cost 恒为 0（faux.js:147 硬编码），没人会真的花钱。
-  const budget = process.env.AXON_SMOKE_BUDGET_HARD
-    ? { hardUsd: Number(process.env.AXON_SMOKE_BUDGET_HARD) }
-    : config.budgetUsd
-      ? {
-          hardUsd: config.budgetUsd,
-          ...(config.budgetSoftUsd !== undefined ? { softUsd: config.budgetSoftUsd } : {}),
-        }
-      : undefined;
-
   // 叶子工具：生产路径下为空（M4 不交付叶子工具）；冒烟下注入一个无害的
   // echo 工具，否则 HITL 门根本无从触发——编排工具按决策 D5 是豁免的。
   // 工具进了 universe 还不够：还得进角色白名单，否则会被白名单先拦
@@ -444,7 +431,6 @@ async function createHost(config: AxonConfig, kbManager?: import('@axon/knowledg
     roles: EFFECTIVE_ROLES,
     persistence: storage,
     records,
-    ...(budget ? { budget } : {}),
     // 运行期参数全部来自配置文件（设置界面改的就是这些；applyConfig 走同一条路）。
     ...(config.maxConcurrent !== undefined ? { maxConcurrent: config.maxConcurrent } : {}),
     ...(config.maxDepth !== undefined ? { maxDepth: config.maxDepth } : {}),
@@ -1005,7 +991,7 @@ app.whenReady().then(async () => {
           const childIds = parent?.record.childSessionIds ?? [];
           const result = childIds.flatMap((id) => {
             const s = host!.getSession(id);
-            return s ? [{ record: s.record, rootPath: s.rootPath, status: s.status, counts: s.counts, usage: s.usage, budget: s.budget }] : [];
+            return s ? [{ record: s.record, rootPath: s.rootPath, status: s.status, counts: s.counts, usage: s.usage }] : [];
           });
           return { id: request.id, ok: true, result };
         }

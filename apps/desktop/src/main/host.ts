@@ -51,8 +51,6 @@ import {
   type ApprovalMode,
   type AxonConfig,
   type AxonThinkingLevel,
-  type BudgetSnapshot,
-  type BudgetTier,
   CONFIG_DEFAULTS,
   type CollabAction,
   type CollabOrigin,
@@ -67,7 +65,6 @@ import {
   type RoleDefinition,
   type RoleEntry,
   type RoleIssue,
-  type SessionBudgetSpec,
   type SessionDetail,
   type SessionExecutor,
   type SessionListQuery,
@@ -83,7 +80,6 @@ import {
 } from '@axon/protocol';
 import {
   AgentRegistry,
-  BudgetGuard,
   Ledger,
   createAxonEngine,
   createLeafTools,
@@ -94,7 +90,6 @@ import {
   intersectTools,
   type AgentEvent,
   type AxonEngine,
-  type BudgetState,
   type LeafOperations,
   type ModelSource,
   type ToolGateResult,
@@ -110,7 +105,6 @@ import { arbiterIneligibleReason, resolveArbiter } from './adoption.ts';
 import {
   SessionStore,
   buildSessionSummary,
-  computeEffectiveBudget,
   titleFromPrompt,
   type SessionStoreChange,
 } from './session-store.ts';
@@ -133,13 +127,6 @@ export type EmitFn = <E extends keyof EventMap>(
   source?: AgentPath,
 ) => void;
 
-export interface BudgetOptions {
-  /** 软线（美元）。省略 = hard × 0.8。 */
-  softUsd?: number;
-  /** 硬线（美元）；<= 0 表示熔断关闭。 */
-  hardUsd: number;
-}
-
 export interface HostOptions {
   emit: EmitFn;
   /** 模型来源。由调用方决定是真 provider 还是 faux —— 宿主不关心。
@@ -157,8 +144,6 @@ export interface HostOptions {
   maxConcurrent?: number;
   /** 分身树最大深度（会话根为 0）；缺省 2。 */
   maxDepth?: number;
-  /** 预算熔断（M3）。缺省 = 关闭。 */
-  budget?: BudgetOptions;
   /** idle 看门狗：running 且超时无任何事件 → 中断。0 = 关闭。默认 5 分钟（kalo 同值）。 */
   idleTimeoutMs?: number;
   /** 审批请求超时（M4）。0 = 不超时。 */
@@ -190,8 +175,6 @@ export interface HostOptions {
 
 /** 可被 `config.patch` 热改的运行期参数。 */
 interface RuntimeConfig {
-  /** 全局档预算（configured 值，不是 BudgetGuard 里补过默认值的版本）。 */
-  globalBudget: SessionBudgetSpec;
   defaultApproval: ApprovalMode;
   defaultCwd?: string;
   defaultExecutor: SessionExecutor;
@@ -199,9 +182,6 @@ interface RuntimeConfig {
 
 /** 默认 idle 看门狗 5 分钟 —— 抄 kalo `IDLE_TIMEOUT_MS = 5min`（02 §2.3）。 */
 const DEFAULT_IDLE_TIMEOUT_MS = 5 * 60_000;
-
-/** 预算档位的严重度排序（只往更差的方向报，回退时不播事件）。 */
-const TIER_RANK: Record<BudgetTier, number> = { ok: 0, warning: 1, frozen: 2 };
 
 /**
  * 路径深度（`/<s>` = 1，`/<s>/dev-1` = 2）。
@@ -285,13 +265,6 @@ export class AxonHost {
   private externalEngines: ExternalEngineProvider | null = null;
   /** 会话元数据（落盘挂点见 onSessionChanged；M5 起由构造参数注入初始记录）。 */
   private readonly sessions: SessionStore;
-  /**
-   * 每会话的预算档位上次观测值。
-   *
-   * 与「事件节流」不是一回事：这里只负责「只报变化」，一个会话的
-   * 档位从 ok 变 warning 只该发一次，而不是每轮 turn.end 都发。
-   */
-  private readonly sessionTiers = new Map<string, BudgetTier>();
   /** 可热改的运行期配置（config.patch 的落点，见 applyConfig）。 */
   private runtime: RuntimeConfig;
   private readonly emit: EmitFn;
@@ -302,8 +275,7 @@ export class AxonHost {
   private readonly leafOps: LeafOperations;
   /** 叶子工具按 cwd 缓存（工具是无状态闭包，同一 cwd 复用同一批实例）。 */
   private readonly leafToolCache = new Map<string, unknown[]>();
-  // ── M3：闸门 / 预算 / 活性 ──────────────────────────────
-  private readonly budget: BudgetGuard;
+  // ── M3：闸门 / 活性 ────────────────────────────────────
   private idleTimeoutMs: number;
   /** parked FIFO：等额度的 Agent，按请求先后排队。 */
   private readonly pendingRuns: AgentPath[] = [];
@@ -372,19 +344,8 @@ export class AxonHost {
       maxConcurrent: options.maxConcurrent ?? 6,
       maxDepth: options.maxDepth ?? 2,
     });
-    this.budget = new BudgetGuard(options.budget ?? { hardUsd: 0 });
-    // 全局线要接着上次算：不把已花的钱种子化，重启就等于把预算重置了。
-    const restoredSpend = [...this.sessionRollups.values()].reduce(
-      (sum, rollup) => sum + rollup.usage.costUsd,
-      0,
-    );
-    if (restoredSpend > 0) this.budget.record(restoredSpend);
     this.idleTimeoutMs = options.idleTimeoutMs ?? DEFAULT_IDLE_TIMEOUT_MS;
     this.runtime = {
-      globalBudget: {
-        ...(options.budget?.hardUsd ? { hardUsd: options.budget.hardUsd } : {}),
-        ...(options.budget?.softUsd ? { softUsd: options.budget.softUsd } : {}),
-      },
       defaultApproval: options.defaultApproval ?? 'always_ask',
       defaultExecutor: options.defaultExecutor ?? 'engine',
       ...(options.defaultCwd ? { defaultCwd: options.defaultCwd } : {}),
@@ -454,7 +415,6 @@ export class AxonHost {
     this.pendingRuns.length = 0;
     this.pendingTexts.clear();
     this.parkedResolvers.clear();
-    this.sessionTiers.clear();
   }
 
   /**
@@ -608,51 +568,6 @@ export class AxonHost {
     return this.registry.get(path)?.engine?.messages() ?? [];
   }
 
-  /** 预算档位（M3）。UI 与编排工具都看它。 */
-  budgetState(): BudgetState {
-    return this.budget.current;
-  }
-
-  /**
-   * 预算快照（M4 / MX G7.3）。
-   *
-   * frozen 是终态且只通过一次性事件宣布，UI 一刷新就再也不知道自己
-   * 已经被冻住了——所以必须有查询通道。
-   */
-  budgetSnapshot(): BudgetSnapshot {
-    const { softUsd, hardUsd } = this.budget.limits;
-    // usage 取全部会话根的和（多根模型下没有唯一的「总账根」）。
-    // spentUsd 也用它而不是 budget.spent：后者是「上次 record 时的值」，
-    // 没人跑任务时会停在旧数上。
-    const usage = this.registry.totalUsage();
-    return {
-      state: this.budget.current,
-      // M5：冷启动时 registry 里一个节点都没有（会话还在盘上），此时「已花」
-      // 只剩构造时按 rollup 种子化的那一份 —— 取两者更大的，别让 UI 显示成 $0。
-      spentUsd: Math.max(usage.costUsd, this.budget.spent),
-      softUsd,
-      hardUsd,
-      disabled: this.budget.disabled,
-      usage,
-    };
-  }
-
-  /** 某会话的预算视图（三层取更严者）。UI 与会话级闸门都用它。 */
-  private budgetViewOf(sessionId: string) {
-    const record = this.sessions.get(sessionId);
-    const team = record?.teamId ? this.teams.get(record.teamId)?.team : undefined;
-    const rootPath = sessionRootPath(sessionId);
-    const spentUsd = this.registry.get(rootPath)?.snapshot.usage.costUsd ?? 0;
-    return computeEffectiveBudget(
-      {
-        global: this.runtime.globalBudget,
-        ...(team?.budget ? { team: team.budget } : {}),
-        ...(record?.budget ? { self: record.budget } : {}),
-      },
-      spentUsd,
-    );
-  }
-
   // ── M4：协作账本 ───────────────────────────────
 
   queryLedger(query: LedgerQuery) {
@@ -773,7 +688,6 @@ export class AxonHost {
       schemaVersion: SESSION_SCHEMA_VERSION,
       ...(payload.teamId !== undefined ? { teamId: payload.teamId } : {}),
       ...(payload.members !== undefined ? { members: payload.members } : {}),
-      ...(payload.budget !== undefined ? { budget: payload.budget } : {}),
       ...(limit > 0 ? { maxConcurrent: limit } : {}),
       ...(engineId !== undefined ? { engineId } : {}),
       ...(payload.modelRef !== undefined ? { modelRef: payload.modelRef } : {}),
@@ -797,9 +711,6 @@ export class AxonHost {
         }
       }
     }
-    // 基线档位：建档时先记一次，之后只在**变差**时播事件（否则开局就发一条噪音）。
-    this.sessionTiers.set(sessionId, this.budgetViewOf(sessionId).tier);
-
     // ④ 主控引擎：roster 只写给真组队的会话（单兵没有成员，写了是撒谎）
     const roster = plan.members.length > 0 ? rosterPrompt(sessionId, spawned) : undefined;
     this.buildRootEngine(rootPath, sessionId, plan.lead, {
@@ -1067,16 +978,6 @@ export class AxonHost {
     throw new Error('spawn 必须指定 parent 或 sessionId（多根模型下没有全局默认根）');
   }
 
-  /** 会话预算闸门：额满时拒绝再往这个会话里放新节点（三层取更严者）。 */
-  private assertSessionCanStart(sessionId: string, what: string): void {
-    const view = this.budgetViewOf(sessionId);
-    if (view.effectiveHardUsd > 0 && view.spentUsd >= view.effectiveHardUsd) {
-      const by = view.limitedBy === 'team' ? '团队预算' : view.limitedBy === 'session' ? '会话预算' : '全局预算';
-      throw new Error(
-        `${what}被拒绝：会话 ${sessionId} 已到硬线（$${view.spentUsd.toFixed(2)} / $${view.effectiveHardUsd.toFixed(2)}，受${by}限制）`,
-      );
-    }
-  }
 
   // ─ 会话的读侧（IPC 的 session.* 直接落在这里）────────────
 
@@ -1125,8 +1026,6 @@ export class AxonHost {
       // limit 0：只要 total，不要记录体（账本面板自己会再查一次带分页的）。
       ledgerCount: this.ledger.query({ sessionId, limit: 0 }).total,
       pending: this.approvals.list().filter((p) => p.sessionId === sessionId),
-      globalBudget: this.runtime.globalBudget,
-      ...(team?.budget !== undefined ? { teamBudget: team.budget } : {}),
       ...(team !== undefined ? { team } : {}),
       tempCount,
       // E-1：已装载的会话也带上 rollup —— S7 用它的 `interruptedAt` 说「上次中断」，
@@ -1180,7 +1079,6 @@ export class AxonHost {
     if (!this.sessions.has(sessionId)) return { removedPaths: [] };
     const removedPaths = this.remove(sessionRootPath(sessionId));
     this.sessions.remove(sessionId);
-    this.sessionTiers.delete(sessionId);
     this.emit('session.removed', { sessionId, paths: removedPaths });
     return { removedPaths };
   }
@@ -1215,8 +1113,6 @@ export class AxonHost {
     if (record.engineId !== undefined) {
       throw new Error('外部引擎会话暂不支持叫人组队');
     }
-    this.budget.assertCanStart('升级');
-    this.assertSessionCanStart(sessionId, '升级');
 
     const plan = this.planFor(
       payload.teamId !== undefined ? 'team' : 'adhoc',
@@ -1525,8 +1421,6 @@ export class AxonHost {
       members: [],
       ledgerCount: rollup?.counts.ledger ?? 0,
       pending: [],
-      globalBudget: this.runtime.globalBudget,
-      ...(team?.budget !== undefined ? { teamBudget: team.budget } : {}),
       ...(team !== undefined ? { team } : {}),
       tempCount: 0,
       ...(rollup ? { countsFromRollup: rollup.counts, usageFromRollup: rollup.usage, rollup } : {}),
@@ -1712,14 +1606,7 @@ export class AxonHost {
     this.registry.setMaxDepth(config.maxDepth ?? CONFIG_DEFAULTS.maxDepth);
     this.idleTimeoutMs = config.idleTimeoutMs ?? CONFIG_DEFAULTS.idleTimeoutMs;
     this.approvals.setTimeoutMs(config.approvalTimeoutMs ?? DEFAULT_APPROVAL_TIMEOUT_MS);
-    const hardUsd = config.budgetUsd ?? 0;
-    const softUsd = config.budgetSoftUsd ?? (hardUsd > 0 ? hardUsd * 0.8 : 0);
-    this.budget.setLimits({ hardUsd, softUsd });
     this.runtime = {
-      globalBudget: {
-        ...(hardUsd > 0 ? { hardUsd } : {}),
-        ...(softUsd > 0 ? { softUsd } : {}),
-      },
       defaultApproval: config.defaultApproval ?? 'always_ask',
       defaultExecutor: config.defaultExecutor ?? 'engine',
       ...(config.defaultCwd !== undefined ? { defaultCwd: config.defaultCwd } : {}),
@@ -1871,7 +1758,6 @@ export class AxonHost {
    * 先算权限再切上下文，是因为切片不改变权限，反之则不成立。
    */
   spawn(payload: SpawnAgentPayload): AgentSnapshot {
-    this.budget.assertCanStart('分身');
     // 冷会话首次用到：先把树装进来，否则下面 resolveParent 会以「父不存在」
     // 拒绝 —— 而这里「父不存在」其实只是「还没加载」（§4.5）。
     const hinted =
@@ -1901,7 +1787,6 @@ export class AxonHost {
     const parentNode = this.registry.get(parent);
     if (!parentNode) throw new Error(`父 Agent 不存在: ${parent}`);
     const sessionId = parentNode.snapshot.sessionId;
-    this.assertSessionCanStart(sessionId, '新建分身');
 
     // ① 权限：父级白名单 ∩ 角色白名单
     const parentTools = this.toolNamesOf(parent);
@@ -1970,7 +1855,6 @@ export class AxonHost {
    * 返回的 Promise 在本轮**跑完**（done/failed）或排队中被取消时 resolve。
    */
   requestRun(path: AgentPath, text: string): Promise<void> {
-    this.budget.assertCanStart('任务');
 
     const node = this.registry.get(path);
     if (!node?.engine) throw new Error(`Agent 无引擎: ${path}`);
@@ -2658,44 +2542,8 @@ ${spec.task}` : spec.task;
           };
           this.registry.addUsage(path, delta);
 
-          // ① 全局档：多根模型下没有唯一的「总账根」，用全部会话根之和
-          const totalUsage = this.registry.totalUsage();
-          const transition = this.budget.record(totalUsage.costUsd);
-          if (transition !== 'none') {
-            const { softUsd, hardUsd } = this.budget.limits;
-            // spentUsd 与 limits 必须是两个不同来源的数：旧实现把
-            // `limitUsd` 填成了 budget.spent，于是 UI banner 的「已用 / 上限」
-            // 永远相等（MX G9.1）。
-            this.emit(
-              transition === 'warning' ? 'budget.warning' : 'budget.frozen',
-              { usage: totalUsage, spentUsd: totalUsage.costUsd, softUsd, hardUsd, scope: 'global' },
-            );
-          }
-
-          // ② 会话档（三层取更严者）：只在**变差**时播一次
           const sessionId = this.registry.sessionIdOf(path);
           if (sessionId !== undefined) {
-            const view = this.budgetViewOf(sessionId);
-            const prev = this.sessionTiers.get(sessionId) ?? 'ok';
-            // 只在会话**自带限额**（团队档或会话档）时播会话级事件。
-            // 三层限额全等于全局档时（多数单兵会话就是如此），全局事件已经说过
-            // 同一件事 —— 再播一次会在 UI 上叠出两个内容相同的 banner。
-            const hasOwnLayer = view.team !== undefined || view.self !== undefined;
-            if (hasOwnLayer && TIER_RANK[view.tier] > TIER_RANK[prev]) {
-              this.sessionTiers.set(sessionId, view.tier);
-              this.emit(
-                view.tier === 'frozen' ? 'budget.frozen' : 'budget.warning',
-                {
-                  usage: this.registry.get(sessionRootPath(sessionId))?.snapshot.usage ?? totalUsage,
-                  spentUsd: view.spentUsd,
-                  softUsd: view.effectiveSoftUsd,
-                  hardUsd: view.effectiveHardUsd,
-                  scope: 'session',
-                  sessionId,
-                  ...(view.limitedBy !== undefined ? { limitedBy: view.limitedBy } : {}),
-                },
-              );
-            }
             this.touchSession(sessionId);
           }
 
@@ -2796,9 +2644,6 @@ ${spec.task}` : spec.task;
         return {
           policy: this.setAdoptionPolicy((payload as { policy: AdoptionPolicy }).policy),
         } as never;
-      case 'budget.get':
-        return this.budgetSnapshot() as never;
-
       // ─ MU-1：会话 ──
       case 'session.create':
         return this.createSession(payload as CreateSessionPayload) as never;

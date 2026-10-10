@@ -304,11 +304,12 @@ export function createMultiProviderSource(
 }
 
 /**
- * 给 model source 的每一轮 LLM 调用注入成本 —— 测试预算熔断用的注水层。
+ * 给 model source 的每一轮 LLM 调用注入成本 —— 测试用的注水层。
  *
  * 为什么需要它：faux provider 的 `withUsageEstimate` 把 usage.cost **硬编码成全 0**
  * （`pi-ai/dist/providers/faux.js:147`），不管模型定义里 cost 配多少都归零。
- * 而 Axon 的预算熔断（M3）吃的正是 turn_end 的 `usage.cost.total`。
+ * 而 Axon 记账吃的正是 turn_end 的 `usage.cost.total`（M6 起喂用量屏与顶栏金额；
+ * M3~2026-10-10 也曾喂预算熔断）。
  *
  * 这一层包在流外：把 done 事件里的 assistant 消息 cost.total 改写成回调给的值。
  * 回调拿到「流调用上下文」与调用序号 —— 既可按序号计价，也可用

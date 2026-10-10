@@ -199,10 +199,8 @@ export interface AxonConfig {
    * 前者是「跨网关时那个主对话用哪个」。只有它能跨 provider。
    */
   defaultModelRef?: string;
-  /** 预算硬线（美元）；缺省/0 = 不设限（与 BudgetGuard 的 hard<=0 同义）。 */
-  budgetUsd?: number;
-  /** 预算软线（美元）；缺省 = hard × 0.8。 */
-  budgetSoftUsd?: number;
+  /* budgetUsd / budgetSoftUsd 已删（2026-10-10）：成本熔断下线。
+     旧 config.json 里残留这两个键读出即忽略，不做迁移也不报错。 */
   /** 全局并发上限（同时 running 的 agent 数）；0 = 不限。 */
   maxConcurrent?: number;
   /** 分身树最大深度（会话根为 0）；缺省 2。 */
@@ -338,8 +336,6 @@ export type ConfigPatchPath =
   // 「第几个 provider 的哪个字段」，而带下标的路径（providers.0.baseUrl）会随 UI 重排失效。
   // 改由 `provider.save` / `provider.delete` 两条 IPC 整体提交（与 role.save/team.save 同构）。
   | 'defaultModelRef'
-  | 'budgetUsd'
-  | 'budgetSoftUsd'
   | 'maxConcurrent'
   | 'maxDepth'
   | 'idleTimeoutMs'
@@ -375,8 +371,6 @@ const MAX_TIMEOUT_MS = 24 * 60 * 60 * 1000;
 
 export const CONFIG_FIELD_SPECS: readonly ConfigFieldSpec[] = Object.freeze([
   { path: 'defaultModelRef', kind: 'string', note: '全局默认模型，形如 providerId:modelId；必须能在 providers 里解析到' },
-  { path: 'budgetUsd', kind: 'number', min: 0, note: '全局预算硬线（美元）；0 = 不设限' },
-  { path: 'budgetSoftUsd', kind: 'number', min: 0, note: '全局预算软线（美元）；缺省 = 硬线 × 0.8' },
   { path: 'maxConcurrent', kind: 'number', min: 0, max: 64, note: '全局并发上限（同时 running）；0 = 不限' },
   { path: 'maxDepth', kind: 'number', min: 1, max: 8, note: '分身树最大深度（会话根为 0）' },
   { path: 'idleTimeoutMs', kind: 'number', min: 0, max: MAX_TIMEOUT_MS, note: 'idle 看门狗（毫秒）；0 = 关闭' },

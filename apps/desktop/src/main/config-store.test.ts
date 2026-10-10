@@ -142,7 +142,7 @@ describe('ConfigStore · patch 校验', () => {
     const { path } = await tempConfig({ maxConcurrent: 4 });
     const s = store(path);
     await s.load();
-    const res = await s.patch({ maxConcurrent: 8, defaultExecutor: 'team', budgetUsd: 2.5 });
+    const res = await s.patch({ maxConcurrent: 8, defaultExecutor: 'team', maxDepth: 5 });
 
     expect(res.accepted).toBe(true);
     expect(res.errors).toEqual([]);
@@ -223,14 +223,14 @@ describe('ConfigStore · patch 校验', () => {
     ).toBe(true);
   });
 
-  it('null = 清除 budgetUsd（config.patch 白名单字段）', async () => {
-    const { path } = await tempConfig({ budgetUsd: 3 });
+  it('null = 清除 maxDepth（config.patch 白名单字段）', async () => {
+    const { path } = await tempConfig({ maxDepth: 3 });
     const s = store(path);
     await s.load();
-    const res = await s.patch({ budgetUsd: null });
+    const res = await s.patch({ maxDepth: null });
     expect(res.accepted).toBe(true);
     const raw = await readRaw(path);
-    expect(raw.budgetUsd).toBeUndefined();
+    expect(raw.maxDepth).toBeUndefined();
   });
 
   it('未知字段（用户自己写的 / 未来版本的）原样保留', async () => {
@@ -296,11 +296,11 @@ describe('ConfigStore · patch 校验', () => {
     const { path } = await tempConfig({ maxConcurrent: 4 });
     const s = store(path);
     await s.load();
-    const res = await s.patch({ maxConcurrent: undefined, budgetUsd: 1 });
+    const res = await s.patch({ maxConcurrent: undefined, maxDepth: 1 });
     expect(res.accepted).toBe(true);
     const raw = await readRaw(path);
     expect(raw.maxConcurrent).toBe(4);
-    expect(raw.budgetUsd).toBe(1);
+    expect(raw.maxDepth).toBe(1);
   });
 });
 // ────────────────────────────────────────────────────────────
@@ -387,7 +387,7 @@ describe('ConfigStore · reset 恢复出厂（MU-3 E-4）', () => {
     expect(res.accepted).toBe(true);
     const raw = await readRaw(path);
     expect(raw.maxConcurrent).toBeUndefined();
-    expect(raw.budgetUsd).toBeUndefined();
+    expect(raw.maxDepth).toBeUndefined();
     expect(raw.ui).toBeUndefined();
     // providers[] はwhitelist外（provider.save/delete で管理）、reset はそこに触れない
     expect(raw.providers[0].id).toBe('my-gw');

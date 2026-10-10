@@ -111,7 +111,7 @@ function MemberRow({
 
 export function S1Workbench(): ReactElement {
   const {
-    sessions, teams, roles, current, details, agents, budget, pending,
+    sessions, teams, roles, current, details, agents, pending,
     openSession, go, setFocus, setSessionView,
   } = useApp();
   const [filter, setFilter] = useState<ListFilter>('all');
@@ -263,8 +263,8 @@ export function S1Workbench(): ReactElement {
                       <div className="k">本会话花费</div>
                       <div className="v">{money(current.usage.costUsd)}</div>
                       <div className="s">
-                        软线 ${current.budget.effectiveSoftUsd.toFixed(2)} · 硬线 $
-                        {current.budget.effectiveHardUsd.toFixed(2)} · 进会话用量 →
+                        {current.usage.inputTokens.toLocaleString('en-US')} in ·{' '}
+                        {current.usage.outputTokens.toLocaleString('en-US')} out · 进会话用量 →
                       </div>
                     </button>
                   ) : (
@@ -272,7 +272,7 @@ export function S1Workbench(): ReactElement {
                       <div className="k">累计花费</div>
                       <div className="v">{money(totalCost)}</div>
                       <div className="s">
-                        跨 {sessions.length} 个会话 · 全局已用 {money(budget?.spentUsd)}
+                        跨 {sessions.length} 个会话
                       </div>
                     </div>
                   )}

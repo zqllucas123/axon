@@ -77,7 +77,6 @@ interface Rec {
 interface HarnessOpts {
   routes?: Record<string, (ctx: Record<string, unknown>, callIndex: number) => unknown>;
   costByText?: Record<string, number>;
-  budget?: HostOptions['budget'];
   adoptionPolicy?: HostOptions['adoptionPolicy'];
   approvalTimeoutMs?: number;
   tools?: unknown[];
@@ -97,7 +96,6 @@ async function harness(opts: HarnessOpts = {}) {
     roles: ROLES,
     tools: opts.tools,
     emit: (event, payload, source) => events.push({ event, payload, source }),
-    budget: opts.budget,
     adoptionPolicy: opts.adoptionPolicy,
     approvalTimeoutMs: opts.approvalTimeoutMs ?? 0,
     idleTimeoutMs: 0,
@@ -508,49 +506,5 @@ describe('M4 审批穿透接线', () => {
 
     h.host.remove(agent.path);
     expect(h.host.listPending()).toHaveLength(0);
-  });
-});
-
-describe('M4 预算修订（MX G9.1 回归）', () => {
-  it('事件里的 spentUsd 与 hardUsd 是两个不同的数', async () => {
-    const h = await harness({
-      budget: { hardUsd: 1, softUsd: 0.1 },
-      costByText: { 烧钱: 0.5 },
-      routes: { 烧钱: () => fauxAssistantMessage('花完了') },
-    });
-    const boss = h.spawn({ role: 'boss' });
-    await h.host.requestRun(boss.path, '烧钱');
-
-    const warn = h.events.find((e) => e.event === 'budget.warning')!
-      .payload as EventMap['budget.warning'];
-    expect(warn.spentUsd).toBeCloseTo(0.5, 6);
-    expect(warn.hardUsd).toBe(1);
-    expect(warn.softUsd).toBe(0.1);
-    expect(warn.spentUsd).not.toBe(warn.hardUsd);
-  });
-
-  it('budget.get 可随时拉档位 —— frozen 是终态，UI 刷新后靠它恢复', async () => {
-    const h = await harness({
-      budget: { hardUsd: 0.3 },
-      costByText: { 烧钱: 0.5 },
-      routes: { 烧钱: () => fauxAssistantMessage('花完了') },
-    });
-    const boss = h.spawn({ role: 'boss' });
-    await h.host.requestRun(boss.path, '烧钱');
-
-    const snap = h.host.budgetSnapshot();
-    expect(snap.state).toBe('frozen');
-    expect(snap.spentUsd).toBeCloseTo(0.5, 6);
-    expect(snap.hardUsd).toBe(0.3);
-    expect(snap.disabled).toBe(false);
-  });
-
-  it('熔断关闭时 disabled=true 且永不跃迁', async () => {
-    const h = await harness({ budget: { hardUsd: 0 }, costByText: { 烧钱: 99 },
-      routes: { 烧钱: () => fauxAssistantMessage('花完了') } });
-    const boss = h.spawn({ role: 'boss' });
-    await h.host.requestRun(boss.path, '烧钱');
-    expect(h.host.budgetSnapshot().disabled).toBe(true);
-    expect(h.host.budgetSnapshot().state).toBe('ok');
   });
 });

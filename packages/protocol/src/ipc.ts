@@ -190,9 +190,6 @@ export interface CommandMap {
     result: { policy: AdoptionPolicy };
   };
 
-  /** 拉当前预算档位；frozen 是终态，没有查询通道 UI 刷新后就瞎了。 */
-  'budget.get': { payload: Record<string, never>; result: BudgetSnapshot };
-
   // ─ MU-1：会话（一等公民，UX 02 §2.2）──
 
   /** 建会话并按执行方式实例化（engine 只建根 / team 按编队 / adhoc 现挑）。 */
@@ -539,19 +536,6 @@ export interface PendingRequest {
   state: 'pending' | 'resolved';
 }
 
-/** 预算档位快照。 */
-export interface BudgetSnapshot {
-  state: 'ok' | 'warning' | 'frozen';
-  /** 已累计花费。 */
-  spentUsd: number;
-  /** 软线；disabled 时无意义。 */
-  softUsd: number;
-  /** 硬线；<= 0 表示熔断关闭。 */
-  hardUsd: number;
-  disabled: boolean;
-  usage: UsageTotals;
-}
-
 // ─────────────────────────────────────────────────────────────
 // 事件（内核 → 渲染，单向推送）
 // ─────────────────────────────────────────────────────────────
@@ -622,18 +606,6 @@ export interface EventMap {
    */
   'ledger.updated': { record: LedgerRecord };
   'ledger.policyChanged': { policy: AdoptionPolicy };
-
-  /**
-   * 预算软/硬熔断。
-   *
-   * `spentUsd` 与 `limits` 必须是两个不同来源的数 —— 之前的 `limitUsd` 字段
-   * 实际塞的是 spent，导致 UI 上「已用 / 上限」永远相等（M4 修订 G9.1）。
-   *
-   * MU-1 加 `scope`：三层限额（全局/团队/会话）取更严者后，UI 必须知道
-   * 是哪一层触发的——否则会话被团队预算卡住时，用户看全局额度还富余，会以为程序坏了。
-   */
-  'budget.warning': BudgetEventPayload;
-  'budget.frozen': BudgetEventPayload;
 
   // ─ MU-1：会话 / 团队 / 配置 ──
 
@@ -714,19 +686,6 @@ export interface EventMap {
   };
 }
 
-/** 预算跃迁事件的载荷（warning / frozen 共用）。 */
-export interface BudgetEventPayload {
-  usage: UsageTotals;
-  spentUsd: number;
-  softUsd: number;
-  hardUsd: number;
-  /** 触发口径：全局档还是某会话档。 */
-  scope: 'global' | 'session';
-  /** scope='session' 时必有。 */
-  sessionId?: string;
-  /** 生效上限来自哪一层（会话口径时有意义，UI 显示「受团队预算限制」）。 */
-  limitedBy?: 'global' | 'team' | 'session';
-}
 
 // ─────────────────────────────────────────────────────────────
 // 桥接接口

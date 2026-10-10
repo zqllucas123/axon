@@ -267,27 +267,14 @@ export function validateTeam(team: unknown, ctx: TeamValidationContext): TeamIss
     warn('formation-mismatch', `chain 编队下第一个成员应是主控（当前第一个是「${members[0]?.name}」）`);
   }
 
-  // ─ 闸门与预算 ──
+  // ─ 闸门 ──
+  // 团队预算（`budget.softUsd/hardUsd`）的校验已随成本熔断一起删（2026-10-10）：
+  // `TeamDef` 里已经没有这个字段，再校验就是校验一个不存在的键。
+  // 旧团队文件里残留的 `budget` 读出来即忽略（多余键不报错，与落盘记录同一条口径）。
   if (def.maxConcurrent !== undefined) {
     const v = def.maxConcurrent;
     if (typeof v !== 'number' || !Number.isFinite(v) || v < 0 || v > TEAM_MEMBER_MAX) {
       err('invalid-value', `maxConcurrent 必须是 0~${TEAM_MEMBER_MAX} 的数字（0 = 不限）`);
-    }
-  }
-  const budget = def.budget as { softUsd?: unknown; hardUsd?: unknown } | undefined;
-  if (budget !== undefined) {
-    if (typeof budget !== 'object' || budget === null) {
-      err('invalid-value', 'budget 必须是对象');
-    } else {
-      const { softUsd, hardUsd } = budget;
-      for (const [k, v] of [['softUsd', softUsd], ['hardUsd', hardUsd]] as const) {
-        if (v !== undefined && (typeof v !== 'number' || !Number.isFinite(v) || v < 0)) {
-          err('invalid-value', `budget.${k} 必须是非负数字`);
-        }
-      }
-      if (typeof softUsd === 'number' && typeof hardUsd === 'number' && hardUsd > 0 && softUsd > hardUsd) {
-        err('invalid-value', `budget.softUsd (${softUsd}) 不该大于 budget.hardUsd (${hardUsd})`);
-      }
     }
   }
   if (def.defaultForkMode !== undefined && def.defaultForkMode !== null) {

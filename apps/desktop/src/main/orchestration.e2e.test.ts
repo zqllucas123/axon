@@ -43,7 +43,6 @@ interface RawEvent {
 interface E2EOpts {
   maxConcurrent?: number;
   routes: Record<string, (ctx: Record<string, unknown>, callIndex: number) => unknown>;
-  budget?: HostOptions['budget'];
 }
 
 async function e2e(opts: E2EOpts) {
@@ -56,7 +55,6 @@ async function e2e(opts: E2EOpts) {
     emit: (event, payload, source) =>
       events.push({ event: String(event), source, payload: payload as RawEvent['payload'] }),
     maxConcurrent: opts.maxConcurrent,
-    budget: opts.budget,
   });
   // MU-1：树以会话为根。这些幕测的是编排语义，所以统一在 harness 里开一个
   // 单兵会话，把 spawn 收成「挂到会话根下」的便捷函数。

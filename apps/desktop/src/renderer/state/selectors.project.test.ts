@@ -33,13 +33,6 @@ function session(
     status: over.status ?? 'idle',
     counts: { members: 0, running: 0, parked: 0, suspended: 0, ledger: 0, pending: 0 },
     usage: { inputTokens: 0, outputTokens: 0, costUsd: 0 },
-    budget: {
-      spentUsd: 0,
-      global: {},
-      effectiveSoftUsd: 0,
-      effectiveHardUsd: 0,
-      tier: 'ok',
-    },
   } as SessionSummary;
 }
 

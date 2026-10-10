@@ -510,7 +510,7 @@ export function splitPending(pending: PendingRequest[]): {
 /* `blockedCount` 已删（MU-3 切片 8）：S5 实现时发现「卡住几个人」要的不是个数而是
    具体名字（`BlockedList` 直接渲染 chain 上的分身），数字反而要再展开一次才能用。 */
 
-// ── S6 预算与用量口径 ──────────────────────────────────────
+// ── S6 用量口径 ────────────────────────────────────────────
 
 /**
  * 按会话的花费排行（降序）。用 `SessionSummary.usage`，
@@ -518,20 +518,6 @@ export function splitPending(pending: PendingRequest[]): {
  */
 export function spendRanking(sessions: SessionSummary[]): SessionSummary[] {
   return [...sessions].sort((a, b) => (b.usage.costUsd ?? 0) - (a.usage.costUsd ?? 0));
-}
-
-/** 全部会话里最严的档位（S6「最严会话档位」指标）。 */
-export function strictestTier(sessions: SessionSummary[]): {
-  tier: 'ok' | 'warning' | 'frozen';
-  session?: SessionSummary;
-} {
-  const rank = { ok: 0, warning: 1, frozen: 2 } as const;
-  let out: { tier: 'ok' | 'warning' | 'frozen'; session?: SessionSummary } = { tier: 'ok' };
-  for (const s of sessions) {
-    const t = s.budget.tier;
-    if (rank[t] > rank[out.tier]) out = { tier: t, session: s };
-  }
-  return out;
 }
 
 /** 用量合计（跨会话）。同上：只加 summary 里已有的数，不触发加载。 */

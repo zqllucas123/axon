@@ -302,7 +302,7 @@ describe('validateTeam —— 编队形状', () => {
   });
 });
 
-describe('validateTeam —— 闸门与预算', () => {
+describe('validateTeam —— 闸门', () => {
   it('maxConcurrent 必须是 0~6 的数字', () => {
     expect(codes({ ...OK_TEAM, maxConcurrent: 3 })).toEqual([]);
     expect(codes({ ...OK_TEAM, maxConcurrent: 0 })).toEqual([]);
@@ -311,12 +311,10 @@ describe('validateTeam —— 闸门与预算', () => {
     }
   });
 
-  it('预算非负；软线不得大于硬线', () => {
-    expect(codes({ ...OK_TEAM, budget: { softUsd: 0.5, hardUsd: 1 } })).toEqual([]);
-    expect(codes({ ...OK_TEAM, budget: { softUsd: -1 } })).toContain('invalid-value');
-    expect(codes({ ...OK_TEAM, budget: { softUsd: 2, hardUsd: 1 } })).toContain('invalid-value');
-    // hard=0 表示不设限，此时软线大于它不算错
-    expect(codes({ ...OK_TEAM, budget: { softUsd: 2, hardUsd: 0 } })).toEqual([]);
+  it('团队文件里残留的 budget 键读出来即忽略（不报错）', () => {
+    // 成本熔断下线后 `TeamDef` 不再有 budget 字段，但用户盘上的旧团队文件还带着它。
+    // 多余键不该让整个团队变成「不可用」—— 与落盘会话记录同一条口径。
+    expect(codes({ ...OK_TEAM, budget: { softUsd: 2, hardUsd: 1 } } as never)).toEqual([]);
   });
 
   it('defaultForkMode 要能被解析', () => {

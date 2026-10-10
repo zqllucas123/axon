@@ -29,7 +29,6 @@ import type {
   AgentPath,
   AgentSnapshot,
   AxonThinkingLevel,
-  BudgetSnapshot,
   CommandMap,
   AgentToolsSnapshot,
   ConfigSnapshot,
@@ -68,15 +67,6 @@ import {
   type StreamItem,
 } from './selectors.ts';
 
-/** 预算告警现场（`budget.get` 只给一次快照，跃迁要靠事件）。 */
-export interface BudgetAlert {
-  state: 'warning' | 'frozen';
-  scope: 'global' | 'session';
-  sessionId?: string;
-  limitedBy?: 'global' | 'team' | 'session';
-  spentUsd: number;
-}
-
 /** `storage.status` 的结果形状（协议里是内联字面量，这里起个名字只为读起来清楚）。 */
 export interface StorageStatus {
   root: string;
@@ -108,8 +98,6 @@ export interface StoreValue {
    * 键是 AgentPath —— 成员是会话内的自然切片，切焦点不重拉。
    */
   streams: Record<AgentPath, StreamItem[]>;
-  budget: BudgetSnapshot | null;
-  budgetAlert: BudgetAlert | null;
   config: ConfigSnapshot | null;
   /** 本机外部 Agent 工具的探测结果（执行引擎 popover 的数据源；只展示，不是执行维度）。 */
   agentTools: AgentToolsSnapshot | null;
@@ -230,8 +218,6 @@ export function AppProvider({ children }: { children: ReactNode }): ReactElement
   const [kbs, setKbs] = useState<KnowledgeBase[]>([]);
   const [kbJobs, setKbJobs] = useState<StoreValue['kbJobs']>({});
   const [streams, setStreams] = useState<Record<AgentPath, StreamItem[]>>({});
-  const [budget, setBudget] = useState<BudgetSnapshot | null>(null);
-  const [budgetAlert, setBudgetAlert] = useState<BudgetAlert | null>(null);
   const [config, setConfig] = useState<ConfigSnapshot | null>(null);
   const [agentTools, setAgentTools] = useState<AgentToolsSnapshot | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -348,14 +334,13 @@ export function AppProvider({ children }: { children: ReactNode }): ReactElement
   useEffect(() => {
     let alive = true;
     void (async () => {
-      const [st, list, rs, ts, prj, ps, bg, cfg, at, kbList] = await Promise.all([
+      const [st, list, rs, ts, prj, ps, cfg, at, kbList] = await Promise.all([
         call(() => window.axon.invoke('storage.status', {})),
         call(() => window.axon.invoke('session.list', {})),
         call(() => window.axon.invoke('role.list', {})),
         call(() => window.axon.invoke('team.list', {})),
         call(() => window.axon.invoke('project.list', {})),
         call(() => window.axon.invoke('pending.list', {})),
-        call(() => window.axon.invoke('budget.get', {})),
         call(() => window.axon.invoke('config.get', {})),
         call(() => window.axon.invoke('agentTools.get', {})),
         call(() => window.axon.invoke('kb.list', {})),
@@ -367,7 +352,6 @@ export function AppProvider({ children }: { children: ReactNode }): ReactElement
       if (ts) setTeams(ts);
       if (prj) setProjects(prj);
       if (ps) setPending(ps);
-      if (bg) setBudget(bg);
       if (cfg) setConfig(cfg);
       // 不覆盖已到的事件：首次探测可能在这次拉取回包前就推过来了（较新）。
       if (at) setAgentTools((prev) => prev ?? at);
@@ -826,35 +810,6 @@ export function AppProvider({ children }: { children: ReactNode }): ReactElement
       }),
     );
 
-    offs.push(
-      sub('budget.warning', (p) => {
-        setBudgetAlert({
-          state: 'warning',
-          scope: p.scope,
-          ...(p.sessionId ? { sessionId: p.sessionId } : {}),
-          ...(p.limitedBy ? { limitedBy: p.limitedBy } : {}),
-          spentUsd: p.spentUsd,
-        });
-        setBudget((prev) =>
-          prev ? { ...prev, state: 'warning', spentUsd: p.spentUsd, softUsd: p.softUsd, hardUsd: p.hardUsd } : prev,
-        );
-      }),
-    );
-    offs.push(
-      sub('budget.frozen', (p) => {
-        setBudgetAlert({
-          state: 'frozen',
-          scope: p.scope,
-          ...(p.sessionId ? { sessionId: p.sessionId } : {}),
-          ...(p.limitedBy ? { limitedBy: p.limitedBy } : {}),
-          spentUsd: p.spentUsd,
-        });
-        setBudget((prev) =>
-          prev ? { ...prev, state: 'frozen', spentUsd: p.spentUsd, softUsd: p.softUsd, hardUsd: p.hardUsd } : prev,
-        );
-      }),
-    );
-
     return () => {
       for (const off of offs) off();
     };
@@ -1181,8 +1136,6 @@ export function AppProvider({ children }: { children: ReactNode }): ReactElement
     kbs,
     kbJobs,
     streams,
-    budget,
-    budgetAlert,
     config,
     agentTools,
     error,

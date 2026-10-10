@@ -184,11 +184,6 @@ export interface SessionRecord {
   createdAt: number;
   updatedAt: number;
   schemaVersion: number;
-  /**
-   * 会话级预算（UX s3「团队预算是会话预算的默认值；会话可下调不可上调」）。
-   * 与全局、团队三档取更严者，见 SessionBudgetView。
-   */
-  budget?: SessionBudgetSpec;
   /** 会话级并发上限（团队 maxConcurrent 实例化到本会话的副本）。 */
   maxConcurrent?: number;
   /**
@@ -260,37 +255,14 @@ export interface SessionCounts {
   pending: number;
 }
 
-/** 一层预算限额。所有字段可选；**0 与缺省同义 = 不设**（与 budget.ts 的 hard<=0 关闭同义）。 */
-export interface SessionBudgetSpec {
-  softUsd?: number;
-  hardUsd?: number;
-}
+/* 预算限额三档（SessionBudgetSpec / BudgetTier / SessionBudgetView）已删
+   —— 2026-10-10 用户决策：成本熔断整体下线。
 
-/** 预算档位；与 BudgetGuard 的 BudgetState 同名同义（ok/warning/frozen）。 */
-export type BudgetTier = 'ok' | 'warning' | 'frozen';
+   用量没有一起删：「花了多少」由 `SessionSummary.usage`（UsageTotals）承载，
+   原 `SessionBudgetView.spentUsd` 本就是 `usage.costUsd` 的副本，删掉不丢数据。
 
-/**
- * 会话视角的预算：三档限额 + 取更严者之后的生效值。
- *
- * 为什么要把三档原样带出来而不只给生效值：UI 必须能解释「为什么是 $1.50」——
- * 团队线比全局线更严时，用户看到的应当是团队那张卡上的数，而不是一个来历不明的数字。
- */
-export interface SessionBudgetView {
-  /** 本会话已花（会话根快照的 usage.costUsd，父链已汇总）。 */
-  spentUsd: number;
-  /** 全局档（`~/.axon/config.json` 的 budgetUsd/soft）。 */
-  global: SessionBudgetSpec;
-  /** 团队档（TeamDefinition.budget）。 */
-  team?: SessionBudgetSpec;
-  /** 会话档（SessionRecord.budget）。 */
-  self?: SessionBudgetSpec;
-  /** 三者取更严者的结果；0 = 不设限。 */
-  effectiveSoftUsd: number;
-  effectiveHardUsd: number;
-  tier: BudgetTier;
-  /** 生效上限来自哪一层 —— UI 显示「受团队预算限制」用。 */
-  limitedBy?: 'global' | 'team' | 'session';
-}
+   旧落盘记录里残留的 `budget` 字段读出来即忽略（多余键不碰类型），
+   因此 SESSION_SCHEMA_VERSION 不升 —— 没有任何字段改变语义或需要回填。 */
 
 /** 会话引用的团队摘要（S2 会话条上的「团队 · 4 成员」）。 */
 export interface SessionTeamRef {
@@ -313,7 +285,6 @@ export interface SessionSummary {
   counts: SessionCounts;
   /** 本会话累计用量（含全部成员）。 */
   usage: UsageTotals;
-  budget: SessionBudgetView;
   /**
    * 上次退出时落盘的汇总（M5 §4.6）。**只有从磁盘恢复的会话才有**：
    * 它是 S7「上次中断」那行字的唯一来源 —— 运行中的会话看 `status` 就够了，
@@ -362,8 +333,6 @@ export interface CreateSessionPayload {
   members?: AdhocMemberSpec[];
   /** 建完立刻交给会话根（lead / 内置引擎）的任务。 */
   initialPrompt?: string;
-  /** 会话级限额；不填则从团队档继承。 */
-  budget?: SessionBudgetSpec;
   /** 会话级并发；不填则从团队档继承。 */
   maxConcurrent?: number;
   /**

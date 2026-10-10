@@ -2,37 +2,27 @@
  * 顶栏三枚 chip（原型 shell.js:statusChipsHTML）。
  *
  * 硬规矩（ux 01 §2.1-④）：需要你决策的东西永远有 chip，且 chip **随屏切作用域** ——
- * 会话屏读本会话口径（counts/budget），全局屏读跨会话口径，两套数字永不混用。
+ * 会话屏读本会话口径（counts/usage），全局屏读跨会话口径，两套数字永不混用。
  */
 
 import type { ReactElement } from 'react';
 import { useApp } from '../state/store.tsx';
-import { globalChips, sessionChips, money } from '../state/selectors.ts';
+import { globalChips, sessionChips, money, totalUsage } from '../state/selectors.ts';
 import { Icon } from '../icons.tsx';
 
 export function Chips(): ReactElement {
-  const { screen, current, sessions, pending, budget } = useApp();
+  const { screen, current, sessions, pending } = useApp();
   const inSession = screen === 's2';
 
+  // 预算熔断下线后这枚 chip 只报事实（花了多少），不再有档位与限额对比。
+  //
+  // 「累计」从会话摘要现算（`totalUsage`），不取主进程的快照：摘要有
+  // `session.changed` 推着走，天然实时；而一次性快照（原 `usage.get`）只在启动
+  // 读一次，开机后的每一笔花费都进不去 —— `budget.get` 当年有 budget 事件兜底，
+  // 用量没有对应事件。
   const spend = inSession
-    ? {
-        label: '本会话',
-        used: current?.budget.spentUsd ?? 0,
-        hard: current?.budget.effectiveHardUsd ?? 0,
-        tier: current?.budget.tier ?? 'ok',
-        limitedBy: current?.budget.limitedBy,
-      }
-    : {
-        label: '今日',
-        used: budget?.spentUsd ?? 0,
-        hard: budget?.hardUsd ?? 0,
-        tier: budget?.state ?? 'ok',
-        limitedBy: undefined as 'global' | 'team' | 'session' | undefined,
-      };
-  const hardText = spend.hard > 0 ? money(spend.hard) : '不设限';
-  const budgetCls = spend.tier === 'frozen' ? 'chip danger' : spend.tier === 'warning' ? 'chip warn' : 'chip';
-  const limitedByText =
-    spend.limitedBy === 'team' ? '受团队预算限制' : spend.limitedBy === 'session' ? '受本会话预算限制' : undefined;
+    ? { label: '本会话', used: current?.usage.costUsd ?? 0 }
+    : { label: '累计', used: totalUsage(sessions).costUsd };
 
   const g = globalChips({ sessions, pending });
   // 会话屏的待批数取**实时值**（审批卡与 chip 必须同一口径，counts 会节流滞后一拍）。
@@ -46,10 +36,10 @@ export function Chips(): ReactElement {
 
   return (
     <div className="status-chips">
-      <span className={budgetCls} title={limitedByText}>
+      <span className="chip" title="累计花费（进程内累计，无日切）">
         <Icon name="wallet" size={14} />
         <span>
-          {spend.label} {money(spend.used)} / {hardText}
+          {spend.label} {money(spend.used)}
         </span>
       </span>
 

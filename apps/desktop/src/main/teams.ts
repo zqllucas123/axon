@@ -32,7 +32,6 @@ export const BUILTIN_TEAMS: TeamDefinition[] = [
     formation: 'star',
     // 4 个成员但只放 3 个同时跑：主控在等结果时退位，额度留给真正干活的。
     maxConcurrent: 3,
-    budget: { softUsd: 1.0, hardUsd: 1.5 },
     defaultForkMode: 'none',
   },
   {
@@ -45,7 +44,6 @@ export const BUILTIN_TEAMS: TeamDefinition[] = [
     ],
     formation: 'star',
     maxConcurrent: 2,
-    budget: { softUsd: 0.5, hardUsd: 0.8 },
     defaultForkMode: 'none',
   },
   {
@@ -69,7 +67,6 @@ export const BUILTIN_TEAMS: TeamDefinition[] = [
     ],
     formation: 'star',
     maxConcurrent: 2,
-    budget: { softUsd: 0.3, hardUsd: 0.5 },
     defaultForkMode: 'none',
   },
 ];

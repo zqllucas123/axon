@@ -48,7 +48,6 @@ const host = new AxonHost({
   roles: ALL_ROLES,
   // 闸门开到 2：父 + 一个子。要的是「父 wait 退位让额」这条路径被真模型走到。
   maxConcurrent: 2,
-  budget: { hardUsd: 0.5 },
   emit: (event, payload, source) => {
     const p = payload as { status?: string; toolName?: string; error?: unknown };
     const detail = p.status ?? p.toolName ?? '';

@@ -20,10 +20,7 @@ import {
   type AgentPath,
   type AgentSnapshot,
   type AgentStatus,
-  type BudgetTier,
   type PendingRequest,
-  type SessionBudgetSpec,
-  type SessionBudgetView,
   type SessionCounts,
   type SessionListQuery,
   type SessionRecord,
@@ -153,80 +150,6 @@ export function titleFromPrompt(text: string, max = SESSION_TITLE_MAX): string {
 }
 
 // ─────────────────────────────────────────────────────────────
-// 三层预算（G10.4）
-// ─────────────────────────────────────────────────────────────
-
-export interface BudgetTiers {
-  global: SessionBudgetSpec;
-  team?: SessionBudgetSpec;
-  self?: SessionBudgetSpec;
-}
-
-/** 有效值：0 与缺省同义 = 不设（与 BudgetGuard 的 hard<=0 关闭熔断同义）。 */
-function positive(v: number | undefined): number | undefined {
-  return v !== undefined && Number.isFinite(v) && v > 0 ? v : undefined;
-}
-
-function minDefined(values: readonly (number | undefined)[]): number {
-  let best = Number.POSITIVE_INFINITY;
-  for (const v of values) if (v !== undefined && v < best) best = v;
-  return Number.isFinite(best) ? best : 0;
-}
-
-/**
- * 三层限额取更严者（UX 02 §6 拍板 4：团队软/硬线在全局档之内取更严者；
- * 会话档同理，且「会话可下调不可上调」——min 天然满足这条）。
- *
- * 每层的软线缺省 = 该层硬线 × 0.8；**逐层算完再取更严**，而不是拿最终硬线
- * 反推 —— 否则「团队只写了软线、全局只写了硬线」这种组合会算错。
- */
-export function computeEffectiveBudget(tiers: BudgetTiers, spentUsd: number): SessionBudgetView {
-  const layerHard = (spec: SessionBudgetSpec | undefined) => positive(spec?.hardUsd);
-  const layerSoft = (spec: SessionBudgetSpec | undefined) => {
-    const soft = positive(spec?.softUsd);
-    if (soft !== undefined) return soft;
-    const hard = layerHard(spec);
-    return hard !== undefined ? hard * 0.8 : undefined;
-  };
-
-  const globals = tiers.global;
-  const layers: { name: 'global' | 'team' | 'session'; spec?: SessionBudgetSpec }[] = [
-    { name: 'global', spec: globals },
-    { name: 'team', spec: tiers.team },
-    { name: 'session', spec: tiers.self },
-  ];
-
-  const effectiveHardUsd = minDefined(layers.map((l) => layerHard(l.spec)));
-  const effectiveSoftUsd = minDefined(layers.map((l) => layerSoft(l.spec)));
-
-  // 生效硬线来自哪一层 —— UI 要能说「受团队预算限制」而不是给个孤零零的数。
-  let limitedBy: SessionBudgetView['limitedBy'];
-  if (effectiveHardUsd > 0) {
-    for (const l of layers) {
-      if (layerHard(l.spec) === effectiveHardUsd) {
-        limitedBy = l.name === 'session' ? 'session' : l.name;
-        break;
-      }
-    }
-  }
-
-  let tier: BudgetTier = 'ok';
-  if (effectiveHardUsd > 0 && spentUsd >= effectiveHardUsd) tier = 'frozen';
-  else if (effectiveSoftUsd > 0 && spentUsd >= effectiveSoftUsd) tier = 'warning';
-
-  return {
-    spentUsd,
-    global: { ...globals },
-    ...(tiers.team ? { team: { ...tiers.team } } : {}),
-    ...(tiers.self ? { self: { ...tiers.self } } : {}),
-    effectiveSoftUsd,
-    effectiveHardUsd,
-    tier,
-    ...(limitedBy ? { limitedBy } : {}),
-  };
-}
-
-// ─────────────────────────────────────────────────────────────
 // 汇总
 // ─────────────────────────────────────────────────────────────
 
@@ -240,10 +163,6 @@ export interface SummaryInput {
   ledgerCount: number;
   /** 本会话挂起中的审批/提问。 */
   pending: readonly PendingRequest[];
-  /** 全局档限额。 */
-  globalBudget: SessionBudgetSpec;
-  /** 团队档（会话引用的团队）。 */
-  teamBudget?: SessionBudgetSpec;
   team?: TeamDefinition;
   /** 并入会话的临时成员数（adhoc 里由「存为团队」之外的方式加的）。 */
   tempCount?: number;
@@ -291,14 +210,6 @@ export function buildSessionSummary(input: SummaryInput): SessionSummary {
   if (input.countsFromRollup) Object.assign(counts, input.countsFromRollup);
 
   const usage = input.usageFromRollup ?? members.find((m) => m.path === input.rootPath)?.usage ?? { ...ZERO_USAGE };
-  const budget = computeEffectiveBudget(
-    {
-      global: input.globalBudget,
-      ...(input.teamBudget ? { team: input.teamBudget } : {}),
-      ...(record.budget ? { self: record.budget } : {}),
-    },
-    usage.costUsd,
-  );
 
   const team: SessionTeamRef | undefined = input.team
     ? {
@@ -316,7 +227,6 @@ export function buildSessionSummary(input: SummaryInput): SessionSummary {
     ...(team ? { team } : {}),
     counts,
     usage,
-    budget,
     ...(input.rollup ? { rollup: input.rollup } : {}),
     ...(input.childSessions !== undefined ? { childSessions: input.childSessions } : {}),
   };

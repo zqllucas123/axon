@@ -84,7 +84,6 @@ interface Emitted {
 }
 
 interface HarnessOpts {
-  budget?: HostOptions['budget'];
   maxConcurrent?: number;
   costByText?: Record<string, number>;
   routes?: Record<string, () => unknown>;
@@ -119,7 +118,6 @@ async function harness(opts: HarnessOpts = {}): Promise<Harness> {
     roles: [...ALL_ROLES, ...TEST_ROLES],
     tools: makeTools(calls),
     emit: (event, payload, source) => events.push({ event, payload, source }),
-    ...(opts.budget ? { budget: opts.budget } : {}),
     ...(opts.maxConcurrent !== undefined ? { maxConcurrent: opts.maxConcurrent } : {}),
   });
   const teams: TeamEntry[] = BUILTIN_TEAMS.map((team: TeamDefinition) => ({
@@ -570,93 +568,6 @@ describe('会话级并发闸门', () => {
     await viWaitFor(
       () => h.host.get(b.path)?.status === 'done' && h.host.get(c.path)?.status === 'done',
     );
-  });
-});
-
-// ─────────────────────────────────────────────────────────────
-// 五、三层预算：scope 与「谁的线告诉我」
-// ─────────────────────────────────────────────────────────────
-
-describe('三层预算 · 会话档事件只在会话**自带**限额时播', () => {
-  it('没有会话档/团队档 ⇒ 只有全局事件（否则 UI 上叠两个一样的 banner）', async () => {
-    const h = await harness({ budget: { hardUsd: 1 }, costByText: { 烧钱: 0.9 } });
-    const s = h.host.createSession({ title: '单兵', executor: 'engine' });
-    await h.host.prompt(s.rootPath, '烧钱');
-
-    const warns = h.payloads('budget.warning');
-    expect(warns.map((w) => w.scope)).toEqual(['global']);
-    expect(h.payloads('budget.frozen')).toEqual([]);
-    // 预算快照（全局口径）还是 ok/warning，不是 frozen
-    expect(h.host.budgetSnapshot().state).toBe('warning');
-  });
-
-  it('会话档比全局更严 ⇒ 事件带 scope=session + sessionId + limitedBy', async () => {
-    const h = await harness({ budget: { hardUsd: 10 }, costByText: { 烧钱: 0.25 } });
-    const s = h.host.createSession({
-      title: '省着点',
-      executor: 'engine',
-      budget: { hardUsd: 0.3 },
-    });
-    await h.host.prompt(s.rootPath, '烧钱');
-
-    const warnings = h.payloads('budget.warning').filter((w) => w.scope === 'session');
-    expect(warnings).toHaveLength(1);
-    expect(warnings[0]!.sessionId).toBe(s.record.id);
-    expect(warnings[0]!.limitedBy).toBe('session');
-    expect(warnings[0]!.hardUsd).toBe(0.3); // 生效硬线来自会话档
-    expect(warnings[0]!.softUsd).toBeCloseTo(0.24); // 0.3 × 0.8
-    // 全局档还很宽松：这条事件只属于这个会话
-    expect(h.payloads('budget.warning').filter((w) => w.scope === 'global')).toEqual([]);
-  });
-
-  it('会话冻结只冻会话：全局照常，别的会话照常开工', async () => {
-    const h = await harness({ budget: { hardUsd: 10 }, costByText: { 烧钱: 0.4 } });
-    const tight = h.host.createSession({
-      title: '紧',
-      executor: 'engine',
-      budget: { hardUsd: 0.3 },
-    });
-    const loose = h.host.createSession({ title: '松', executor: 'engine' });
-
-    await h.host.prompt(tight.rootPath, '烧钱');
-    expect(h.payloads('budget.frozen').filter((f) => f.scope === 'session')[0]?.sessionId).toBe(
-      tight.record.id,
-    );
-    expect(h.host.getSession(tight.record.id)?.budget.tier).toBe('frozen');
-
-    // ① 这个会话的新起点被拒（错误信息说清是谁的线）
-    expect(() => h.host.spawn({ role: 'worker', parent: tight.rootPath })).toThrow(/已到硬线/);
-    expect(() => h.host.spawn({ role: 'worker', parent: tight.rootPath })).toThrow(/会话预算/);
-
-    // ② 全局没冻，别的会话不受影响
-    expect(h.host.budgetSnapshot().state).toBe('ok');
-    expect(h.host.getSession(loose.record.id)?.budget.tier).toBe('ok');
-    const ok = h.host.spawn({ role: 'worker', parent: loose.rootPath });
-    expect(ok.path.startsWith(loose.rootPath)).toBe(true);
-  });
-
-  it('团队档参与取严：团队硬线比全局严时 limitedBy=team', async () => {
-    const h = await harness({ budget: { hardUsd: 10 }, costByText: { 烧钱: 0.4 } });
-    // 评审小队：团队硬线 0.5（软线 0.3）
-    const s = h.host.createSession({ title: '评审', executor: 'team', teamId: '评审小队' });
-    await h.host.prompt(s.rootPath, '烧钱');
-
-    const sessionEvents = h.payloads('budget.warning').filter((w) => w.scope === 'session');
-    expect(sessionEvents).toHaveLength(1);
-    expect(sessionEvents[0]!.limitedBy).toBe('team');
-    expect(sessionEvents[0]!.hardUsd).toBe(0.5);
-  });
-
-  it('会话档只能比团队档更严（min 天然满足「可下调不可上调」）', async () => {
-    const h = await harness();
-    const s = h.host.createSession({
-      title: '想上调',
-      executor: 'team',
-      teamId: '测试双人', // 团队硬线 0.8
-      budget: { hardUsd: 5 }, // 想放宽 → 不生效
-    });
-    expect(h.host.getSession(s.record.id)?.budget.effectiveHardUsd).toBe(0.8);
-    expect(h.host.getSession(s.record.id)?.budget.limitedBy).toBe('team');
   });
 });
 

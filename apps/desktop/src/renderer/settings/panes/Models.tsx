@@ -19,7 +19,6 @@ import {
 import { formatModelRef, type ModelSpec, type ProviderConfigView } from '@axon/protocol';
 import { useSettings } from '../SettingsStore.tsx';
 import {
-  InputField,
   SettingsRow,
   envLock,
 } from '../fields.tsx';
@@ -717,7 +716,6 @@ export function ModelsPane(): ReactElement {
   if (!config) return <div className="empty">读取配置中…</div>;
 
   const env = config.envOverrides;
-  const hard = config.config.budgetUsd;
   const res = config.resolution;
 
   // legacy 单 provider 的兜底：迁移后 providers[] 恒有值，但 config.json 是用户
@@ -739,8 +737,8 @@ export function ModelsPane(): ReactElement {
     <section className="st-pane" data-pane="model">
       <h1 className="st-h1">模型与网关</h1>
       <p className="st-lede">
-        Axon 只走 OpenAI 兼容网关（<code>openai-completions</code>）：一个网关 + 一份模型清单 +
-        一条全局预算。
+        Axon 只走 OpenAI 兼容网关（<code>openai-completions</code>）：想接几个网关就配几个，
+        每个网关自带一份模型清单。
       </p>
 
       {/* 当前生效状态 */}
@@ -783,40 +781,6 @@ export function ModelsPane(): ReactElement {
         <span>添加网关</span>
       </button>
 
-      {/* 预算 */}
-      <div className="st-sec">预算</div>
-      <div className="grp">
-        <InputField
-          path="budgetUsd"
-          title="全局硬线（累计）"
-          desc="到线只挡新起点（spawn / prompt），在跑的那一轮不会被杀。进程内累计，不按自然日重置。留空或 0 = 关闭熔断。"
-          value={hard}
-          kind="number"
-          width="sm"
-          suffix="美元"
-          placeholder="0"
-          lock={envLock(env, 'budgetUsd')}
-          smoke="set-budgetUsd"
-        />
-        <InputField
-          path="budgetSoftUsd"
-          title="软线（预警）"
-          desc={
-            <>
-              到软线只发预警（主窗顶栏变黄），不挡任何东西。
-              <b>留空 = 硬线 × 0.8</b>
-              {hard ? `（当前 ${(hard * 0.8).toFixed(2)} 美元）` : ''}。填了就以填的为准。
-            </>
-          }
-          value={config.config.budgetSoftUsd}
-          kind="number"
-          width="sm"
-          suffix="美元"
-          placeholder={hard ? (hard * 0.8).toFixed(2) : '自动'}
-          lock={envLock(env, 'budgetSoftUsd')}
-          smoke="set-budgetSoftUsd"
-        />
-      </div>
     </section>
   );
 }

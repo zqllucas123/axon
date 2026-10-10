@@ -27,7 +27,7 @@ const NAV: Array<{ id: Screen; icon: IconName; label: string }> = [
   { id: 's0', icon: 'pen', label: '新建会话' },
   { id: 's1', icon: 'layers', label: '会话总览' },
   { id: 's5', icon: 'inbox', label: '收件箱' },
-  { id: 's6', icon: 'wallet', label: '预算与用量' },
+  { id: 's6', icon: 'wallet', label: '用量' },
   { id: 's7', icon: 'history', label: '会话恢复' },
   { id: 's4', icon: 'book', label: '知识库' },
   { id: 's3', icon: 'users', label: '团队管理' },

@@ -44,7 +44,6 @@ const ROLES: RoleDefinition[] = [
 
 interface HarnessOpts {
   maxConcurrent?: number;
-  budget?: HostOptions['budget'];
   idleTimeoutMs?: number;
   routes?: Record<string, () => unknown>;
   /** 按最近一条 user 文本计价的成本注水（预算测试用）。 */
@@ -69,7 +68,6 @@ async function harness(opts: HarnessOpts = {}) {
     roles: opts.roles ?? ROLES,
     emit: (event, _payload, source) => events.push({ event, source }),
     maxConcurrent: opts.maxConcurrent,
-    budget: opts.budget,
     idleTimeoutMs: opts.idleTimeoutMs,
   });
   // MU-1：并发闸门现在有两个口径（全局 + 会话），所以先开一个会话。
@@ -232,55 +230,6 @@ describe('M3 wait：退位-解挂', () => {
   });
 });
 
-describe('M3 预算熔断', () => {
-  it('越软线发 warning、越硬线发 frozen，且只挡新起点', async () => {
-    const h = await harness({
-      budget: { hardUsd: 0.02 },
-      costByText: { 1: 0.018, 2: 0.03 },
-    });
-    const a = h.spawn({ role: 'boss' });
-
-    await h.host.requestRun(a.path, '1'); // 0.018 ≥ 0.016 软线
-    expect(h.events.filter((e) => e.event === 'budget.warning')).toHaveLength(1);
-    expect(h.events.some((e) => e.event === 'budget.frozen')).toBe(false);
-
-    await h.host.requestRun(a.path, '2'); // 累计 0.048 ≥ 0.02 硬线
-    expect(h.events.some((e) => e.event === 'budget.frozen')).toBe(true);
-    expect(h.host.budgetState()).toBe('frozen');
-
-    // 只挡新起点：spawn / requestRun 都拒绝
-    expect(() => h.spawn({ role: 'boss' })).toThrow(/预算已冻结/);
-    expect(() => h.host.requestRun(a.path, '3')).toThrow(/预算已冻结/);
-  });
-
-  it('硬线冻结不杀在跑 Agent（撞线由他人完成，在跑者继续到收尾）', async () => {
-    const gb = gate('B 的长活');
-    const h = await harness({
-      budget: { hardUsd: 0.01 },
-      costByText: { 撞线: 0.02 },
-      routes: { 'B 长活': gb.factory },
-    });
-
-    const a = h.spawn({ role: 'boss' });
-    const b = h.spawn({ role: 'boss' });
-
-    const pb = h.host.requestRun(b.path, 'B 长活'); // B 先开跑（gate 挂着 = 长任务中）
-    await viWaitFor(() => h.host.get(b.path)?.status === 'running');
-
-    await h.host.requestRun(a.path, '撞线'); // A 一轮就撞穿硬线 → frozen
-    expect(h.host.budgetState()).toBe('frozen');
-    expect(h.events.some((e) => e.event === 'budget.frozen')).toBe(true);
-    expect(h.host.get(b.path)?.status).toBe('running'); // 在跑者不受影响
-
-    // frozen 只挡新起点
-    expect(() => h.spawn({ role: 'boss' })).toThrow(/预算已冻结/);
-
-    gb.release(); // B 收尾自然完成
-    await pb;
-    expect(h.host.get(b.path)?.status).toBe('done');
-  });
-});
-
 describe('M3 idle 看门狗', () => {
   it('running 且超时无任何事件 → 中断（按空闲计时，不按总时长）', async () => {
     const g = gate('很慢');
@@ -390,22 +339,6 @@ describe('M3 授权矩阵与工具绑定（切片 5）', () => {
     const msgs = h.host.messagesOf(childId as AgentPath);
     const lastAssistant = [...msgs].reverse().find((m) => m.role === 'assistant');
     expect(JSON.stringify(lastAssistant?.content)).toContain('返工');
-  });
-
-  it('预算冻结直达 agent 工具：spawn 子被拒', async () => {
-    const h = await harness({
-      roles: ALL_ROLES,
-      budget: { hardUsd: 0.01 },
-      costByText: { 撞线: 0.02 },
-    });
-    const planner = h.spawn({ role: 'planner' });
-    await h.host.requestRun(planner.path, '撞线');
-    expect(h.host.budgetState()).toBe('frozen');
-
-    const byName = new Map(h.host.orchestrationToolsFor(planner.path).map((t) => [t.name, t]));
-    await expect(
-      byName.get('agent')!.execute('c', { role: 'developer', task: 'x' } as never),
-    ).rejects.toThrow(/预算已冻结/);
   });
 });
 

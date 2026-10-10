@@ -20,7 +20,6 @@
  */
 
 import type { ApprovalMode, ForkModeSpec } from './agent.ts';
-import type { BudgetTier, SessionBudgetSpec } from './session.ts';
 
 // ─────────────────────────────────────────────────────────────
 // 成员
@@ -106,8 +105,6 @@ export interface TeamDefinition {
   formation?: TeamFormation;
   /** 本队会话的并发上限（同时 running 的成员数）；0/未设 = 不限。 */
   maxConcurrent?: number;
-  /** 团队档预算；会话可下调不可上调（取更严者）。 */
-  budget?: SessionBudgetSpec;
   /** 成员的缺省 ForkMode；成员自己的 forkMode 优先。 */
   defaultForkMode?: ForkModeSpec;
 }
@@ -243,17 +240,3 @@ export function isStricterOrEqualApproval(a: ApprovalMode, b: ApprovalMode): boo
 export function approvalStrictness(mode: ApprovalMode): number {
   return STRICTNESS[mode];
 }
-
-/** 团队档预算的展示文案口径（S3 卡片上的「$1.50 上限」）。 */
-export function budgetLabel(spec: SessionBudgetSpec | undefined): string | undefined {
-  if (!spec) return undefined;
-  if (spec.hardUsd === undefined || spec.hardUsd <= 0) return undefined;
-  return `$${spec.hardUsd.toFixed(2)} 上限`;
-}
-
-/** 预算档位的中文名（UI 与测试共用一份，避免两处写死）。 */
-export const BUDGET_TIER_LABEL: Record<BudgetTier, string> = {
-  ok: '正常',
-  warning: '接近上限',
-  frozen: '已冻结',
-};
